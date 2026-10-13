@@ -1,0 +1,1 @@
+{"uuid": "dialpad@asus-linux-drivers", "name": "ASUS DialPad Overlay", "description": "Native radial dial overlay for ASUS DialPad", "shell-version": ["45", "46", "47", "48", "49", "50", "51"], "url": "https://github.com/asus-linux-drivers/asus-dialpad-driver", "version": 2}

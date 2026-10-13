@@ -1,0 +1,12 @@
+.dialpad-overlay {
+    background: transparent;
+}
+
+/* Symbolic icons from the configuration follow the dial palette. */
+.dialpad-segment-icon {
+    color: rgba(186, 179, 171, 0.92);
+}
+
+.dialpad-segment-icon:active {
+    color: rgb(251, 232, 207);
+}
