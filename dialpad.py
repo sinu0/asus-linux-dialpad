@@ -623,6 +623,15 @@ log.info('Touchpad min-max: x %d-%d, y %d-%d', min_x, max_x, min_y, max_y)
 
 last_event_time = 0
 
+def overlay_enabled():
+    """Overlay state is wanted by the D-Bus overlay or the socket overlay.
+
+    The GNOME extension listens on D-Bus, so it must not depend on the
+    original driver's ``socket_enabled`` switch, which only concerns the
+    Unix socket of the PySide overlay.
+    """
+    return dbus_service is not None or bool(globals().get("socket_enabled"))
+
 def send_to_socket(payload: dict):
     if dbus_service:
         try:
@@ -632,7 +641,7 @@ def send_to_socket(payload: dict):
 
     # Presentation details are D-Bus only; the legacy socket overlay does not
     # understand them.
-    if not sock or set(payload) <= {"details"}:
+    if not sock or not globals().get("socket_enabled") or set(payload) <= {"details"}:
         return
     payload = {key: value for key, value in payload.items() if key != "details"}
 
@@ -1466,7 +1475,7 @@ def activate_dialpad():
 
     dialpad = True
 
-    if socket_enabled:
+    if overlay_enabled():
         send_to_socket({CONFIG_ENABLED: dialpad})
 
     show_initial_function_state()
@@ -1486,7 +1495,7 @@ def deactivate_dialpad():
 
     dialpad = False
 
-    if socket_enabled:
+    if overlay_enabled():
         send_to_socket({CONFIG_ENABLED: dialpad})
 
 # Function to enable/disable the DialPad
@@ -1724,7 +1733,7 @@ def reset_center():
 
 def show_pointer_enabled():
     overlay = getattr(gui_config, "overlay", None)
-    return bool(getattr(overlay, "show_pointer", True)) and bool(socket_enabled)
+    return bool(getattr(overlay, "show_pointer", True)) and bool(overlay_enabled())
 
 def profile_meta():
     shortcuts = globals().get("app_specific_shortcuts")
@@ -1757,7 +1766,7 @@ def menu_colors():
     return colors
 
 def send_details(**details):
-    if socket_enabled:
+    if overlay_enabled():
         send_to_socket({"details": details})
 
 def send_function_details(function_title):
@@ -1773,7 +1782,7 @@ def send_function_details(function_title):
     )
 
 def show_multifunction_menu():
-    if socket_enabled:
+    if overlay_enabled():
         send_details(
             profile=profile_meta().get("name") or "",
             mode="multi",
@@ -1799,7 +1808,7 @@ def enter_function(function_title, query_value=True):
     title = function_title
     if app_name and profile_meta().get("remember_last", True):
         last_function_by_app[app_name] = function_title
-    if socket_enabled:
+    if overlay_enabled():
         send_function_details(function_title)
         send_to_socket({
             "titles": [],
@@ -1817,7 +1826,7 @@ def show_single_function():
 
     settings = single_function_settings()
     title = settings.get("title") or None
-    if socket_enabled:
+    if overlay_enabled():
         send_function_details(title)
         send_to_socket({"titles": [], "icons": [], "value": 0, "unit": "", "title": title or ""})
     if title and dialpad and settings.get("value"):
@@ -1872,7 +1881,7 @@ def enqueue_action(job):
 def send_function_value(shortcuts, function_title):
     """Query a function's current value off the touch thread and show it."""
     value = get_current_value(shortcuts)
-    if socket_enabled and value is not None:
+    if overlay_enabled() and value is not None:
         send_to_socket({
             "value": value,
             "unit": get_current_value_unit(shortcuts),
@@ -1887,7 +1896,7 @@ def run_rotation_action(shortcuts, direction, modifiers, scroll_multiplier, func
         modifiers,
         scroll_multiplier=scroll_multiplier,
     )
-    if not shortcut or not show_value or not socket_enabled:
+    if not shortcut or not show_value or not overlay_enabled():
         return
 
     value_source = value_source if value_source is not None else shortcuts
@@ -2098,7 +2107,7 @@ def listen_touchpad_events():
 
                             if not touching_sent:
                                 touching_sent = True
-                                if socket_enabled:
+                                if overlay_enabled():
                                     send_to_socket({"touching": True})
 
                             if distance < center_button_radius:
@@ -2127,7 +2136,7 @@ def listen_touchpad_events():
                                     log.debug("Touch detected in center button area. Title is: %s", title)
 
                                     if title:
-                                        if socket_enabled:
+                                        if overlay_enabled():
                                             send_to_socket({"input": "center", "value": 1, "title": title})
                                         center_enter_time = time()
                                         center_hold_fired = False
@@ -2148,7 +2157,7 @@ def listen_touchpad_events():
                                     center_hold_fired = False
                                     icon_activated = False
                                     center_enter_time = 0
-                                    if socket_enabled:
+                                    if overlay_enabled():
                                         send_to_socket({"input": "center", "value": 0, "title": title})
                                     log.debug("Touch ended in center button area.")
 
@@ -2173,7 +2182,7 @@ def listen_touchpad_events():
                                         except IndexError:
                                             title = None
 
-                                        if socket_enabled:
+                                        if overlay_enabled():
                                             send_to_socket({"titles": multi_app_mode_titles, "icons": multi_app_mode_icons, "title": title})
 
                                         last_slice = current_slice_idx
@@ -2202,7 +2211,7 @@ def listen_touchpad_events():
 
                                     if triggered is None:
                                         progress = rotation.progress(trigger_threshold)
-                                        if show_progress and socket_enabled and abs(progress - previous_progress) >= 3:
+                                        if show_progress and overlay_enabled() and abs(progress - previous_progress) >= 3:
                                             send_to_socket({
                                                 "value_angle_start": rotation.start_angle or 0.0,
                                                 "value": progress,
@@ -2224,7 +2233,7 @@ def listen_touchpad_events():
                                             scroll_multiplier,
                                         )
 
-                                        if show_progress and socket_enabled:
+                                        if show_progress and overlay_enabled():
                                             send_to_socket({
                                                 "value_angle_start": rotation.start_angle or 0.0,
                                                 "value": 0,
@@ -2290,7 +2299,7 @@ def listen_touchpad_events():
                                     run_center_action(shortcuts, modifiers, duration_held, function_title)
                             )
 
-                        if center_button_triggered and socket_enabled:
+                        if center_button_triggered and overlay_enabled():
                             send_to_socket({"input": "center", "value": 0, "title": title})
 
                         center_button_triggered = False
@@ -2302,7 +2311,7 @@ def listen_touchpad_events():
 
                         if touching_sent:
                             touching_sent = False
-                            if socket_enabled:
+                            if overlay_enabled():
                                 send_to_socket({"touching": False})
 
                         if tap_disabled:

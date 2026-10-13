@@ -353,9 +353,9 @@ Normally you hold the illuminated corner icon. From a terminal, change `enabled`
 
 ```
 # enabling DialPad via command line
-sed -i "s/enabled = 0/enabled = 1/g" /usr/share/asus-dialpad-driver/dialpad_dev
+sed -i "s/^enabled = 0/enabled = 1/" /usr/share/asus-dialpad-driver/dialpad_dev
 # disabling
-sed -i "s/enabled = 1/enabled = 0/g" /usr/share/asus-dialpad-driver/dialpad_dev
+sed -i "s/^enabled = 1/enabled = 0/" /usr/share/asus-dialpad-driver/dialpad_dev
 ```
 
 ## Configuration
@@ -379,7 +379,7 @@ You do not need to edit these files; they are described for backups and troubles
 | File | Content |
 | --- | --- |
 | `~/.config/asus-dialpad/config.json` | Everything set in the app: profiles, functions, behaviour, on-screen dial and dial geometry. Written atomically; the driver and the GNOME extension reload it after every change. Use *Import/Export* to move profiles between computers. |
-| `/usr/share/asus-dialpad-driver/dialpad_dev` | Runtime state of the driver: `enabled` (DialPad on/off) and `socket_enabled` (overlay messages, keep `1`). Its other keys come from the original driver and are ignored while `config.json` exists. |
+| `/usr/share/asus-dialpad-driver/dialpad_dev` | Runtime state of the driver: `enabled` (DialPad on/off) and `socket_enabled` (messages for the PySide overlay on other desktops; the GNOME overlay does not need it). Its other keys come from the original driver and are ignored while `config.json` exists. |
 | `/usr/share/asus-dialpad-driver/layouts/*.py` | Default geometry of each touchpad family and the original Python format of shortcuts. Used only until `config.json` exists — the first start of the app converts them. |
 
 If `config.json` is deleted, the app recreates it from the layout on its next start.

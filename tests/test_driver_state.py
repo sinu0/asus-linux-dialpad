@@ -37,6 +37,7 @@ STATE_FUNCTIONS = {
     "pad_to_minimum",
     "window_was_changed",
     "get_appropriate_app_name_and_shortcuts",
+    "overlay_enabled",
 }
 
 
@@ -61,7 +62,9 @@ def load_driver_state(shortcuts):
         "multi_app_mode_titles": None,
         "multi_app_mode_icons": None,
         "slices_minimum_count": 4,
-        "socket_enabled": True,
+        "socket_enabled": False,
+        # The D-Bus overlay alone must receive the state.
+        "dbus_service": object(),
         "dialpad": True,
         "active_modifiers": set(),
         "last_function_by_app": {},
