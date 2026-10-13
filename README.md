@@ -30,19 +30,21 @@ Configuration lives in `~/.config/asus-dialpad/config.json`; the original `dialp
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 
-| On-screen dial (GNOME) | Settings app |
+## Screenshots
+
+**On-screen dial** (GNOME Shell): radial menu with colour-coded functions, a level gauge for volume and brightness, rotation hints and the finger position.
+
+![On-screen dial](./preview/overlay-states.png)
+
+**Settings app** — functions of a profile, application profiles, the function library and the per-function editor:
+
+| | |
 |---|---|
-| ![Overlay](./preview/overlay.png) | ![Settings](./preview/settings.png) |
+| ![Dial controls](./preview/settings-dial-controls.png) | ![Profiles](./preview/settings-profiles.png) |
+| ![Function library](./preview/settings-library.png) | ![Function editor](./preview/settings-function-editor.png) |
+| ![Guided calibration](./preview/settings-calibration.png) | ![Behaviour](./preview/settings-behaviour.png) |
 
-The sections below come from the original project and describe the base driver; where they mention installation, use this repository's URL.
-
-![Demo](./preview/ui_demo.gif)
-
-The driver is written in python and does not necessarily run as a systemd service ([How to start DialPad without systemd service?](#faq)). It contains the common DialPad layouts, you can pick up the right one during the install process. Default settings aim to be the most convenient for the majority. All possible customizations can be found [here](#configuration).
-
-All the groundwork is by the original author — if the driver is useful to you, consider supporting him:
-
-[![BuyMeACoffee](https://img.shields.io/badge/Buy%20to%20maintainer%20a%20coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://ko-fi.com/ldrahnik)
+The sections below come from the original project and describe the base driver.
 
 ## Changelog
 
@@ -565,16 +567,6 @@ Listening on /tmp/dialpad.sock
 
 **Why was this project created?** Because linux does not support integration of DialPad into a Touchpad
 
-**Stargazer evolution for the project**
+## Credits
 
-[![Stargazers over time](https://starchart.cc/asus-linux-drivers/asus-dialpad-driver.svg)](https://starchart.cc/asus-linux-drivers/asus-dialpad-driver)
-
-**Buy me a coffee**
-
-Do you think my effort put into open source is useful for you / others? Please put a star in the GitHub repository. Every star makes me proud. Any contribution is also welcome. Would you like to reward me more? There now exists a way : you can invite me for a coffee! I would really appreciate that!
-
-For this [ko-fi.com/ldrahnik](https://ko-fi.com/ldrahnik) is preferred instead of [buymeacoffee.com/ldrahnik](https://buymeacoffee.com/ldrahnik) because of zero commissions.
-
-[![Ko-fi supporters](images/kofi.png)](https://ko-fi.com/ldrahnik)
-
-[![Buy me a coffee supporters](images/buymeacoffee.png)](https://buymeacoffee.com/ldrahnik)
+The driver this fork builds on — touchpad handling, layouts, installer and the original DialPad support — is the work of [Lukáš Drahník](https://github.com/ldrahnik) and the contributors of [asus-linux-drivers/asus-dialpad-driver](https://github.com/asus-linux-drivers/asus-dialpad-driver).
