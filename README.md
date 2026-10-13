@@ -29,22 +29,18 @@ Configuration lives in `~/.config/asus-dialpad/config.json`; the original `dialp
 ---
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
-![Maintainer](https://img.shields.io/badge/maintainer-ldrahnik-blue)
-[![GitHub Release](https://img.shields.io/github/release/asus-linux-drivers/asus-dialpad-driver.svg?style=flat)](https://github.com/asus-linux-drivers/asus-dialpad-driver/releases)
-[![GitHub commits](https://img.shields.io/github/commits-since/asus-linux-drivers/asus-dialpad-driver/v2.3.0.svg)](https://GitHub.com/asus-linux-drivers/asus-dialpad-driver/commit/)
-[![GitHub issues-closed](https://img.shields.io/github/issues-closed/asus-linux-drivers/asus-dialpad-driver.svg)](https://GitHub.com/asus-linux-drivers/asus-dialpad-driver/issues?q=is%3Aissue+is%3Aclosed)
-[![GitHub pull-requests closed](https://img.shields.io/github/issues-pr-closed/asus-linux-drivers/asus-dialpad-driver.svg)](https://github.com/asus-linux-drivers/asus-dialpad-driver/compare)
-[![Ask Me Anything !](https://img.shields.io/badge/Ask%20about-anything-1abc9c.svg)](https://github.com/asus-linux-drivers/asus-dialpad-driver/issues/new/choose)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
-![Badge](https://hitscounter.dev/api/hit?url=https%3A%2F%2Fgithub.com%2Fasus-linux-drivers%2Fasus-dialpad-driver&label=Visitors&icon=suit-heart-fill&color=%23e35d6a)
---
-[![Nix Flakes: Compatible](https://img.shields.io/badge/Nix%20Flakes-Compatible-brightgreen)](https://github.com/asus-linux-drivers/asus-dialpad-driver#installation)
+
+| On-screen dial (GNOME) | Settings app |
+|---|---|
+| ![Overlay](./preview/overlay.png) | ![Settings](./preview/settings.png) |
+
+The sections below come from the original project and describe the base driver; where they mention installation, use this repository's URL.
 
 ![Demo](./preview/ui_demo.gif)
 
 The driver is written in python and does not necessarily run as a systemd service ([How to start DialPad without systemd service?](#faq)). It contains the common DialPad layouts, you can pick up the right one during the install process. Default settings aim to be the most convenient for the majority. All possible customizations can be found [here](#configuration).
 
-If you find this project useful, please do not forget to give it a [![GitHub stars](https://img.shields.io/github/stars/asus-linux-drivers/asus-dialpad-driver.svg?style=social&label=Star&maxAge=2592000)](https://github.com/asus-linux-drivers/asus-dialpad-driver/stargazers) People already did!
+All the groundwork is by the original author — if the driver is useful to you, consider supporting him:
 
 [![BuyMeACoffee](https://img.shields.io/badge/Buy%20to%20maintainer%20a%20coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://ko-fi.com/ldrahnik)
 
@@ -151,11 +147,8 @@ app_shortcuts = {
 Get the latest stable or dev version using `git`:
 
 ```bash
-$ git clone https://github.com/asus-linux-drivers/asus-dialpad-driver
-$ cd asus-dialpad-driver
-# now you are using master branch with the latest changes which may be not stable
-# jump to the latest release of stable version:
-$ git checkout v2.3.0
+$ git clone https://github.com/sinu0/asus-linux-dialpad.git
+$ cd asus-linux-dialpad
 ```
 
 or customized install:
@@ -220,6 +213,8 @@ $ USER_INTERFACE=0 \
 ```
 
 #### NixOS
+
+> **Fork note:** the Nix packaging is inherited from the original project and has not been updated for this fork's additions (settings app, GNOME extension, JSON configuration). The flake URLs below still point to the original driver.
 
 Nix code is provided for this driver.
 Please read the `nix/module.nix` for default behavior.
@@ -386,8 +381,8 @@ $
 **How to install the driver when is used pyenv for managing multiple Python versions?**
 
 ```
-$ git clone https://github.com/asus-linux-drivers/asus-dialpad-driver
-$ cd asus-dialpad-driver
+$ git clone https://github.com/sinu0/asus-linux-dialpad.git
+$ cd asus-linux-dialpad
 
 $ # pyenv install Ubuntu 22.04
 $ apt install -y make build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev wget curl llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev libffi-dev liblzma-dev python3-openssl git
