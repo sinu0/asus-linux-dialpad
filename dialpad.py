@@ -2357,8 +2357,17 @@ def listen_touchpad_events():
             # The kernel buffer overflowed; resynchronise this device and keep
             # the gesture state instead of restarting the listener.
             log.debug("Touchpad events dropped; resynchronising")
-            for _ in d_t.sync(True):
+            # A plain sync drains libevdev's resync queue and ends. With
+            # force=True every call starts a new sync, so the loop never
+            # finished and the driver stopped reacting to touches.
+            for _ in d_t.sync():
                 pass
+            # Touch state is rebuilt from the next frames.
+            slots = {}
+            finger_down = False
+            prev_finger_down = False
+            settle_counter = 0
+            rotation.reset()
         except Exception:
             log.exception("Error in listen_touchpad_events")
             break
