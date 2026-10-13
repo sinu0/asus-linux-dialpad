@@ -116,6 +116,15 @@ shopt -s extglob
 	    echo "Something went wrong when removing the uinput conf"
 	fi
 
+	# Settings app launcher and GNOME Shell overlay of this fork.
+	if command -v gnome-extensions >/dev/null 2>&1; then
+		gnome-extensions disable dialpad@asus-linux-drivers >/dev/null 2>&1
+	fi
+	rm -rf "$HOME/.local/share/gnome-shell/extensions/dialpad@asus-linux-drivers"
+	rm -f "$HOME/.local/share/applications/io.github.asuslinuxdrivers.DialPadControl.desktop"
+	rm -f "$HOME/.local/share/icons/hicolor/scalable/apps/io.github.asuslinuxdrivers.DialPadControl.svg"
+	echo "Your functions and profiles remain in $HOME/.config/asus-dialpad (remove it by hand if not needed)"
+
 	echo "Asus DialPad Driver removed"
 
 	echo

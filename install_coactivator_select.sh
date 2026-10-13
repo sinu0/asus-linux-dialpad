@@ -26,6 +26,11 @@ echo
 echo "Select co-activator key:"
 echo
 
+if [ -z "$COACTIVATOR_KEY" ] && [ "$INTERACTIVE" != "1" ]; then
+    # Can be changed later in the settings app (Behaviour -> Activation).
+    COACTIVATOR_KEY="None"
+fi
+
 if [ -z "$COACTIVATOR_KEY" ]; then
     PS3="Please enter your choice: "
     OPTIONS=("None" "Shift" "Control" "Alt" "Quit")

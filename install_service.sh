@@ -25,8 +25,7 @@ fi
 echo "Systemctl service(s)"
 echo
 
-read -r -p "Do you want install systemctl service(s)? [y/N]" RESPONSE
-case "$RESPONSE" in [yY][eE][sS]|[yY])
+if ask "Do you want install systemctl service(s)?" y; then
 
     # check rpm-ostree FIRST before dnf/yum (for BazziteOS/Fedora Atomic/Silverblue)
     # because dnf may exist as a wrapper that blocks usage on immutable systems
@@ -219,4 +218,4 @@ case "$RESPONSE" in [yY][eE][sS]|[yY])
         fi
 
     fi
-esac
+fi

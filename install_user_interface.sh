@@ -25,8 +25,13 @@ echo
 
 USER_INTERFACE=0
 
-read -r -p "Do you want to install the DialPad User Interface? [y/N]" RESPONSE
-case "$RESPONSE" in [yY][eE][sS]|[yY])
+UI_DEFAULT=y
+if is_gnome; then
+    # GNOME draws the dial with the Shell extension instead.
+    UI_DEFAULT=n
+fi
+
+if ask "Do you want to install the DialPad User Interface?" "$UI_DEFAULT"; then
 
     source $INSTALL_DIR_PATH/.env/bin/activate
     pip3 install -r requirements.ui.txt
@@ -51,4 +56,4 @@ case "$RESPONSE" in [yY][eE][sS]|[yY])
         # add new setting under [main] section
         sudo sed -i "/\[main\]/a socket_enabled = 1" "$CONFIG_FILE_PATH"
     fi
-esac
+fi

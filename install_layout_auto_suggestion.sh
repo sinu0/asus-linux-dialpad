@@ -107,8 +107,7 @@ for OPTION in $(ls layouts); do
         echo
         echo "DialPad layout"
         echo
-        read -r -p "The automatically recommended DialPad layout for this laptop ($LAPTOP_NAME_FULL) is $SUGGESTED_LAYOUT. Do you want to use the $SUGGESTED_LAYOUT layout? (The photo of the recommended DialPad layout can be found here https://github.com/asus-linux-drivers/asus-dialpad-driver#$SUGGESTED_LAYOUT) [y/N]" RESPONSE
-        case "$RESPONSE" in [yY][eE][sS]|[yY])
+        if ask "The recommended DialPad layout for this laptop ($LAPTOP_NAME_FULL) is $SUGGESTED_LAYOUT. Use it?" y; then
 
             echo
 
@@ -124,9 +123,6 @@ for OPTION in $(ls layouts); do
             fi
 
             echo "Selected key layout: $LAYOUT_NAME"
-            ;;
-        *)
-            ;;
-        esac
+        fi
     fi
 done

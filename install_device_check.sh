@@ -56,11 +56,17 @@ if command -v /usr/sbin/i2cdetect >/dev/null 2>&1 && command -v /usr/sbin/i2ctra
             continue
         fi
 
+        if [ "$INTERACTIVE" != "1" ]; then
+            # Unattended: the first address that accepts the command wins.
+            DEVICE_ADDRESS=$first_try_addr
+            TOUCHPAD_WITH_DIALPAD_DETECTED=true
+            echo "responds at 0x$first_try_addr"
+            break
+        fi
+
         send_test_activation "$NUMBER" "$first_try_addr"
         echo
-        read -p "Did DialPad light up? (0x$first_try_addr) [y/N]: " OK_FIRST
-
-        if [[ "$OK_FIRST" =~ ^[Yy]$ ]]; then
+        if ask "Did DialPad light up? (0x$first_try_addr)" n; then
             DEVICE_ADDRESS=$first_try_addr
             TOUCHPAD_WITH_DIALPAD_DETECTED=true
             send_test_deactivation "$NUMBER" "$first_try_addr"
@@ -70,9 +76,7 @@ if command -v /usr/sbin/i2cdetect >/dev/null 2>&1 && command -v /usr/sbin/i2ctra
         if [ -n "$second_try_addr" ]; then
 
             send_test_activation "$NUMBER" "$second_try_addr"
-            read -p "Did DialPad light up? (0x$second_try_addr) [y/N]: " OK_SECOND
-
-            if [[ "$OK_SECOND" =~ ^[Yy]$ ]]; then
+            if ask "Did DialPad light up? (0x$second_try_addr)" n; then
                 DEVICE_ADDRESS=$second_try_addr
                 TOUCHPAD_WITH_DIALPAD_DETECTED=true
                 send_test_deactivation "$NUMBER" "$second_try_addr"
@@ -84,16 +88,11 @@ if command -v /usr/sbin/i2cdetect >/dev/null 2>&1 && command -v /usr/sbin/i2ctra
     done
 
     if [ -z "$TOUCHPAD_WITH_DIALPAD_DETECTED" ]; then
-        echo "The detection was not successful. Touchpad with DialPad not found. Check whether your touchpad has integrated DialPad (e.g. on product websites) and in case it has then eventually create an issue here https://github.com/asus-linux-drivers/asus-dialpad-driver/issues/new/choose."
+        echo "The detection was not successful. Touchpad with DialPad not found. Check whether your touchpad has integrated DialPad (e.g. on product websites) and in case it has then create an issue here https://github.com/sinu0/asus-linux-dialpad/issues (see PORTING.md)."
 
-        read -p "Do you want try to continue anyway? [y/N]: " CONTINUE
-
-        if [[ ! "$CONTINUE" =~ ^[Yy]$ ]]; then
-
-            echo
-
-            source install_send_anonymous_dsdt_table.sh
-
+        # Unattended installs continue: the touchpad may still work once
+        # calibrated, and the driver picks the I2C address itself.
+        if ! ask "Do you want try to continue anyway?" y; then
             exit 1
         fi
     fi

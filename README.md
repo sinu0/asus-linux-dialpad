@@ -14,6 +14,16 @@ What the fork adds:
 - **GNOME Shell overlay**: native radial dial with value gauge, rotation hints and finger position; size and position configurable.
 - **Guided calibration** that measures the dial on any DialPad touchpad — see [PORTING.md](PORTING.md).
 
+### Install
+
+```bash
+git clone https://github.com/sinu0/asus-linux-dialpad.git
+cd asus-linux-dialpad
+bash install.sh
+```
+
+The installer needs `sudo`, asks no questions (use `bash install.sh --interactive` to choose layout, co-activator key and services yourself), keeps your existing configuration, and collects no data. Afterwards log out and back in, hold the illuminated corner icon to switch the DialPad on, and open **ProArt DialPad** from the applications menu. To update, `git pull` and run `bash install.sh` again; to remove, run `bash uninstall.sh`.
+
 Configuration lives in `~/.config/asus-dialpad/config.json`; the original `dialpad_dev` + `layouts/*.py` setup keeps working as a fallback.
 
 ---
@@ -53,7 +63,7 @@ If you find this project useful, please do not forget to give it a [![GitHub sta
 
 ## Features
 
-- Driver during installation collects anonymous data with goal improve driver (e.g. automatic layout detection or [for kernel driver development](https://lookerstudio.google.com/u/0/reporting/a9ed8ed9-a0d7-42bd-96e9-57daed8697b1/page/p_e0hnu8md0d); data are publicly available [here](https://lookerstudio.google.com/s/gaK2TftgZqM), you can provide used config using `$ bash install_config_send_anonymous_report.sh`)
+- The original project collects anonymous installation data; **this fork removed it** and sends nothing.
 - Driver (including backlighting if hardware supported) installed for the current user
 - Driver creates own virtual environment of currently installed version of `Python3`
 - Multiple pre-created [DialPad layouts](https://github.com/asus-linux-drivers/asus-dialpad-driver#layouts) with the possibility of [creating custom layouts or improving existing ones (circle_diameter, center_button_diameter, circle_center_x..)](https://github.com/asus-linux-drivers/asus-dialpad-driver#keyboard-layout)

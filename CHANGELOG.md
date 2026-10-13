@@ -11,6 +11,12 @@
 - Horizontal scrolling and scrolling with held modifiers (Ctrl + wheel zoom)
 - Guided calibration that fits the ring and centre button from finger traces
 
+- Unattended installer (`bash install.sh`; `--interactive` for the original questions)
+
+### Removed
+
+- Anonymous installation reports and DSDT upload of the original installer
+
 ### Fixed
 
 - Centre actions of rotating functions were unreachable in the radial menu

@@ -2,6 +2,8 @@
 
 source non_sudo_check.sh
 
+source install_common.sh "$@"
+
 source install_security_check.sh
 
 echo
@@ -145,32 +147,18 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
             echo
         fi
 
-        source install_begin_send_anonymous_report.sh
-
-        read -r -p "Do you want to continue anyway? [y/N] " response
-        case "$response" in
-            [yY][eE][sS]|[yY])
-                ;;
-            *)
-                exit 1
-                ;;
-        esac
+        if ! ask "Do you want to continue anyway?" n; then
+            exit 1
+        fi
     else
-        source install_begin_send_anonymous_report.sh
-
-        if [[ "$PACKAGE_MANAGER" == "rpm-ostree" ]]; then
+        if [[ "$PACKAGE_MANAGER" == "rpm-ostree" && -n "$MISSING_PACKAGES" ]]; then
             echo
             echo "You must reboot before continuing the installation. After reboot run this script again."
             echo
-            read -r -p "Do you want to reboot now? [y/N] " response
-            case "$response" in
-                [yY][eE][sS]|[yY])
-                    sudo /sbin/reboot
-                    ;;
-                *)
-                    exit 0
-                    ;;
-            esac
+            if ask "Do you want to reboot now?" n; then
+                sudo /sbin/reboot
+            fi
+            exit 0
         fi
     fi
 
@@ -180,8 +168,6 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
    ! command -v qdbus6 >/dev/null 2>&1; then
         echo
         echo "WARNING: You are using Plasma desktop environment and qdbus is not available after installation. Manual intervention is required for the driver to function properly." >&2
-        read -n1 -r -p "Press any key to continue.."
-        echo
     fi
 
     echo
@@ -191,10 +177,6 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
     echo
 
     source install_device_check.sh
-
-    echo
-
-    source install_send_anonymous_dsdt_table.sh 
 
     echo
 
@@ -232,20 +214,14 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
     install -m 644 config_app/icon.svg "$HOME/.local/share/icons/hicolor/scalable/apps/io.github.asuslinuxdrivers.DialPadControl.svg"
 
     if [[ -f "$CONFIG_FILE_PATH" ]]; then
-        read -r -p "In system remains config file from previous installation. Do you want replace that config with default config? [y/N]" RESPONSE
-        case "$RESPONSE" in [yY][eE][sS]|[yY])
-
+        if ask "In system remains config file from previous installation. Do you want replace that config with default config?" n; then
             # default will be autocreated, that is why is removed
             sudo rm -f $CONFIG_FILE_PATH
             if [[ $? != 0 ]]; then
                 echo "$CONFIG_FILE_PATH cannot be removed correctly..."
                 exit 1
             fi
-            ;;
-        *)
-            source install_config_send_anonymous_report.sh
-            ;;
-        esac
+        fi
     else
         echo "Default config will be autocreated during the first run and available for futher modifications here:"
         echo "$CONFIG_FILE_PATH"
@@ -302,6 +278,12 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
 
       echo
 
+      if [ -z "$LAYOUT_NAME" ] && [ "$INTERACTIVE" != "1" ]; then
+        LAYOUT_NAME="proartp16"
+        echo "No known layout for this laptop; using $LAYOUT_NAME."
+        echo "Run Calibration -> Guided calibration in the ProArt DialPad app after installing."
+      fi
+
       if [ -z "$LAYOUT_NAME" ]; then
 
         source install_layout_select.sh
@@ -326,20 +308,19 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
 
     echo
 
-    END_TIME=${EPOCHREALTIME::-7}
-    source install_finished_send_anonymous_report.sh
-
     echo "Installation finished successfully"
+    echo
+    echo "Next steps:"
+    echo "  1. Log out and back in (new user groups and the GNOME extension load at login)."
+    echo "  2. Hold the illuminated corner icon of the touchpad to switch the DialPad on."
+    echo "  3. Open \"ProArt DialPad\" from the applications menu to set up functions;"
+    echo "     on a laptop that is not listed, run Calibration -> Guided calibration."
 
     echo
 
-    read -r -p "Reboot is required. Do you want reboot now? [y/N]" response
-    case "$response" in [yY][eE][sS]|[yY])
+    if [ "$INTERACTIVE" = "1" ] && ask "Reboot now instead of logging out?" n; then
         sudo /sbin/reboot
-        ;;
-    *)
-        ;;
-    esac
+    fi
 
     echo
 
