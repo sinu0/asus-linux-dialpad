@@ -260,3 +260,40 @@ class CalibrationSession:
             "cancelled": self.cancelled,
             "result": self.result(),
         }
+
+
+MT_TOOL_PALM = 2
+
+
+def select_dial_touch(slots, locked_id, claims):
+    """Choose the one touch the dial follows on a multi-touch pad.
+
+    ``slots`` maps slot numbers to dicts with ``tracking_id``, ``x``, ``y``
+    and optionally ``tool``. ``claims(x, y)`` tells whether the dial owns a
+    touch at that position (inside the ring, or on the corner icon).
+
+    The touch already followed (``locked_id``) is kept while it lasts, so a
+    palm or a second hand resting elsewhere neither steals the dial nor
+    keeps it from seeing the finger lift. Otherwise the newest claimed touch
+    is taken; touches the dial does not claim are ignored. Touches the pad
+    reports as a palm are never used.
+
+    Returns ``(tracking_id, x, y)`` or ``None``.
+    """
+    touches = []
+    for state in slots.values():
+        tracking_id = state.get("tracking_id", -1)
+        if tracking_id is None or tracking_id < 0 or "x" not in state or "y" not in state:
+            continue
+        if state.get("tool") == MT_TOOL_PALM:
+            continue
+        touches.append((tracking_id, state["x"], state["y"]))
+
+    for touch in touches:
+        if locked_id is not None and touch[0] == locked_id:
+            return touch
+
+    claimed = [touch for touch in touches if claims(touch[1], touch[2])]
+    if not claimed:
+        return None
+    return max(claimed, key=lambda touch: touch[0])

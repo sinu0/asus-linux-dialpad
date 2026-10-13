@@ -88,7 +88,7 @@
 - Per-frame recalculations of `circle_radius` and bounds allow live calibration changes.
 - Constants: `DEBOUNCE_MS=30`, `SETTLE_FRAMES=3`; hysteresis comes from `gesture.hysteresis` in JSON (default 3 without JSON).
 - `RotationTracker.reset()` must run on touch down, lift, centre and leaving the ring, or the next touch jumps.
-- `finger_down` follows `BTN_TOUCH` (not `BTN_TOOL_FINGER`, which drops when a second finger lands).
+- `finger_down` follows the one finger the dial tracks (`dial_touch_id`, chosen by `dial_gesture.select_dial_touch`): the touch already followed, else the newest touch inside the ring or on the corner icon. Other fingers, a resting palm and touches reported as `MT_TOOL_PALM` are ignored, and lifting the tracked finger counts as release even while others stay down. Never clear `slots` on release; `update_touch_slots()` keeps them in sync (also from `d_t.sync()` after `SYN_DROPPED`).
 - Actions, shell macros and value queries run on the `dialpad-actions` worker thread via `enqueue_action()`; never call subprocesses from the touch loop.
 - The GNOME overlay shows while `touching`, and fades out 1.5 s after release.
 

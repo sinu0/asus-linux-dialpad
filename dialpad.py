@@ -36,6 +36,7 @@ from dial_gesture import (
     SCROLL_TRIGGER_DEGREES,
     RotationTracker,
     scroll_acceleration_multiplier,
+    select_dial_touch,
     slice_index,
     touch_angle,
 )
@@ -2037,6 +2038,27 @@ def return_to_multifunction_menu():
 
 window_binary = None
 
+def update_touch_slots(slots, current_slot, event):
+    """Apply one multi-touch event to ``slots``; return the current slot."""
+    if event.matches(EV_ABS.ABS_MT_SLOT):
+        return event.value
+    if event.matches(EV_ABS.ABS_MT_TRACKING_ID):
+        if event.value == -1:
+            slots.pop(current_slot, None)
+        else:
+            # A new tracking id is a new finger: start from a clean state.
+            slots[current_slot] = {'tracking_id': event.value}
+        return current_slot
+    for code, key in (
+        (EV_ABS.ABS_MT_POSITION_X, 'x'),
+        (EV_ABS.ABS_MT_POSITION_Y, 'y'),
+        (EV_ABS.ABS_MT_TOOL_TYPE, 'tool'),
+    ):
+        if event.matches(code):
+            slots.setdefault(current_slot, {})[key] = event.value
+            break
+    return current_slot
+
 def listen_touchpad_events():
     global slices_minimum_count, activation_time, last_event_time, dialpad, active_modifiers, coactivator_keys, title, center_activated, treshold, multi_app_mode_titles, app_specific_shortcuts, window_binary
 
@@ -2045,14 +2067,15 @@ def listen_touchpad_events():
 
     log.info("Listening to touchpad events...")
 
-    # BTN_TOUCH stays down while any finger touches. BTN_TOOL_FINGER drops
-    # to 0 when a second finger lands, which used to look like a release.
     finger_key = EV_KEY.BTN_TOUCH if d_t.has(EV_KEY.BTN_TOUCH) else EV_KEY.BTN_TOOL_FINGER
 
-    # Frame buffer state
+    # Frame buffer state. The dial follows one finger (by its tracking id),
+    # so a palm or a second hand elsewhere on the pad neither takes over the
+    # dial nor hides the moment that finger lifts.
     slots = {}
     current_slot = 0
     finger_down = False
+    dial_touch_id = None
 
     # Gesture state
     touch_start_time = None
@@ -2093,27 +2116,47 @@ def listen_touchpad_events():
                     }
 
                     # Frame completed — process gesture logic once per frame
+                    def dial_claims(x, y):
+                        if calibration is not None:
+                            return True
+                        if (top_right_icon_bounds["x_min"] <= x <= top_right_icon_bounds["x_max"] and
+                                top_right_icon_bounds["y_min"] <= y <= top_right_icon_bounds["y_max"]):
+                            return True
+                        return bool(dialpad) and math.hypot(x - circle_center_x, y - circle_center_y) <= circle_radius
+
+                    picked = select_dial_touch(slots, dial_touch_id, dial_claims)
+                    if picked is not None and dial_touch_id is not None and picked[0] != dial_touch_id:
+                        # The followed finger lifted while another one touched
+                        # the dial: finish this touch first, start the next
+                        # one on the following frame.
+                        picked = None
+                    if picked is None:
+                        dial_touch_id = None
+                        touch_x = None
+                        touch_y = None
+                        finger_down = False
+                    else:
+                        dial_touch_id, touch_x, touch_y = picked
+                        finger_down = True
+
+                    if finger_down and not prev_finger_down:
+                        coactivator_blocked = False
+                        touch_start_time = time()
+                        within_top_right_icon = False
+                        icon_activated = False
+                        last_slice = None
+                        rotation.reset()
+                        log.debug("Finger detected.")
+
                     if finger_down:
                         settle_counter += 1
                     else:
                         settle_counter = 0
 
-                    # Find first valid slot
-                    touch_x = None
-                    touch_y = None
-                    for slot_id in sorted(slots.keys()):
-                        s = slots[slot_id]
-                        if s.get('tracking_id', -1) >= 0 and 'x' in s and 'y' in s:
-                            touch_x = s['x']
-                            touch_y = s['y']
-                            break
-
                     if calibration is not None:
                         # Calibration owns the touchpad: no activation and no
                         # dial actions while the circles are traced.
                         calibration_frame(touch_x, touch_y, finger_down, prev_finger_down)
-                        if not finger_down:
-                            slots = {}
                         prev_finger_down = finger_down
                         continue
 
@@ -2367,46 +2410,14 @@ def listen_touchpad_events():
                             set_touchpad_prop_send_events(1)
                             tap_disabled = False
 
-                        slots = {}
-
                     prev_finger_down = finger_down
 
-                elif event.matches(EV_ABS.ABS_MT_SLOT):
-                    current_slot = event.value
-                    if current_slot not in slots:
-                        slots[current_slot] = {}
-
-                elif event.matches(EV_ABS.ABS_MT_POSITION_X):
-                    if current_slot not in slots:
-                        slots[current_slot] = {}
-                    slots[current_slot]['x'] = event.value
-
-                elif event.matches(EV_ABS.ABS_MT_POSITION_Y):
-                    if current_slot not in slots:
-                        slots[current_slot] = {}
-                    slots[current_slot]['y'] = event.value
-
-                elif event.matches(EV_ABS.ABS_MT_TRACKING_ID):
-                    if event.value == -1:
-                        slots.pop(current_slot, None)
-                    else:
-                        if current_slot not in slots:
-                            slots[current_slot] = {}
-                        slots[current_slot]['tracking_id'] = event.value
+                elif event.matches(EV_ABS):
+                    current_slot = update_touch_slots(slots, current_slot, event)
 
                 elif event.matches(finger_key):
                     if event.value == 1:
                         key_press_times[event.code] = time()
-                        finger_down = True
-                        coactivator_blocked = False
-                        touch_start_time = time()
-                        within_top_right_icon = False
-                        icon_activated = False
-                        last_slice = None
-                        rotation.reset()
-                        log.debug("Finger detected.")
-                    elif event.value == 0:
-                        finger_down = False
 
             # The event generator only ends when the device goes away.
             break
@@ -2418,12 +2429,10 @@ def listen_touchpad_events():
             # A plain sync drains libevdev's resync queue and ends. With
             # force=True every call starts a new sync, so the loop never
             # finished and the driver stopped reacting to touches.
-            for _ in d_t.sync():
-                pass
-            # Touch state is rebuilt from the next frames.
-            slots = {}
-            finger_down = False
-            prev_finger_down = False
+            # The sync events describe the fingers currently on the pad.
+            for sync_event in d_t.sync():
+                if sync_event.matches(EV_ABS):
+                    current_slot = update_touch_slots(slots, current_slot, sync_event)
             settle_counter = 0
             rotation.reset()
         except Exception:

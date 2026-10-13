@@ -194,5 +194,51 @@ class CalibrationTest(unittest.TestCase):
         self.assertIn("centre button", session.error)
 
 
+class DialTouchSelectionTest(unittest.TestCase):
+    @staticmethod
+    def inside(x, y):
+        return (x - 500) ** 2 + (y - 500) ** 2 <= 400 ** 2
+
+    def test_resting_palm_does_not_steal_the_dial(self):
+        from dial_gesture import select_dial_touch
+
+        slots = {
+            0: {"tracking_id": 10, "x": 3500, "y": 2000},  # other hand
+            1: {"tracking_id": 11, "x": 520, "y": 480},    # dial finger
+        }
+        self.assertEqual(select_dial_touch(slots, None, self.inside), (11, 520, 480))
+
+    def test_locked_finger_is_kept_when_it_leaves_the_ring(self):
+        from dial_gesture import select_dial_touch
+
+        slots = {0: {"tracking_id": 7, "x": 950, "y": 500}}
+        self.assertEqual(select_dial_touch(slots, 7, self.inside), (7, 950, 500))
+
+    def test_lifting_the_dial_finger_is_seen_with_another_finger_down(self):
+        from dial_gesture import select_dial_touch
+
+        slots = {0: {"tracking_id": 10, "x": 3500, "y": 2000}}
+        self.assertIsNone(select_dial_touch(slots, 11, self.inside))
+
+    def test_palm_and_ended_touches_are_ignored(self):
+        from dial_gesture import MT_TOOL_PALM, select_dial_touch
+
+        slots = {
+            0: {"tracking_id": 3, "x": 500, "y": 500, "tool": MT_TOOL_PALM},
+            1: {"tracking_id": -1, "x": 500, "y": 500},
+            2: {"tracking_id": 4, "x": 500},
+        }
+        self.assertIsNone(select_dial_touch(slots, None, self.inside))
+
+    def test_newest_claimed_touch_wins(self):
+        from dial_gesture import select_dial_touch
+
+        slots = {
+            0: {"tracking_id": 20, "x": 450, "y": 500},
+            1: {"tracking_id": 21, "x": 550, "y": 500},
+        }
+        self.assertEqual(select_dial_touch(slots, None, self.inside)[0], 21)
+
+
 if __name__ == "__main__":
     unittest.main()
