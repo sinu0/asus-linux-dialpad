@@ -13,35 +13,42 @@ const BUS_IFACE = BUS_NAME;
 const CONFIG_DIR = GLib.build_filenamev([GLib.get_user_config_dir(), 'asus-dialpad']);
 const CONFIG_NAME = 'config.json';
 
-// The warm graphite and champagne accents follow the ProArt Creator Hub
-// visual language while retaining enough contrast for GNOME's dark shell.
+// A dark glass dial in the spirit of the ASUS Dial overlay: one calm
+// surface, functions as icon bubbles and colour only where it carries
+// meaning (the highlighted function, its level and the finger).
 const PALETTE = {
-    ink: [0.075, 0.078, 0.09, 0.96],
-    ringEdge: [0.42, 0.42, 0.46, 0.56],
-    track: [0.21, 0.215, 0.25, 0.98],
-    segment: [0.255, 0.26, 0.3, 0.98],
-    segmentDim: [0.18, 0.185, 0.215, 0.98],
+    surfaceTop: [0.17, 0.175, 0.205, 0.97],
+    surfaceBottom: [0.085, 0.09, 0.105, 0.97],
+    rim: [1, 1, 1, 0.09],
+    bubble: [1, 1, 1, 0.07],
+    track: [1, 1, 1, 0.08],
+    centerTop: [0.205, 0.21, 0.245, 1],
+    centerBottom: [0.125, 0.13, 0.15, 1],
+    text: [0.96, 0.95, 0.93, 1],
+    muted: [0.70, 0.69, 0.67, 1],
+    icon: [0.86, 0.85, 0.83, 1],
+    iconOnColor: [0.08, 0.08, 0.09, 1],
     champagne: [0.96, 0.82, 0.67, 1],
-    paper: [0.985, 0.91, 0.81, 1],
-    muted: [0.73, 0.70, 0.67, 0.92],
-    shadow: [0, 0, 0, 0.5],
 };
 
 // Logical geometry; everything is multiplied by the configured scale.
 const DIAL_D = 360;
 const DIAL_R = DIAL_D / 2;
 const HINT_H = 46;
-const OUTER_R = 169;
-const RING_OUTER = 154;
-const RING_INNER = 104;
-const CENTER_R = 88;
-// Segment icons occupy the optical centre of the ring.  Keeping their
-// complete bounding box inside this radius avoids the bottom sectors looking
-// as if their icons spill over the dial edge.
-const ICON_R = 127;
-const TICK_COUNT = 56;
-const ICON_SIZE = 22;
-const CENTER_ICON_SIZE = 30;
+// Room around the disc for its symmetric shadow.
+const OUTER_R = 162;
+const ICON_R = 113;
+const BUBBLE_R = 27;
+const HIGHLIGHT_R = 152;
+const GAUGE_R = 136;
+const GAUGE_W = 11;
+const CENTER_R = 70;
+const ICON_SIZE = 20;
+const CENTER_ICON_SIZE = 26;
+// Level gauges open at the bottom like a knob scale.
+const GAUGE_START = 0.75 * Math.PI;
+const GAUGE_SWEEP = 1.5 * Math.PI;
+const FONT = 'Adwaita Sans';
 
 // Function names map to GNOME (Adwaita) symbolic icons, the same set the
 // settings app uses. First match wins, so specific words come first.
@@ -51,23 +58,23 @@ const ICON_RULES = [
     [['keyboard'], 'keyboard-brightness'],
     [['bright', 'exposure', 'light'], 'display-brightness'],
     [['horizontal'], 'object-flip-horizontal'],
-    [['scroll'], 'view-continuous'],
+    [['scroll'], 'object-flip-vertical'],
     [['timeline'], 'zoom-fit-best'],
-    [['zoom'], 'zoom-in'],
-    [['redo'], 'edit-redo'],
+    [['zoom'], 'system-search'],
     [['undo', 'history', 'edit'], 'edit-undo'],
+    [['redo'], 'edit-redo'],
     [['seek', 'shuttle'], 'media-seek-forward'],
     [['frame'], 'media-skip-forward'],
     [['media', 'track', 'play', 'music'], 'media-playback-start'],
     [['workspace'], 'view-grid'],
-    [['tab'], 'tab-new'],
+    [['tab'], 'view-paged'],
     [['back', 'forward', 'arrow'], 'go-next'],
     [['brush', 'opacity', 'paint', 'draw'], 'document-edit'],
     [['rotate'], 'object-rotate-right'],
-    [['scale'], 'object-select'],
+    [['scale'], 'zoom-fit-best'],
     [['photo', 'image'], 'image-x-generic'],
     [['rating', 'star'], 'starred'],
-    [['label', 'colour', 'color'], 'bookmark-new'],
+    [['label', 'colour', 'color'], 'color-select'],
     [['font', 'text'], 'font-x-generic'],
     [['notif'], 'preferences-system-notifications'],
 ];
@@ -545,11 +552,7 @@ export default class DialPadExtension extends Extension {
         this._iconLayer.visible = !this._isSelectedMode();
         for (const icon of this._iconLayer.get_children()) {
             const active = icon._dialpadTitle === activeTitle;
-            icon.opacity = active ? 255 : 190;
-            if (active)
-                icon.add_style_pseudo_class('active');
-            else
-                icon.remove_style_pseudo_class('active');
+            icon.set_style(this._cssColor(active ? PALETTE.iconOnColor : PALETTE.icon, active ? 1 : 0.85));
         }
         this._updateCenterIcon();
     }
@@ -571,12 +574,18 @@ export default class DialPadExtension extends Extension {
         const size = Math.round(CENTER_ICON_SIZE * scale);
         icon.gicon = this._gicon(title, index >= 0 ? icons[index] || '' : '');
         icon.icon_size = size;
-        icon.set_style(this._cssColor(selected ? this._functionColor() : PALETTE.champagne));
+        icon.set_style(this._cssColor(selected ? this._functionColor() : this._activeColor()));
         const [x, y] = this._dialOrigin;
-        const offset = selected ? 36 : 28;
+        const offset = selected ? 34 : 26;
         icon.set_position(
             Math.round(x + DIAL_R * scale - size / 2),
             Math.round(y + (DIAL_R - offset) * scale - size / 2));
+    }
+
+    _activeColor() {
+        const { titles } = this._segmentState();
+        const index = titles.indexOf(this._state.title);
+        return index >= 0 ? this._segmentColor(index) : this._accent;
     }
 
     // --- painting -------------------------------------------------------
@@ -590,14 +599,12 @@ export default class DialPadExtension extends Extension {
         if (this._state.enabled) {
             cr.save();
             cr.scale(this._appearance.scale, this._appearance.scale);
-            this._drawDialBase(cr, DIAL_R, DIAL_R);
+            this._drawSurface(cr, DIAL_R, DIAL_R);
             if (this._isSelectedMode()) {
-                this._drawFunctionRing(cr, DIAL_R, DIAL_R);
-                this._drawProgress(cr, DIAL_R, DIAL_R);
+                this._drawGauge(cr, DIAL_R, DIAL_R);
             } else {
-                this._drawSegments(cr, DIAL_R, DIAL_R);
+                this._drawMenu(cr, DIAL_R, DIAL_R);
             }
-            this._drawPointer(cr, DIAL_R, DIAL_R);
             this._drawCenter(cr, DIAL_R, DIAL_R);
             this._drawHints(cr, DIAL_R, DIAL_D + HINT_H / 2);
             cr.restore();
@@ -606,183 +613,201 @@ export default class DialPadExtension extends Extension {
         cr.$dispose();
     }
 
-    _drawDialBase(cr, cx, cy) {
+    _drawSurface(cr, cx, cy) {
         cr.save();
-        cr.arc(cx + 4, cy + 8, OUTER_R, 0, 2 * Math.PI);
-        cr.setSourceRGBA(...PALETTE.shadow);
+        // Soft shadow centred under the disc, slightly lower like a light
+        // from above; concentric so the dial never looks off-centre.
+        const shadow = new Cairo.RadialGradient(cx, cy + 4, OUTER_R - 6, cx, cy + 4, OUTER_R + 16);
+        shadow.addColorStopRGBA(0, 0, 0, 0, 0.45);
+        shadow.addColorStopRGBA(1, 0, 0, 0, 0);
+        cr.arc(cx, cy + 4, OUTER_R + 16, 0, 2 * Math.PI);
+        cr.setSource(shadow);
         cr.fill();
 
-        const baseGradient = new Cairo.RadialGradient(cx - 46, cy - 56, 18, cx, cy, OUTER_R);
-        baseGradient.addColorStopRGBA(0, 0.29, 0.3, 0.35, 1);
-        baseGradient.addColorStopRGBA(1, ...PALETTE.ink);
+        const surface = new Cairo.LinearGradient(cx, cy - OUTER_R, cx, cy + OUTER_R);
+        surface.addColorStopRGBA(0, ...PALETTE.surfaceTop);
+        surface.addColorStopRGBA(1, ...PALETTE.surfaceBottom);
         cr.arc(cx, cy, OUTER_R, 0, 2 * Math.PI);
-        cr.setSource(baseGradient);
+        cr.setSource(surface);
         cr.fill();
 
-        cr.arc(cx, cy, RING_OUTER, 0, 2 * Math.PI);
-        cr.setLineWidth(1.2);
-        cr.setSourceRGBA(...PALETTE.ringEdge);
-        cr.stroke();
-
-        cr.setLineWidth(1.1);
-        cr.setLineCap(Cairo.LineCap.ROUND);
-        for (let i = 0; i < TICK_COUNT; i++) {
-            const angle = i / TICK_COUNT * 2 * Math.PI - Math.PI / 2;
-            const longTick = i % 7 === 0;
-            const outer = RING_OUTER + (longTick ? 8 : 4);
-            const inner = RING_OUTER - (longTick ? 6 : 2);
-            cr.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
-            cr.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
-        }
-        cr.setSourceRGBA(...PALETTE.muted);
+        cr.arc(cx, cy, OUTER_R - 0.5, 0, 2 * Math.PI);
+        cr.setLineWidth(1);
+        cr.setSourceRGBA(...PALETTE.rim);
         cr.stroke();
         cr.restore();
     }
 
-    _drawSegments(cr, cx, cy) {
+    _drawMenu(cr, cx, cy) {
         const { titles, count } = this._segmentState();
         const slice = (2 * Math.PI) / count;
         const activeTitle = this._state.title === 'Menu' ? '' : this._state.title;
+        cr.save();
+        cr.setLineCap(Cairo.LineCap.ROUND);
 
         for (let index = 0; index < count; index++) {
             const label = titles[index] || '';
-            const start = index * slice - Math.PI / 2 + 0.025;
-            const end = (index + 1) * slice - Math.PI / 2 - 0.025;
-            const active = Boolean(label) && label === activeTitle;
-            const color = this._segmentColor(index);
-            cr.save();
-            cr.moveTo(cx + Math.cos(start) * RING_INNER, cy + Math.sin(start) * RING_INNER);
-            cr.arc(cx, cy, RING_OUTER - 4, start, end);
-            cr.arcNegative(cx, cy, RING_INNER, end, start);
-            cr.closePath();
-            const fill = active ? mix(color, PALETTE.segment, 0.38) : label ? PALETTE.segment : PALETTE.segmentDim;
-            cr.setSourceRGBA(...fill);
-            cr.fill();
-            cr.restore();
+            const mid = (index + 0.5) * slice - Math.PI / 2;
+            const x = cx + Math.cos(mid) * ICON_R;
+            const y = cy + Math.sin(mid) * ICON_R;
 
-            // A thin colour key on the inner edge identifies each function,
-            // like the coloured buttons of the ASUS Control Panel.
-            if (label) {
-                cr.save();
-                cr.setLineWidth(active ? 5 : 3);
-                cr.setSourceRGBA(color[0], color[1], color[2], active ? 1 : 0.7);
-                cr.arc(cx, cy, RING_INNER + 3, start + 0.04, end - 0.04);
+            if (!label) {
+                // A free slot is a quiet dot, not a dark hole in the ring.
+                cr.arc(x, y, 3, 0, 2 * Math.PI);
+                cr.setSourceRGBA(1, 1, 1, 0.14);
+                cr.fill();
+                continue;
+            }
+
+            const color = this._segmentColor(index);
+            const active = label === activeTitle;
+            if (active) {
+                // Glow of the chosen slice and an arc on the rim.
+                const start = index * slice - Math.PI / 2 + 0.06;
+                const end = (index + 1) * slice - Math.PI / 2 - 0.06;
+                cr.moveTo(cx + Math.cos(start) * (CENTER_R + 8), cy + Math.sin(start) * (CENTER_R + 8));
+                cr.arc(cx, cy, OUTER_R - 3, start, end);
+                cr.arcNegative(cx, cy, CENTER_R + 8, end, start);
+                cr.closePath();
+                cr.setSourceRGBA(color[0], color[1], color[2], 0.07);
+                cr.fill();
+
+                cr.setLineWidth(4);
+                cr.setSourceRGBA(...color);
+                cr.arc(cx, cy, HIGHLIGHT_R, start + 0.04, end - 0.04);
                 cr.stroke();
-                cr.restore();
+            }
+
+            cr.arc(x, y, BUBBLE_R, 0, 2 * Math.PI);
+            if (active) {
+                cr.setSourceRGBA(...color);
+                cr.fill();
+            } else {
+                cr.setSourceRGBA(...PALETTE.bubble);
+                cr.fill();
+                // A small colour key keeps functions recognisable.
+                cr.arc(x, y, BUBBLE_R - 0.75, mid + Math.PI - 0.55, mid + Math.PI + 0.55);
+                cr.setLineWidth(1.5);
+                cr.setSourceRGBA(color[0], color[1], color[2], 0.75);
+                cr.stroke();
             }
         }
+        cr.restore();
+        this._drawPointer(cr, cx, cy, HIGHLIGHT_R, PALETTE.text);
     }
 
-    _drawFunctionRing(cr, cx, cy) {
-        const radius = (RING_OUTER + RING_INNER) / 2 - 2;
-        const width = RING_OUTER - RING_INNER - 18;
+    _drawGauge(cr, cx, cy) {
         const color = this._functionColor();
+        const value = this._numericValue();
+        const level = !this._state.valueShowOnlyProgress && this._state.unit === '%' && value !== null;
         cr.save();
         cr.setLineCap(Cairo.LineCap.ROUND);
-        cr.setLineWidth(width);
-        cr.setSourceRGBA(...PALETTE.track);
-        cr.arc(cx, cy, radius, 0, 2 * Math.PI);
-        cr.stroke();
+        cr.setLineWidth(GAUGE_W);
 
-        // Percentage functions (volume, brightness…) show a level gauge.
-        const value = this._numericValue();
-        if (!this._state.valueShowOnlyProgress && this._state.unit === '%' && value !== null) {
+        if (level) {
+            // Level functions (volume, brightness…) get a knob-style scale.
+            cr.setSourceRGBA(...PALETTE.track);
+            cr.arc(cx, cy, GAUGE_R, GAUGE_START, GAUGE_START + GAUGE_SWEEP);
+            cr.stroke();
             const fraction = Math.max(0, Math.min(1, value / 100));
-            if (fraction > 0.004) {
-                const start = -Math.PI / 2;
-                cr.setSourceRGBA(color[0], color[1], color[2], 0.92);
-                cr.arc(cx, cy, radius, start, start + fraction * 2 * Math.PI);
+            if (fraction > 0.005) {
+                cr.setSourceRGBA(...color);
+                cr.arc(cx, cy, GAUGE_R, GAUGE_START, GAUGE_START + fraction * GAUGE_SWEEP);
                 cr.stroke();
             }
         } else {
-            // Endless functions get a subtle coloured groove instead.
+            // Endless functions show detents, like the notches of a wheel.
+            cr.setSourceRGBA(...PALETTE.track);
+            cr.arc(cx, cy, GAUGE_R, 0, 2 * Math.PI);
+            cr.stroke();
             cr.setLineWidth(2);
-            cr.setSourceRGBA(color[0], color[1], color[2], 0.45);
-            cr.arc(cx, cy, radius + width / 2 - 1, 0, 2 * Math.PI);
+            for (let index = 0; index < 24; index++) {
+                const angle = index / 24 * 2 * Math.PI;
+                cr.moveTo(cx + Math.cos(angle) * (GAUGE_R - 3), cy + Math.sin(angle) * (GAUGE_R - 3));
+                cr.lineTo(cx + Math.cos(angle) * (GAUGE_R + 3), cy + Math.sin(angle) * (GAUGE_R + 3));
+            }
+            cr.setSourceRGBA(1, 1, 1, 0.16);
             cr.stroke();
         }
+
+        if (this._state.valueShowOnlyProgress) {
+            // Progress towards the next step of slow functions (Undo…).
+            const fraction = Math.max(-1, Math.min(1, this._state.value / 100));
+            if (Math.abs(fraction) >= 0.01) {
+                const start = this._state.valueAngleStart * Math.PI / 180 - Math.PI / 2;
+                cr.setLineWidth(GAUGE_W);
+                cr.setSourceRGBA(...color);
+                if (fraction > 0)
+                    cr.arc(cx, cy, GAUGE_R, start, start + fraction * 2 * Math.PI);
+                else
+                    cr.arcNegative(cx, cy, GAUGE_R, start, start + fraction * 2 * Math.PI);
+                cr.stroke();
+            }
+        }
         cr.restore();
+        this._drawPointer(cr, cx, cy, GAUGE_R, color);
     }
 
-    _drawProgress(cr, cx, cy) {
-        if (!this._state.valueShowOnlyProgress)
-            return;
-        const fraction = Math.max(-1, Math.min(1, this._state.value / 100));
-        if (Math.abs(fraction) < 0.01)
-            return;
-        // The driver measures degrees clockwise from the top of the pad.
-        const start = this._state.valueAngleStart * Math.PI / 180 - Math.PI / 2;
-        const end = start + fraction * 2 * Math.PI;
-        const radius = (RING_OUTER + RING_INNER) / 2 - 2;
-        cr.save();
-        cr.setLineCap(Cairo.LineCap.ROUND);
-        cr.setLineWidth(RING_OUTER - RING_INNER - 18);
-        cr.setSourceRGBA(...this._functionColor());
-        if (fraction > 0)
-            cr.arc(cx, cy, radius, start, end);
-        else
-            cr.arcNegative(cx, cy, radius, start, end);
-        cr.stroke();
-        cr.restore();
-    }
-
-    _drawPointer(cr, cx, cy) {
+    _drawPointer(cr, cx, cy, radius, color) {
         const pointer = Number(this._details.pointer);
         if (!this._appearance.show_pointer || !this._state.touching || !(pointer >= 0))
             return;
         const angle = pointer * Math.PI / 180 - Math.PI / 2;
-        const radius = RING_OUTER + 2;
         const x = cx + Math.cos(angle) * radius;
         const y = cy + Math.sin(angle) * radius;
-        const color = this._isSelectedMode() ? this._functionColor() : PALETTE.paper;
         cr.save();
-        cr.arc(x, y, 9, 0, 2 * Math.PI);
-        cr.setSourceRGBA(color[0], color[1], color[2], 0.28);
+        const glow = new Cairo.RadialGradient(x, y, 2, x, y, 15);
+        glow.addColorStopRGBA(0, color[0], color[1], color[2], 0.55);
+        glow.addColorStopRGBA(1, color[0], color[1], color[2], 0);
+        cr.arc(x, y, 15, 0, 2 * Math.PI);
+        cr.setSource(glow);
         cr.fill();
-        cr.arc(x, y, 5, 0, 2 * Math.PI);
-        cr.setSourceRGBA(...color);
+        cr.arc(x, y, 5.5, 0, 2 * Math.PI);
+        cr.setSourceRGBA(1, 1, 1, 0.95);
         cr.fill();
         cr.restore();
     }
 
     _drawCenter(cr, cx, cy) {
         const selectedMode = this._isSelectedMode();
-        cr.save();
-        cr.arc(cx + 3, cy + 5, CENTER_R + 2, 0, 2 * Math.PI);
-        cr.setSourceRGBA(...PALETTE.shadow);
-        cr.fill();
-
-        const centerGradient = new Cairo.RadialGradient(cx - 26, cy - 34, 8, cx, cy, CENTER_R);
-        centerGradient.addColorStopRGBA(0, 0.3, 0.31, 0.36, 1);
-        centerGradient.addColorStopRGBA(1, 0.16, 0.165, 0.19, 1);
-        cr.arc(cx, cy, CENTER_R, 0, 2 * Math.PI);
-        cr.setSource(centerGradient);
-        cr.fill();
-
         const accent = selectedMode ? this._functionColor() : this._accent;
+        cr.save();
+        const halo = new Cairo.RadialGradient(cx, cy + 2, CENTER_R - 4, cx, cy + 2, CENTER_R + 10);
+        halo.addColorStopRGBA(0, 0, 0, 0, 0.35);
+        halo.addColorStopRGBA(1, 0, 0, 0, 0);
+        cr.arc(cx, cy + 2, CENTER_R + 10, 0, 2 * Math.PI);
+        cr.setSource(halo);
+        cr.fill();
+
+        const surface = new Cairo.LinearGradient(cx, cy - CENTER_R, cx, cy + CENTER_R);
+        surface.addColorStopRGBA(0, ...PALETTE.centerTop);
+        surface.addColorStopRGBA(1, ...PALETTE.centerBottom);
         cr.arc(cx, cy, CENTER_R, 0, 2 * Math.PI);
-        cr.setLineWidth(this._state.centerPressed ? 3 : 1.5);
-        cr.setSourceRGBA(...(this._state.centerPressed ? accent : PALETTE.ringEdge));
+        cr.setSource(surface);
+        cr.fill();
+
+        cr.arc(cx, cy, CENTER_R - 0.5, 0, 2 * Math.PI);
+        cr.setLineWidth(this._state.centerPressed ? 2.5 : 1);
+        cr.setSourceRGBA(...(this._state.centerPressed ? accent : PALETTE.rim));
         cr.stroke();
 
         const title = this._state.title;
         const profile = (this._details.profile || '').toUpperCase();
         if (selectedMode) {
-            this._drawCenteredText(cr, title, cx, cy + 4, title.length > 12 ? 15 : 19, PALETTE.paper, true);
             const value = !this._state.valueShowOnlyProgress && this._state.unit
                 ? `${this._state.value}${this._state.unit}`
                 : '';
+            this._drawCenteredText(cr, truncate(title, 14), cx, cy + 2, title.length > 10 ? 13 : 16, PALETTE.text, true);
             if (value)
-                this._drawCenteredText(cr, value, cx, cy + 30, 16, accent, true);
+                this._drawCenteredText(cr, value, cx, cy + 27, 18, accent, true);
             else if (profile)
-                this._drawCenteredText(cr, profile, cx, cy + 30, 9, PALETTE.muted, false);
+                this._drawCenteredText(cr, truncate(profile, 16), cx, cy + 26, 8.5, PALETTE.muted, false);
         } else if (title && title !== 'Menu') {
-            this._drawCenteredText(cr, title, cx, cy + 15, title.length > 12 ? 14 : 18, PALETTE.paper, true);
-            this._drawCenteredText(cr, 'Release to select', cx, cy + 39, 9, PALETTE.champagne, false);
+            this._drawCenteredText(cr, truncate(title, 14), cx, cy + 10, title.length > 10 ? 13 : 16, PALETTE.text, true);
+            this._drawCenteredText(cr, 'Release to select', cx, cy + 32, 8.5, PALETTE.muted, false);
         } else {
-            this._drawCenteredText(cr, profile || 'ASUS DIAL', cx, cy - 9, profile.length > 12 ? 12 : 16, PALETTE.paper, true);
-            this._drawCenteredText(cr, 'Choose a function', cx, cy + 17, 10, PALETTE.champagne, false);
-            this._drawCenteredText(cr, 'Touch a segment', cx, cy + 38, 9, PALETTE.muted, false);
+            this._drawCenteredText(cr, truncate(profile || 'DIAL', 14), cx, cy - 8, profile.length > 10 ? 11 : 13, PALETTE.text, true);
+            this._drawCenteredText(cr, 'Choose a function', cx, cy + 14, 9, PALETTE.muted, false);
         }
         cr.restore();
     }
@@ -808,17 +833,20 @@ export default class DialPadExtension extends Extension {
         const height = center ? 40 : 24;
         const top = cy - HINT_H / 2 + 2;
         cr.save();
-        this._roundedRect(cr, cx - width / 2, top, width, height, 11);
-        cr.setSourceRGBA(0.1, 0.105, 0.12, 0.88);
-        cr.fill();
+        this._roundedRect(cr, cx - width / 2, top, width, height, 12);
+        cr.setSourceRGBA(...PALETTE.surfaceBottom);
+        cr.fillPreserve();
+        cr.setLineWidth(1);
+        cr.setSourceRGBA(...PALETTE.rim);
+        cr.stroke();
         const arrowColor = this._functionColor();
         if (ccw) {
             this._drawTurnArrow(cr, cx - width / 2 + 18, top + 12, false, arrowColor);
-            this._drawAlignedText(cr, ccw, cx - width / 2 + 30, top + 12, 11, PALETTE.paper, 'left');
+            this._drawAlignedText(cr, ccw, cx - width / 2 + 30, top + 12, 11, PALETTE.text, 'left');
         }
         if (cw) {
             this._drawTurnArrow(cr, cx + width / 2 - 18, top + 12, true, arrowColor);
-            this._drawAlignedText(cr, cw, cx + width / 2 - 30, top + 12, 11, PALETTE.paper, 'right');
+            this._drawAlignedText(cr, cw, cx + width / 2 - 30, top + 12, 11, PALETTE.text, 'right');
         }
         if (center)
             this._drawCenteredText(cr, center, cx, top + 29, 9, PALETTE.muted, false);
@@ -864,7 +892,7 @@ export default class DialPadExtension extends Extension {
 
     _setFont(cr, size, bold) {
         cr.setFontSize(size);
-        cr.selectFontFace('Sans', Cairo.FontSlant.NORMAL, bold ? Cairo.FontWeight.BOLD : Cairo.FontWeight.NORMAL);
+        cr.selectFontFace(FONT, Cairo.FontSlant.NORMAL, bold ? Cairo.FontWeight.BOLD : Cairo.FontWeight.NORMAL);
     }
 
     _drawCenteredText(cr, text, x, y, size, color, bold) {
