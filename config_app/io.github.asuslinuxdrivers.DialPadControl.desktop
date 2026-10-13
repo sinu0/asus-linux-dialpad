@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=ProArt DialPad Control
+Comment=Configure ASUS DialPad functions and application profiles
+Exec=python3 @INSTALL_DIR@/config_app/main.py
+Icon=io.github.asuslinuxdrivers.DialPadControl
+Terminal=false
+Type=Application
+Categories=Settings;HardwareSettings;

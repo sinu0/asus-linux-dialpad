@@ -1,0 +1,135 @@
+/* Warm graphite and champagne — inspired by the restrained ProArt palette. */
+.proart-window,
+.proart-window window,
+.proart-window scrolledwindow > viewport {
+  background: #191a1f;
+  color: #f6e1ca;
+}
+
+.proart-window headerbar {
+  background: linear-gradient(110deg, #24252c, #1b1c21 62%, #2e2a29);
+  border-bottom: 1px solid #5c514b;
+  color: #f6e1ca;
+}
+
+.proart-brand image,
+.proart-eyebrow {
+  color: #e7b98d;
+}
+
+.proart-eyebrow {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+}
+
+.proart-sidebar {
+  background: #202126;
+  border-right: 1px solid #4a4544;
+  padding: 12px 8px;
+}
+
+.proart-sidebar row {
+  border-radius: 8px;
+  margin: 2px 4px;
+}
+
+.proart-sidebar row:selected {
+  background: #4d3c35;
+  color: #ffe3c0;
+}
+
+.proart-hero {
+  min-height: 196px;
+  margin: 4px 2px 12px;
+  padding: 20px 24px;
+  border-radius: 14px;
+  border: 1px solid #5f5148;
+  background: radial-gradient(circle at 86% 14%, #54403a, transparent 36%), linear-gradient(120deg, #2c2d34, #202126 68%);
+}
+
+.proart-action-card {
+  margin: 4px 2px 14px;
+  padding: 4px 10px 10px;
+  border: 1px solid #504a49;
+  border-radius: 12px;
+  background: #24252b;
+}
+
+.proart-action-icon {
+  color: #e7b98d;
+}
+
+.proart-window button.suggested-action {
+  color: #211a18;
+  background: #e5b789;
+  border-color: #f5d2aa;
+}
+
+.proart-window button.suggested-action:hover {
+  background: #f1c69c;
+}
+
+.proart-window entry,
+.proart-window spinbutton,
+.proart-window dropdown button {
+  background: #2d2e35;
+  border-color: #645a56;
+  color: #f6e1ca;
+}
+
+.proart-key-capture {
+  min-height: 38px;
+  padding: 6px 12px;
+  font-family: monospace;
+  color: #f6e1ca;
+  background: #292a30;
+  border: 1px solid #776254;
+  border-radius: 8px;
+}
+
+.proart-key-choice {
+  min-width: 44px;
+  min-height: 30px;
+  margin: 2px;
+  color: #f6e1ca;
+  background: #303139;
+  border: 1px solid #575159;
+  border-radius: 5px;
+}
+
+.proart-key-choice:checked {
+  background: #89634f;
+  border-color: #f1c296;
+  color: #fff3e2;
+}
+
+.proart-muted-card {
+  padding: 12px;
+  border-radius: 10px;
+  background: #24252b;
+}
+
+.proart-selected-row {
+  background: alpha(#e5b789, 0.10);
+  box-shadow: inset 3px 0 #e5b789;
+}
+
+.proart-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.8em;
+  font-weight: 700;
+  color: #211a18;
+  background: #e5b789;
+}
+
+.proart-card {
+  border-radius: 14px;
+  border: 1px solid #504a49;
+  background: #202126;
+}
+
+.proart-window preferencesgroup > box > box.header .title {
+  color: #e7b98d;
+}
