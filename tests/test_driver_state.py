@@ -52,6 +52,7 @@ def load_driver_state(shortcuts):
     sent, queued = [], []
     namespace = {
         "META_KEY": META_KEY,
+        "GENERIC_DESKTOP_ID_WORDS": {"studio", "desktop", "app", "editor", "client", "player", "viewer"},
         "app_shortcuts": shortcuts,
         "app_specific_shortcuts": {},
         "app_name": None,

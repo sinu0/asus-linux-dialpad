@@ -133,7 +133,8 @@ class PresetsTest(unittest.TestCase):
         self.assertEqual(pack_for_app("org.kde.krita.desktop").name, "Krita")
         self.assertEqual(pack_for_app("firefox.desktop").name, "Browser")
         self.assertIsNone(pack_for_app("org.gnome.Calculator.desktop"))
-        self.assertEqual(profile_for_app("darktable", "org.darktable.darktable.desktop").name, "Darktable")
+        self.assertTrue(profile_for_app("darktable", "org.darktable.darktable.desktop").segments)
+        self.assertEqual(pack_for_app("com.obsproject.Studio.desktop").name, "OBS Studio")
 
     def test_pack_titles_are_unique(self):
         from config.presets import APP_PACKS

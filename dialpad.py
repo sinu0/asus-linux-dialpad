@@ -1209,6 +1209,8 @@ def get_active_window_title():
 
     return None, None
 
+GENERIC_DESKTOP_ID_WORDS = {"studio", "desktop", "app", "editor", "client", "player", "viewer"}
+
 def get_appropriate_app_name_and_shortcuts(window_binary, window_title):
 
     app_name = None
@@ -1224,9 +1226,14 @@ def get_appropriate_app_name_and_shortcuts(window_binary, window_title):
         # GNOME Shell gives ``org.darktable.darktable.desktop``, while
         # PyAT-SPI commonly supplies just ``Darktable``.  The final desktop-id
         # component is the stable bridge between the two forms.
+        # A generic last component ("com.obsproject.Studio") would also match
+        # unrelated apps such as LM Studio; the vendor part is used instead.
         if "." in stem:
-            last_component = stem.rsplit(".", 1)[-1]
-            if len(last_component) >= 3:
+            parts = stem.split(".")
+            last_component = parts[-1]
+            if last_component in GENERIC_DESKTOP_ID_WORDS and len(parts) >= 3:
+                last_component = parts[-2]
+            if len(last_component) >= 3 and last_component not in GENERIC_DESKTOP_ID_WORDS:
                 candidates.add(last_component)
         return any(candidate and candidate in value for candidate in candidates)
 

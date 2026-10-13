@@ -157,6 +157,17 @@ def describe_macro(steps: list[MacroStep]) -> str:
 # Function names map to GNOME (Adwaita) symbolic icons; kept in sync with
 # ICON_RULES in gnome/extension/extension.js. First match wins.
 ICON_RULES = (
+    (("record",), "media-record"),
+    (("stream",), "network-transmit"),
+    (("pause",), "media-playback-pause"),
+    (("mic",), "audio-input-microphone"),
+    (("replay", "save"), "document-save"),
+    (("point", "cut", "split", "clip", "snap"), "edit-cut"),
+    (("layer",), "view-list"),
+    (("keyframe",), "starred"),
+    (("arrange", "order"), "view-sort-ascending"),
+    (("cursor",), "go-next"),
+    (("mirror",), "object-flip-horizontal"),
     (("mute",), "audio-volume-muted"),
     (("volume", "audio", "sound"), "audio-volume-high"),
     (("keyboard",), "keyboard-brightness"),

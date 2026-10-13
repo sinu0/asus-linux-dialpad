@@ -53,6 +53,17 @@ const FONT = 'Adwaita Sans';
 // Function names map to GNOME (Adwaita) symbolic icons, the same set the
 // settings app uses. First match wins, so specific words come first.
 const ICON_RULES = [
+    [['record'], 'media-record'],
+    [['stream'], 'network-transmit'],
+    [['pause'], 'media-playback-pause'],
+    [['mic'], 'audio-input-microphone'],
+    [['replay', 'save'], 'document-save'],
+    [['point', 'cut', 'split', 'clip', 'snap'], 'edit-cut'],
+    [['layer'], 'view-list'],
+    [['keyframe'], 'starred'],
+    [['arrange', 'order'], 'view-sort-ascending'],
+    [['cursor'], 'go-next'],
+    [['mirror'], 'object-flip-horizontal'],
     [['mute'], 'audio-volume-muted'],
     [['volume', 'audio', 'sound'], 'audio-volume-high'],
     [['keyboard'], 'keyboard-brightness'],

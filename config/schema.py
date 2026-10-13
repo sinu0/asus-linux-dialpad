@@ -165,100 +165,10 @@ def darktable_colour_labels_segment() -> Segment:
 
 
 def darktable_profile() -> Profile:
-    """Return a practical Darktable 5.x profile using its default shortcuts.
+    """Return the darktable profile from the pre-programmed packs."""
+    from config.presets import darktable_profile_segments
 
-    The actions are deliberately limited to six broad controls so each
-    segment remains comfortably selectable on a physical DialPad.  They map
-    to the user's Darktable shortcut configuration and can be changed in the
-    graphical editor like any other profile.
-    """
-    return Profile(
-        name="Darktable",
-        app_id=DARKTABLE_APP_ID,
-        segments=[
-            Segment(
-                title="Zoom",
-                macro_cw=[
-                    MacroStep(
-                        type=StepType.KEYSTROKE,
-                        keys=["KEY_LEFTCTRL", "KEY_LEFTSHIFT", "KEY_EQUAL"],
-                        title="Zoom in",
-                    ),
-                ],
-                macro_ccw=[
-                    MacroStep(
-                        type=StepType.KEYSTROKE,
-                        keys=["KEY_LEFTCTRL", "KEY_MINUS"],
-                        title="Zoom out",
-                    ),
-                ],
-                macro_center=[
-                    MacroStep(
-                        type=StepType.KEYSTROKE,
-                        keys=["KEY_LEFTALT", "KEY_3"],
-                        title="Fit image",
-                    ),
-                ],
-            ),
-            Segment(
-                title="Photo",
-                macro_cw=[
-                    MacroStep(type=StepType.KEYSTROKE, keys=["KEY_SPACE"], title="Next image"),
-                ],
-                macro_ccw=[
-                    MacroStep(type=StepType.KEYSTROKE, keys=["KEY_BACKSPACE"], title="Previous image"),
-                ],
-                macro_center=[
-                    MacroStep(type=StepType.KEYSTROKE, keys=["KEY_W"], title="Full preview"),
-                ],
-            ),
-            Segment(
-                title="Rotate",
-                macro_cw=[
-                    MacroStep(type=StepType.KEYSTROKE, keys=["KEY_RIGHTBRACE"], title="Rotate clockwise"),
-                ],
-                macro_ccw=[
-                    MacroStep(type=StepType.KEYSTROKE, keys=["KEY_LEFTBRACE"], title="Rotate counter-clockwise"),
-                ],
-                macro_center=[
-                    MacroStep(type=StepType.KEYSTROKE, keys=["KEY_C"], title="Crop"),
-                ],
-            ),
-            Segment(
-                title="History",
-                macro_cw=[
-                    MacroStep(type=StepType.KEYSTROKE, keys=["KEY_LEFTCTRL", "KEY_Y"], title="Redo"),
-                ],
-                macro_ccw=[
-                    MacroStep(type=StepType.KEYSTROKE, keys=["KEY_LEFTCTRL", "KEY_Z"], title="Undo"),
-                ],
-            ),
-            Segment(
-                title="Rating",
-                macro_cw=[
-                    MacroStep(type=StepType.KEYSTROKE, keys=["KEY_5"], title="Five stars"),
-                ],
-                macro_ccw=[
-                    MacroStep(type=StepType.KEYSTROKE, keys=["KEY_0"], title="Clear rating"),
-                ],
-                macro_center=[
-                    MacroStep(type=StepType.KEYSTROKE, keys=["KEY_R"], title="Reject image"),
-                ],
-            ),
-            Segment(
-                title="Exposure",
-                macro_cw=[
-                    MacroStep(type=StepType.KEYSTROKE, keys=["KEY_O"], title="Toggle clipping warning"),
-                ],
-                macro_ccw=[
-                    MacroStep(type=StepType.KEYSTROKE, keys=["KEY_G"], title="Toggle guides"),
-                ],
-                macro_center=[
-                    MacroStep(type=StepType.KEYSTROKE, keys=["KEY_E"], title="Open exposure module"),
-                ],
-            ),
-        ],
-    )
+    return Profile(name="Darktable", app_id=DARKTABLE_APP_ID, segments=darktable_profile_segments())
 
 
 def _default_config() -> DialPadConfig:
