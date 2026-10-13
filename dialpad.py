@@ -1271,6 +1271,59 @@ def set_keys_held(keys, pressed):
     except Exception as e:
         log.error(f"Error sending modifier event: {e}")
 
+# Keys held for scroll steps (Ctrl + wheel = zoom) stay pressed while the
+# dial keeps turning, like a hand holding Ctrl on a mouse. Releasing them
+# after every notch let applications that smooth scrolling (Firefox) see
+# part of the wheel motion without Ctrl, so they zoomed and scrolled.
+SCROLL_MODIFIER_RELEASE_SECONDS = 0.35
+scroll_modifier_lock = threading.Lock()
+scroll_modifiers_held = []
+scroll_modifier_generation = 0
+
+def release_scroll_modifiers(generation=None):
+    global scroll_modifiers_held
+    with scroll_modifier_lock:
+        # A newer scroll step re-armed the release; this timer is stale.
+        if generation is not None and generation != scroll_modifier_generation:
+            return
+        keys, scroll_modifiers_held = scroll_modifiers_held, []
+        set_keys_held(keys, False)
+
+def hold_scroll_modifiers(keys):
+    """Keep ``keys`` pressed and postpone their release; True if newly pressed."""
+    global scroll_modifiers_held, scroll_modifier_generation
+    with scroll_modifier_lock:
+        scroll_modifier_generation += 1
+        generation = scroll_modifier_generation
+        newly_pressed = False
+        if keys != scroll_modifiers_held:
+            set_keys_held(scroll_modifiers_held, False)
+            set_keys_held(keys, True)
+            scroll_modifiers_held = list(keys)
+            newly_pressed = bool(keys)
+    if keys:
+        timer = threading.Timer(
+            SCROLL_MODIFIER_RELEASE_SECONDS, release_scroll_modifiers, args=(generation,)
+        )
+        timer.daemon = True
+        timer.start()
+    return newly_pressed
+
+def send_wheel(codes, notches, high_resolution):
+    """Send one wheel step as a single input frame."""
+    if not udev:
+        log.error("Virtual device is not initialized. Cannot send scroll events.")
+        return
+    events = []
+    if notches:
+        events.append(InputEvent(codes[0], notches))
+    events.append(InputEvent(codes[1], high_resolution))
+    events.append(InputEvent(EV_SYN.SYN_REPORT, 0))
+    try:
+        udev.send_events(events)
+    except Exception as e:
+        log.error(f"Error sending scroll event: {e}")
+
 def execute_config_macro(steps, scroll_multiplier=1):
     if not CONFIG_APP_AVAILABLE:
         log.warning("Cannot execute configuration macro: config runtime is unavailable")
@@ -1293,14 +1346,10 @@ def execute_config_macro(steps, scroll_multiplier=1):
         else:
             codes = [EV_REL.REL_WHEEL, EV_REL.REL_WHEEL_HI_RES]
         held_keys = [resolve_evdev_key(key) for key in held or []]
-        set_keys_held(held_keys, True)
-        try:
-            if notches:
-                send_key_event(codes, [notches, high_resolution], log_event=False)
-            else:
-                send_key_event(codes[1:], [high_resolution], log_event=False)
-        finally:
-            set_keys_held(held_keys, False)
+        if hold_scroll_modifiers(held_keys):
+            # Let the compositor register the modifier before the wheel.
+            sleep(0.02)
+        send_wheel(codes, notches, high_resolution)
 
     def volume(direction, value):
         key = EV_KEY.KEY_VOLUMEUP if direction.lower() in ("up", "clockwise") else EV_KEY.KEY_VOLUMEDOWN
@@ -2852,6 +2901,12 @@ def cleanup():
     global dialpad, display, display_wayland, stop_threads, event_notifier, watch_manager, xkb_conn, sock, dbus_service
 
     log.info("Clean up started")
+
+    # Never leave a held Ctrl behind (Ctrl + wheel zoom).
+    try:
+        release_scroll_modifiers()
+    except Exception:
+        log.exception("Failed to release scroll modifiers")
 
     # try deactivate first
     try:
