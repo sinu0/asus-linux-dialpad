@@ -39,7 +39,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         PACKAGE_MANAGER="rpm-ostree"
 
         # note: systemd packages are installed separately in install_service.sh if user chooses systemd
-        PACKAGES="curl xinput i2c-tools python3-devel python3-pyatspi wayland-protocols-devel gcc pkg-config libxcb-devel libxkbcommon-devel cairo-devel cairo-gobject-devel glib2-devel gobject-introspection-devel"
+        PACKAGES="curl xinput i2c-tools python3-devel python3-pyatspi wayland-protocols-devel gcc pkg-config libxcb-devel libxkbcommon-devel cairo-devel cairo-gobject-devel glib2-devel gobject-introspection-devel dbus-devel"
 
         if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
             PACKAGES="$PACKAGES wayland-devel"
@@ -61,7 +61,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         fi
     elif command -v apt-get >/dev/null 2>&1; then
         PACKAGE_MANAGER="apt"
-        sudo apt-get -y install ibus libevdev2 curl xinput i2c-tools python3-dev python3-virtualenv python3-pyatspi libxml2-utils libxkbcommon-dev gcc pkg-config
+        sudo apt-get -y install ibus libevdev2 curl xinput i2c-tools python3-dev python3-virtualenv python3-pyatspi libxml2-utils libxkbcommon-dev libdbus-1-dev gcc pkg-config
         if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
             sudo apt-get -y install libwayland-dev
         fi
@@ -70,7 +70,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         fi
     elif command -v pacman >/dev/null 2>&1; then
         PACKAGE_MANAGER="pacman"
-        sudo pacman --noconfirm --needed -S ibus libevdev curl xorg-xinput i2c-tools python python-virtualenv python-pyatspi libxml2 libxkbcommon gcc pkgconf
+        sudo pacman --noconfirm --needed -S ibus libevdev curl xorg-xinput i2c-tools python python-virtualenv python-pyatspi python-dbus python-gobject gtk4 libadwaita dbus libxml2 libxkbcommon gcc pkgconf
         if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
             sudo pacman --noconfirm --needed -S wayland
         fi
@@ -79,7 +79,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         fi
     elif command -v dnf >/dev/null 2>&1; then
         PACKAGE_MANAGER="dnf"
-        sudo dnf -y install ibus libevdev curl xinput i2c-tools python3-devel python3-virtualenv python3-pyatspi libxml2 libxkbcommon-devel gcc pkg-config
+        sudo dnf -y install ibus libevdev curl xinput i2c-tools python3-devel python3-virtualenv python3-pyatspi libxml2 libxkbcommon-devel dbus-devel gcc pkg-config
         if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
             sudo dnf -y install wayland-devel
         fi
@@ -88,7 +88,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         fi
     elif command -v yum >/dev/null 2>&1; then
         PACKAGE_MANAGER="yum"
-        sudo yum -y install ibus libevdev curl xinput i2c-tools python3-devel python3-pyatspi virtualenv libxml2 libxkbcommon-devel gcc python-pkgconfig
+        sudo yum -y install ibus libevdev curl xinput i2c-tools python3-devel python3-pyatspi virtualenv libxml2 libxkbcommon-devel dbus-devel gcc python-pkgconfig
         if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
             sudo yum -y install wayland-devel
         fi
@@ -97,7 +97,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         fi
     elif command -v zypper >/dev/null 2>&1; then
         PACKAGE_MANAGER="zypper"
-        sudo zypper --non-interactive install ibus libevdev2 curl xinput i2c-tools python3-devel python3-virtualenv python3-pyatspi libxml2 libxkbcommon-devel gcc pkg-config
+        sudo zypper --non-interactive install ibus libevdev2 curl xinput i2c-tools python3-devel python3-virtualenv python3-pyatspi libxml2 libxkbcommon-devel dbus-1-devel gcc pkg-config
         if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
             sudo zypper --non-interactive install wayland-devel
         fi
@@ -106,7 +106,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         fi
     elif command -v xbps-install >/dev/null 2>&1; then
         PACKAGE_MANAGER="xbps-install"
-        sudo xbps-install -Suy ibus-devel libevdev-devel curl xinput i2c-tools python3-devel python3-virtualenv python3-pyatspi libxml2 libxkbcommon-devel gcc pkg-config
+        sudo xbps-install -Suy ibus-devel libevdev-devel curl xinput i2c-tools python3-devel python3-virtualenv python3-pyatspi libxml2 libxkbcommon-devel dbus-devel gcc pkg-config
         if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
             sudo xbps-install -Suy wayland-devel
         fi
@@ -115,7 +115,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         fi
     elif command -v emerge >/dev/null 2>&1; then
         PACKAGE_MANAGER="portage"
-        sudo emerge app-i18n/ibus dev-libs/libevdev net-misc/curl x11-apps/xinput sys-apps/i2c-tools dev-lang/python dev-python/virtualenv dev-python/pyatspi dev-libs/libxml2 x11-libs/libxkbcommon sys-devel/gcc virtual/pkgconfig
+        sudo emerge app-i18n/ibus dev-libs/libevdev net-misc/curl x11-apps/xinput sys-apps/i2c-tools dev-lang/python dev-python/virtualenv dev-python/pyatspi dev-libs/libxml2 x11-libs/libxkbcommon sys-apps/dbus sys-devel/gcc virtual/pkgconfig
         if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
             sudo emerge dev-libs/wayland
         fi
@@ -124,7 +124,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         fi
     elif command -v eopkg >/dev/null 2>&1; then
         PACKAGE_MANAGER="eopkg"
-        sudo eopkg install -y ibus libevdev curl xinput i2c-tools python3-devel python3-virtualenv python3-pyatspi libxml2-devel libxkbcommon-devel gcc pkg-config 
+        sudo eopkg install -y ibus libevdev curl xinput i2c-tools python3-devel python3-virtualenv python3-pyatspi libxml2-devel libxkbcommon-devel dbus-devel gcc pkg-config
         if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
             sudo eopkg install -y wayland-devel
         fi
@@ -215,10 +215,21 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
     fi
     CONFIG_FILE_PATH="$CONFIG_FILE_DIR_PATH/$CONFIG_FILE_NAME"
 
-    sudo mkdir -p "$INSTALL_DIR_PATH/layouts"
+    sudo mkdir -p "$INSTALL_DIR_PATH/layouts" "$INSTALL_DIR_PATH/config" "$INSTALL_DIR_PATH/config_app" "$INSTALL_DIR_PATH/gnome/extension"
     sudo install dialpad.py "$INSTALL_DIR_PATH"
+    sudo install dialpad_dbus.py "$INSTALL_DIR_PATH"
+    sudo install dial_gesture.py "$INSTALL_DIR_PATH"
     sudo install -t "$INSTALL_DIR_PATH/layouts" layouts/*.py
+    sudo install -m 644 -t "$INSTALL_DIR_PATH/config" config/*.py
+    sudo install -m 755 config_app/main.py "$INSTALL_DIR_PATH/config_app/main.py"
+    sudo install -m 644 config_app/__init__.py config_app/icon.svg config_app/style.css config_app/io.github.asuslinuxdrivers.DialPadControl.desktop "$INSTALL_DIR_PATH/config_app/"
+    sudo install -m 644 gnome/extension/extension.js gnome/extension/metadata.json gnome/extension/stylesheet.css "$INSTALL_DIR_PATH/gnome/extension/"
     sudo chown -R $USER "$INSTALL_DIR_PATH"
+
+    mkdir -p "$HOME/.local/share/applications"
+    sed "s|@INSTALL_DIR@|$INSTALL_DIR_PATH|g" config_app/io.github.asuslinuxdrivers.DialPadControl.desktop > "$HOME/.local/share/applications/io.github.asuslinuxdrivers.DialPadControl.desktop"
+    mkdir -p "$HOME/.local/share/icons/hicolor/scalable/apps"
+    install -m 644 config_app/icon.svg "$HOME/.local/share/icons/hicolor/scalable/apps/io.github.asuslinuxdrivers.DialPadControl.svg"
 
     if [[ -f "$CONFIG_FILE_PATH" ]]; then
         read -r -p "In system remains config file from previous installation. Do you want replace that config with default config? [y/N]" RESPONSE
@@ -308,6 +319,10 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
     echo
 
     source install_service.sh
+
+    echo
+
+    source install_gnome_extension.sh
 
     echo
 

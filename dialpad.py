@@ -28,8 +28,51 @@ import xcffib.xkb
 import glob
 import socket
 import json
+import queue
+
+from dial_gesture import (
+    CalibrationSession,
+    DEFAULT_HYSTERESIS,
+    SCROLL_TRIGGER_DEGREES,
+    RotationTracker,
+    scroll_acceleration_multiplier,
+    slice_index,
+    touch_angle,
+)
+
+try:
+    from dialpad_dbus import DialPadDBusService
+    DBUS_SERVICE_AVAILABLE = True
+except Exception:
+    DialPadDBusService = None
+    DBUS_SERVICE_AVAILABLE = False
+
+try:
+    from config.schema import CONFIG_FILE, MacroStep, StepType, load_config
+    from config.legacy_adapter import META_KEY, shortcuts_from_config
+    from config.runtime import MacroExecutionError, MacroExecutor
+    CONFIG_APP_AVAILABLE = True
+except Exception:
+    CONFIG_FILE = None
+    MacroStep = None
+    StepType = None
+    load_config = None
+    META_KEY = "_meta"
+    shortcuts_from_config = None
+    MacroExecutionError = None
+    MacroExecutor = None
+    CONFIG_APP_AVAILABLE = False
+
 SOCKET_PATH = "/tmp/dialpad.sock"
 sock = None
+dbus_service = None
+driver_state_lock = threading.RLock()
+pending_active_application = None
+pending_config_reload = False
+# Guided calibration: requested over D-Bus, run on the touch thread.
+pending_calibration = None
+calibration = None
+calibration_last_emit = 0
 
 def init_socket():
     global sock
@@ -41,6 +84,181 @@ def init_socket():
     except Exception as e:
         log.error("Failed to initialize socket: %s", e)
         sock = None
+
+def on_dbus_active_application(app_id):
+    global pending_active_application
+
+    normalized_app_id = str(app_id).strip().lower() if app_id is not None else None
+    with driver_state_lock:
+        pending_active_application = normalized_app_id or None
+
+def on_dbus_reload_config():
+    global pending_config_reload
+
+    with driver_state_lock:
+        pending_config_reload = True
+    return True
+
+def process_pending_driver_updates():
+    global pending_active_application, pending_config_reload, pending_calibration
+
+    with driver_state_lock:
+        active_application = pending_active_application
+        reload_config = pending_config_reload
+        calibration_request = pending_calibration
+        pending_active_application = None
+        pending_config_reload = False
+        pending_calibration = None
+
+    if calibration_request == "start":
+        start_calibration()
+    elif calibration_request == "cancel":
+        stop_calibration(cancelled=True)
+
+    if reload_config:
+        try:
+            load_gui_shortcuts()
+            apply_gui_settings()
+            enable_config_macro_capabilities(reset_udev=True)
+        except Exception:
+            log.exception("Configuration reload failed")
+            return
+
+        if active_application is None:
+            active_application = window_binary
+
+    if active_application is not None:
+        # After a reload, colours, hints and titles may have changed even
+        # when the application did not.
+        window_was_changed(active_application, force=reload_config)
+
+def on_dbus_start_calibration():
+    global pending_calibration
+
+    with driver_state_lock:
+        pending_calibration = "start"
+    return True
+
+def on_dbus_cancel_calibration():
+    global pending_calibration
+
+    with driver_state_lock:
+        pending_calibration = "cancel"
+    return True
+
+def emit_calibration_state(point=None):
+    global calibration_last_emit
+
+    if calibration is None or not dbus_service:
+        return
+    state = calibration.state()
+    state["layout"] = model or ""
+    state["touchpad_max_x"] = int(max_x)
+    state["touchpad_max_y"] = int(max_y)
+    if point is not None:
+        state["point"] = [int(point[0]), int(point[1])]
+    calibration_last_emit = time()
+    try:
+        dbus_service.emit_calibration_progress(state)
+    except Exception:
+        log.exception("Failed to emit calibration progress")
+
+def start_calibration():
+    """Collect raw touches instead of dial gestures until both circles are traced."""
+    global calibration
+
+    calibration = CalibrationSession(time())
+    # Keep the pointer still while the user traces the printed circles.
+    set_touchpad_prop_send_events(0)
+    log.info("Guided calibration started")
+    emit_calibration_state()
+
+def stop_calibration(cancelled=False):
+    global calibration
+
+    if calibration is None:
+        return
+    if cancelled:
+        calibration.cancelled = True
+        calibration.message = "Calibration cancelled"
+    emit_calibration_state()
+    log.info("Guided calibration %s", "cancelled" if cancelled else "finished: %s" % calibration.result())
+    calibration = None
+    set_touchpad_prop_send_events(1)
+
+def calibration_frame(touch_x, touch_y, finger_down, prev_finger_down):
+    """Feed one touch frame to the calibration session."""
+    if calibration.expired(time()):
+        calibration.error = "Calibration timed out"
+        stop_calibration(cancelled=True)
+        return
+    if finger_down and touch_x is not None and touch_y is not None:
+        if calibration.add_point(touch_x, touch_y) and time() - calibration_last_emit > 0.05:
+            emit_calibration_state(point=(touch_x, touch_y))
+    elif prev_finger_down and not finger_down:
+        calibration.finish_stroke()
+        if calibration.done:
+            stop_calibration()
+        else:
+            emit_calibration_state()
+
+def get_dbus_status():
+    return {
+        "enabled": bool(dialpad),
+        "application": app_name or "",
+        "session_type": xdg_session_type or "",
+        "layout": model or "",
+        "selected_function": (
+            globals().get("title") or ""
+            if globals().get("center_activated", False)
+            else ""
+        ),
+        "menu_active": bool(
+            multi_app_mode and not globals().get("center_activated", False)
+        ),
+        "profile": str(profile_meta().get("name") or ""),
+        "mode": "multi" if multi_app_mode else "single",
+        "touchpad_max_x": int(globals().get("max_x") or 0),
+        "touchpad_max_y": int(globals().get("max_y") or 0),
+        "calibrating": calibration is not None,
+    }
+
+def init_dbus():
+    global dbus_service
+
+    if not DBUS_SERVICE_AVAILABLE:
+        return
+
+    try:
+        service = DialPadDBusService(
+            on_active_application=on_dbus_active_application,
+            on_reload_config=on_dbus_reload_config,
+            on_start_calibration=on_dbus_start_calibration,
+            status_provider=get_dbus_status,
+            on_cancel_calibration=on_dbus_cancel_calibration,
+        )
+    except Exception:
+        log.exception("Failed to create the DialPad D-Bus service")
+        return
+
+    dbus_service = service
+
+    def start_service():
+        try:
+            if not service.start():
+                log.debug("DialPad D-Bus service is unavailable")
+        except Exception:
+            log.exception("Failed to start the DialPad D-Bus service")
+
+    try:
+        threading.Thread(
+            target=start_service,
+            name="dialpad-dbus-startup",
+            daemon=True,
+        ).start()
+    except Exception:
+        dbus_service = None
+        log.exception("Failed to schedule DialPad D-Bus startup")
 
 PYWAYLAND_AVAILABLE = False
 try:
@@ -171,6 +389,81 @@ top_right_icon_height = getattr(model_layout, "top_right_icon_height", 0)
 
 # App-specific configuration (add more mappings as needed)
 app_shortcuts = getattr(model_layout, "app_shortcuts", {})
+gui_config = None
+legacy_app_shortcuts = app_shortcuts
+angle_hysteresis = DEFAULT_HYSTERESIS
+center_hold_time = 0.5
+# Function last used per application, restored like the ASUS Dial does.
+last_function_by_app = {}
+
+def load_gui_shortcuts():
+    global app_shortcuts, gui_config
+
+    if not CONFIG_APP_AVAILABLE or CONFIG_FILE is None or not CONFIG_FILE.exists():
+        app_shortcuts = legacy_app_shortcuts
+        gui_config = None
+        return False
+
+    try:
+        config = load_config()
+        shortcuts = shortcuts_from_config(config)
+    except Exception:
+        log.exception("Failed to load GUI configuration")
+        app_shortcuts = legacy_app_shortcuts
+        gui_config = None
+        return False
+
+    gui_config = config
+    app_shortcuts = shortcuts
+    log.info("Loaded GUI configuration from %s", CONFIG_FILE)
+    return True
+
+def apply_gui_settings():
+    global circle_diameter, center_button_diameter, circle_center_x, circle_center_y
+    global top_right_icon_width, top_right_icon_height
+    global activation_time, coactivator_keys, default_treshold
+    global slices_minimum_count, disable_due_inactivity_time, angle_hysteresis
+    global center_hold_time
+
+    if gui_config is None:
+        return False
+
+    geometry = gui_config.geometry
+    activation = gui_config.activation
+    gesture = gui_config.gesture
+
+    # A configuration created for another laptop model (for example an
+    # imported file) must not move the dial away from this touchpad's ring.
+    if gui_config.device_name and model and gui_config.device_name != model:
+        log.warning(
+            "config.json geometry is for layout %s, the driver runs %s; using the layout geometry",
+            gui_config.device_name, model,
+        )
+    else:
+        circle_diameter = geometry.circle_diameter
+        center_button_diameter = geometry.center_button_diameter
+        circle_center_x = geometry.center_x
+        circle_center_y = geometry.center_y
+        top_right_icon_width = geometry.width
+        top_right_icon_height = geometry.height
+
+    activation_time = activation.activation_time
+    coactivator_keys = activation.coactivator_keys
+    default_treshold = gesture.default_threshold
+    slices_minimum_count = gesture.slices_minimum_count
+    disable_due_inactivity_time = gesture.disable_inactivity_time
+    angle_hysteresis = max(0, gesture.hysteresis)
+    center_hold_time = max(0.2, float(gesture.center_hold_time))
+
+    if keymap_loaded and "load_evdev_keys_for_coactivator_modifiers" in globals():
+        try:
+            load_evdev_keys_for_coactivator_modifiers(coactivator_keys)
+        except Exception:
+            log.debug("Failed to load GUI co-activator modifiers", exc_info=True)
+
+    return True
+
+load_gui_shortcuts()
 
 # Figure out devices from devices file
 touchpad: Optional[str] = None
@@ -330,8 +623,17 @@ log.info('Touchpad min-max: x %d-%d, y %d-%d', min_x, max_x, min_y, max_y)
 last_event_time = 0
 
 def send_to_socket(payload: dict):
-    if not sock:
+    if dbus_service:
+        try:
+            dbus_service.emit_overlay_state(payload)
+        except Exception:
+            log.exception("Failed to emit DialPad D-Bus overlay state")
+
+    # Presentation details are D-Bus only; the legacy socket overlay does not
+    # understand them.
+    if not sock or set(payload) <= {"details"}:
         return
+    payload = {key: value for key, value in payload.items() if key != "details"}
 
     msg = {
         "ts": time(),
@@ -423,26 +725,23 @@ def is_multifunction(app_config):
     non_standard_keys_icons = []
 
     for key, value in app_config.items():
-        if key in standard_keys:
+        if key in standard_keys or str(key).startswith("_"):
             continue
 
         non_standard_keys.append(key)
 
+        # Keep icons index-aligned with titles; segments without an icon
+        # get an empty entry instead of shifting the following icons.
+        icon = ""
         if isinstance(value, dict):
-            icon = value.get("icon")
-            if icon:
-                non_standard_keys_icons.append(icon)
-            icons = None
-            try:
-                icons = value.get("icons")
-            except:
-                pass
-            if icons:
-                value_command = value.get("value")
-                if value_command:
-                    value_command_output = get_current_value(value)
-                    icon = icons[value_command_output]
-                    non_standard_keys_icons.append(icon)
+            icon = value.get("icon") or ""
+            icons = value.get("icons")
+            if icons and value.get("value"):
+                try:
+                    icon = icons[get_current_value(value)]
+                except (KeyError, IndexError, TypeError):
+                    pass
+        non_standard_keys_icons.append(icon)
 
     return bool(len(non_standard_keys)), non_standard_keys, non_standard_keys_icons
 
@@ -549,6 +848,68 @@ def send_value_to_touchpad_via_i2c(value):
 
     return False
 
+def enable_config_macro_capabilities(reset_udev=False):
+    if MacroStep is None or StepType is None:
+        return
+
+    enabled_keys_count = len(enabled_evdev_keys)
+
+    def enable_macro_key(key):
+        try:
+            if not isinstance(key, str):
+                raise ValueError("Macro keys must be strings")
+            if key.isdigit():
+                evdev_key = EV_KEY.codes[int(key)]
+            else:
+                evdev_key = getattr(EV_KEY, key)
+            if getattr(evdev_key, "type", None) != EV_KEY:
+                raise ValueError("Macro key is not an EV_KEY")
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+            log.debug("Skipping invalid configuration macro key %r", key)
+            return
+
+        enable_key(evdev_key)
+
+    def enable_macro_keys(keys):
+        if not isinstance(keys, list):
+            if keys is not None:
+                log.debug("Skipping invalid configuration macro keys %r", keys)
+            return
+        for key in keys:
+            enable_macro_key(key)
+
+    def process_macro(macro):
+        for step in macro:
+            if step.type in (StepType.KEYSTROKE, StepType.MEDIA, StepType.VOLUME, StepType.BRIGHTNESS):
+                enable_macro_keys(step.keys)
+            if step.type is StepType.SCROLL:
+                enable_key([EV_REL.REL_WHEEL, EV_REL.REL_WHEEL_HI_RES])
+                if step.axis == "horizontal":
+                    enable_key([EV_REL.REL_HWHEEL, EV_REL.REL_HWHEEL_HI_RES])
+                enable_macro_keys(step.modifiers)
+            elif step.type is StepType.VOLUME:
+                enable_key([EV_KEY.KEY_VOLUMEUP, EV_KEY.KEY_VOLUMEDOWN])
+            elif step.type is StepType.BRIGHTNESS:
+                enable_key([EV_KEY.KEY_BRIGHTNESSUP, EV_KEY.KEY_BRIGHTNESSDOWN])
+            elif step.type is StepType.MEDIA and step.direction is not None:
+                enable_macro_key(step.direction)
+
+    def scan_shortcuts(value):
+        if isinstance(value, dict):
+            macro = value.get("macro")
+            if isinstance(macro, list) and all(isinstance(step, MacroStep) for step in macro):
+                process_macro(macro)
+            for nested_value in value.values():
+                scan_shortcuts(nested_value)
+        elif isinstance(value, list):
+            for nested_value in value:
+                scan_shortcuts(nested_value)
+
+    scan_shortcuts(app_shortcuts)
+
+    if reset_udev and udev and len(enabled_evdev_keys) > enabled_keys_count:
+        reset_udev_device()
+
 def initialize_virtual_device():
     global udev, dev, modifiers
 
@@ -600,6 +961,8 @@ def initialize_virtual_device():
                         configs = [configs]
                     for config in configs:
                         process_config(config)
+
+        enable_config_macro_capabilities()
 
         # create the uinput device
         udev = dev.create_uinput_device()
@@ -839,16 +1202,36 @@ def get_appropriate_app_name_and_shortcuts(window_binary, window_title):
 
     app_name = None
 
+    def profile_matches_window(profile_id, value):
+        """Match a desktop id as well as the human app name supplied by AT-SPI."""
+        if not value:
+            return False
+        profile_id = str(profile_id).lower()
+        value = str(value).lower()
+        stem = profile_id.removesuffix(".desktop")
+        candidates = {profile_id, stem}
+        # GNOME Shell gives ``org.darktable.darktable.desktop``, while
+        # PyAT-SPI commonly supplies just ``Darktable``.  The final desktop-id
+        # component is the stable bridge between the two forms.
+        if "." in stem:
+            last_component = stem.rsplit(".", 1)[-1]
+            if len(last_component) >= 3:
+                candidates.add(last_component)
+        return any(candidate and candidate in value for candidate in candidates)
+
     # 1. window_binary (exact match)
     if window_binary:
-        binary_lower = window_binary.lower()
+        binary_lower = str(window_binary).lower()
         app_name = next(
-            (app for app in app_shortcuts if app in binary_lower),
+            (app for app in app_shortcuts if app != "none" and profile_matches_window(app, binary_lower)),
             None
         )
     # 2. window_title (may be only part of)
-    if not app_name:
-        app_name = next((app for app in app_shortcuts if app in window_title.lower()), None) if window_title else None
+    if not app_name and window_title:
+        app_name = next(
+            (app for app in app_shortcuts if app != "none" and profile_matches_window(app, window_title)),
+            None,
+        )
 
     # 3. not a specific app -> 'none' shortcuts block
     if not app_name:
@@ -858,7 +1241,90 @@ def get_appropriate_app_name_and_shortcuts(window_binary, window_title):
 
     return app_name, shortcuts
 
-def emulate_shortcuts(app_shortcuts, touch_input, event_code, active_modifiers, duration_held=0):
+def resolve_evdev_key(key):
+    try:
+        if key.isdigit():
+            return EV_KEY.codes[int(key)]
+        return getattr(EV_KEY, key)
+    except (AttributeError, IndexError, KeyError, ValueError):
+        raise MacroExecutionError("Unknown evdev key: %s" % key)
+
+def set_keys_held(keys, pressed):
+    if not udev or not keys:
+        return
+    try:
+        for key in (keys if pressed else reversed(keys)):
+            udev.send_events([
+                InputEvent(key, 1 if pressed else 0),
+                InputEvent(EV_SYN.SYN_REPORT, 0)
+            ])
+    except Exception as e:
+        log.error(f"Error sending modifier event: {e}")
+
+def execute_config_macro(steps, scroll_multiplier=1):
+    if not CONFIG_APP_AVAILABLE:
+        log.warning("Cannot execute configuration macro: config runtime is unavailable")
+        return
+
+    def send_keys(keys):
+        resolved_keys = [resolve_evdev_key(key) for key in keys]
+        send_key_event(resolved_keys[0] if len(resolved_keys) == 1 else resolved_keys)
+
+    def scroll(direction, value, axis=None, held=None):
+        sign = 1 if direction.lower() in ("clockwise", "up", "right") else -1
+        multiplier = max(0.25, min(float(scroll_multiplier), 24))
+        high_resolution = int(round(sign * abs(value) * multiplier))
+        if high_resolution == 0:
+            return
+        # Whole notches for applications without high-resolution support.
+        notches = int(high_resolution / 120)
+        if axis == "horizontal":
+            codes = [EV_REL.REL_HWHEEL, EV_REL.REL_HWHEEL_HI_RES]
+        else:
+            codes = [EV_REL.REL_WHEEL, EV_REL.REL_WHEEL_HI_RES]
+        held_keys = [resolve_evdev_key(key) for key in held or []]
+        set_keys_held(held_keys, True)
+        try:
+            if notches:
+                send_key_event(codes, [notches, high_resolution], log_event=False)
+            else:
+                send_key_event(codes[1:], [high_resolution], log_event=False)
+        finally:
+            set_keys_held(held_keys, False)
+
+    def volume(direction, value):
+        key = EV_KEY.KEY_VOLUMEUP if direction.lower() in ("up", "clockwise") else EV_KEY.KEY_VOLUMEDOWN
+        for _ in range(max(1, min(abs(value), 20))):
+            send_key_event(key)
+
+    def brightness(direction, value):
+        key = EV_KEY.KEY_BRIGHTNESSUP if direction.lower() in ("up", "clockwise") else EV_KEY.KEY_BRIGHTNESSDOWN
+        for _ in range(max(1, min(abs(value), 20))):
+            send_key_event(key)
+
+    def media(value):
+        send_keys([value] if isinstance(value, str) else value)
+
+    def run_program(program, args):
+        subprocess.run([program, *args], check=True)
+
+    try:
+        MacroExecutor(
+            send_keys=send_keys,
+            scroll=scroll,
+            media=media,
+            brightness=brightness,
+            volume=volume,
+            run_program=run_program,
+            run_shell=execute_command,
+            sleep=sleep,
+        ).execute(steps)
+    except MacroExecutionError as error:
+        log.error("Configuration macro failed: %s", error)
+    except Exception:
+        log.exception("Configuration macro execution failed")
+
+def emulate_shortcuts(app_shortcuts, touch_input, event_code, active_modifiers, duration_held=0, scroll_multiplier=1):
     global suppress_app_specifics_shortcuts
 
     matched_shortcuts = app_shortcuts.get(touch_input, [])
@@ -894,6 +1360,17 @@ def emulate_shortcuts(app_shortcuts, touch_input, event_code, active_modifiers, 
                     (trigger_mode == "release" and not event_code) or\
                     (touch_input == "center"):
 
+                    if "macro" in shortcut:
+                        execute_config_macro(shortcut["macro"], scroll_multiplier)
+                        if any(
+                            getattr(step, "type", None) is StepType.SCROLL
+                            for step in shortcut["macro"]
+                        ):
+                            log.debug("Executed accelerated scroll macro")
+                        else:
+                            log.info("Executed configuration macro with modifier %s", modifier)
+                        return shortcut
+
                     if key_code:
                         send_key_event(key_code, key_value)
                     if command:
@@ -909,7 +1386,23 @@ def emulate_shortcuts(app_shortcuts, touch_input, event_code, active_modifiers, 
 
     return None
 
-def send_key_event(key_code, key_value):
+def shortcut_has_scroll_action(shortcuts, direction):
+    """Return whether a rotation direction resolves to a config scroll macro."""
+    entries = shortcuts.get(direction, []) if isinstance(shortcuts, dict) else []
+    if not isinstance(entries, list):
+        entries = [entries]
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        macros = entry.get("macro", [])
+        if StepType is not None and any(
+            getattr(step, "type", None) is StepType.SCROLL for step in macros
+        ):
+            return True
+    return False
+
+def send_key_event(key_code, key_value=None, log_event=True):
     global udev
 
     if not udev:
@@ -948,13 +1441,18 @@ def send_key_event(key_code, key_value):
                 InputEvent(EV_SYN.SYN_REPORT, 0)
          ])
 
-        log.info(f"Sent key {key_code, key_value}")
+        if log_event:
+            log.info(f"Sent key {key_code, key_value}")
 
     except Exception as e:
         log.error(f"Error sending key event: {e}")
 
 def activate_dialpad():
     global dialpad, multi_app_mode_titles, multi_app_mode_icons
+
+    # A previous touch session must never leave the next activation in a
+    # selected function with no visible way back to the menu.
+    reset_center()
 
     # unlock
     send_value_to_touchpad_via_i2c("0x60")
@@ -970,11 +1468,13 @@ def activate_dialpad():
     if socket_enabled:
         send_to_socket({CONFIG_ENABLED: dialpad})
 
-        if multi_app_mode:
-            send_to_socket({"titles": multi_app_mode_titles, "icons": multi_app_mode_icons, "title": None})
+    show_initial_function_state()
 
 def deactivate_dialpad():
     global dialpad
+
+    # Discard any selected radial function before the next activation.
+    reset_center()
 
     # lock
     send_value_to_touchpad_via_i2c("0x61")
@@ -1055,12 +1555,14 @@ def qdbusSet(cmd):
 
             if ret != 0:
                 raise subprocess.CalledProcessError(ret, final_cmd)
+            return True
 
         except Exception as e:
             log.debug(e, exc_info=True)
             qdbus_failure_count+=1
     else:
         log.debug('Qdbus failed more then: \"%s\" so is not try anymore', qdbus_max_failure_count)
+    return False
 
 def qdbusSetTouchpadEnabled(value):
     cmd = [
@@ -1072,7 +1574,7 @@ def qdbusSetTouchpadEnabled(value):
         'enabled',
         str(bool(value)).lower()
     ]
-    qdbusSet(cmd)
+    return qdbusSet(cmd)
 
 def gsettingsSet(path, name, value):
     global gsettings_failure_count, gsettings_max_failure_count
@@ -1089,54 +1591,52 @@ def gsettingsSet(path, name, value):
             ret = subprocess.call(cmd)
             if ret != 0:
                 raise subprocess.CalledProcessError(ret, cmd)
+            return True
         except Exception as e:
             log.debug(e, exc_info=True)
             gsettings_failure_count+=1
     else:
         log.debug('Gsettings failed more than: "%s" so is not trying anymore', gsettings_max_failure_count)
+    return False
 
 def gsettingsSetTouchpadSendEvents(value):
-    gsettingsSet('org.gnome.desktop.peripherals.touchpad', 'send-events', 'enabled' if value else 'disabled')
+    return gsettingsSet('org.gnome.desktop.peripherals.touchpad', 'send-events', 'enabled' if value else 'disabled')
 
 def set_touchpad_prop_send_events(value):
-    global touchpad_name, gsettings_failure_count, gsettings_max_failure_count, qdbus_max_failure_count, qdbus_failure_count, xinput_failure_count, xinput_max_failure_count, synclient_status_failure_count, synclient_status_max_failure_count
+    global touchpad_name, xinput_failure_count, xinput_max_failure_count, synclient_status_failure_count, synclient_status_max_failure_count
 
     # 1. priority - gsettings (gnome) or qdbus (kde)
-    if gsettings_failure_count < gsettings_max_failure_count:
-        gsettingsSetTouchpadSendEvents(value)
-    if qdbus_failure_count < qdbus_max_failure_count:
-        qdbusSetTouchpadEnabled(value)
-    else:
-        log.debug('Qdbus failed more than: "%s" so is not trying anymore', qdbus_max_failure_count)
+    if gsettings_failure_count < gsettings_max_failure_count and gsettingsSetTouchpadSendEvents(value):
+        return
+    if qdbus_failure_count < qdbus_max_failure_count and qdbusSetTouchpadEnabled(value):
+        return
 
     # 2. priority - xinput
-    if xinput_failure_count > xinput_max_failure_count:
+    if xinput_failure_count >= xinput_max_failure_count:
         log.debug('Setting libinput Send Events via xinput failed more than: "%s" times so is not trying anymore', xinput_max_failure_count)
     else:
         try:
             cmd = ["xinput", "enable" if value else "disable", touchpad_name]
             log.debug(cmd)
-            subprocess.call(cmd)
             ret = subprocess.call(cmd)
             if ret != 0:
                 raise subprocess.CalledProcessError(ret, cmd)
             return
-        except:
+        except Exception:
             xinput_failure_count+=1
             log.debug('Setting libinput Send Events via xinput failed')
 
     # 3. priority - synclient
-    if synclient_status_failure_count > synclient_status_max_failure_count:
-        log.debug('Setting libinput Send Events via synclient failed more than: "%s" times so is not trying anymore', xinput_max_failure_count)
+    if synclient_status_failure_count >= synclient_status_max_failure_count:
+        log.debug('Setting libinput Send Events via synclient failed more than: "%s" times so is not trying anymore', synclient_status_max_failure_count)
+        return
     try:
-        cmd = ["synclient", "TouchpadOff=" + str(value)]
+        cmd = ["synclient", "TouchpadOff=" + str(0 if value else 1)]
         log.debug(cmd)
-        subprocess.call(cmd)
         ret = subprocess.call(cmd)
         if ret != 0:
             raise subprocess.CalledProcessError(ret, cmd)
-        return
-    except:
+    except Exception:
         synclient_status_failure_count+=1
 
 
@@ -1221,347 +1721,646 @@ def reset_center():
     title = None
     treshold = None
 
+def show_pointer_enabled():
+    overlay = getattr(gui_config, "overlay", None)
+    return bool(getattr(overlay, "show_pointer", True)) and bool(socket_enabled)
+
+def profile_meta():
+    shortcuts = globals().get("app_specific_shortcuts")
+    meta = shortcuts.get(META_KEY) if isinstance(shortcuts, dict) else None
+    return meta if isinstance(meta, dict) else {}
+
+def single_function_settings():
+    """Settings of the bound function in single-function mode."""
+    single = profile_meta().get("single")
+    return single if isinstance(single, dict) else {}
+
+def profile_float(key, default=1.0):
+    try:
+        return max(0.25, min(float(profile_meta().get(key, default)), 4.0))
+    except (TypeError, ValueError):
+        return default
+
+def function_settings(function_title):
+    """Return the segment dictionary that defines a function's metadata."""
+    if multi_app_mode:
+        segment = app_specific_shortcuts.get(function_title) if function_title else None
+        return segment if isinstance(segment, dict) else {}
+    return single_function_settings()
+
+def menu_colors():
+    colors = []
+    for menu_title in multi_app_mode_titles or []:
+        segment = app_specific_shortcuts.get(menu_title) if menu_title else None
+        colors.append(segment.get("color") or "" if isinstance(segment, dict) else "")
+    return colors
+
+def send_details(**details):
+    if socket_enabled:
+        send_to_socket({"details": details})
+
+def send_function_details(function_title):
+    settings = function_settings(function_title)
+    hints = settings.get("hints") if isinstance(settings.get("hints"), dict) else {}
+    send_details(
+        profile=profile_meta().get("name") or "",
+        mode="multi" if multi_app_mode else "single",
+        color=settings.get("color") or "",
+        hints=hints,
+        hold_returns=bool(multi_app_mode),
+        pointer=-1,
+    )
+
+def show_multifunction_menu():
+    if socket_enabled:
+        send_details(
+            profile=profile_meta().get("name") or "",
+            mode="multi",
+            colors=menu_colors(),
+            color="",
+            hints={},
+            pointer=-1,
+        )
+        send_to_socket({
+            "titles": multi_app_mode_titles,
+            "icons": multi_app_mode_icons,
+            "title": "Menu",
+        })
+
+def enter_function(function_title, query_value=True):
+    """Bind the dial to one function of the current multi-function profile."""
+    global center_activated, title
+
+    selected_shortcuts = app_specific_shortcuts.get(function_title, {})
+    if not isinstance(selected_shortcuts, dict):
+        return False
+    center_activated = True
+    title = function_title
+    if app_name and profile_meta().get("remember_last", True):
+        last_function_by_app[app_name] = function_title
+    if socket_enabled:
+        send_function_details(function_title)
+        send_to_socket({
+            "titles": [],
+            "icons": [],
+            "value": 0,
+            "unit": "",
+            "title": function_title,
+        })
+    if query_value and dialpad:
+        enqueue_action(lambda: send_function_value(selected_shortcuts, function_title))
+    return True
+
+def show_single_function():
+    global title
+
+    settings = single_function_settings()
+    title = settings.get("title") or None
+    if socket_enabled:
+        send_function_details(title)
+        send_to_socket({"titles": [], "icons": [], "value": 0, "unit": "", "title": title or ""})
+    if title and dialpad and settings.get("value"):
+        function_title = title
+        enqueue_action(lambda: send_function_value(settings, function_title))
+
+def remembered_function():
+    if not multi_app_mode or not profile_meta().get("remember_last", True):
+        return None
+    remembered = last_function_by_app.get(app_name)
+    if remembered and remembered in (multi_app_mode_titles or []):
+        segment = app_specific_shortcuts.get(remembered)
+        if isinstance(segment, dict) and (segment.get("clockwise") or segment.get("counterclockwise")):
+            return remembered
+    return None
+
+def show_initial_function_state():
+    """Show the menu, the remembered function or the single bound function."""
+    if multi_app_mode:
+        remembered = remembered_function()
+        if remembered:
+            enter_function(remembered)
+        else:
+            reset_center()
+            show_multifunction_menu()
+    elif single_function_settings():
+        reset_center()
+        show_single_function()
+
+# Actions (macros, shell commands, value queries) can take tens of
+# milliseconds. They run on one worker thread in order, so the touchpad
+# loop never stalls and the dial stays smooth.
+ACTION_QUEUE_SIZE = 32
+action_queue = queue.Queue(maxsize=ACTION_QUEUE_SIZE)
+
+def action_worker():
+    while not stop_threads:
+        job = action_queue.get()
+        if job is None:
+            break
+        try:
+            job()
+        except Exception:
+            log.exception("DialPad action failed")
+
+def enqueue_action(job):
+    try:
+        action_queue.put_nowait(job)
+    except queue.Full:
+        log.warning("DialPad action queue is full; dropping an action")
+
+def send_function_value(shortcuts, function_title):
+    """Query a function's current value off the touch thread and show it."""
+    value = get_current_value(shortcuts)
+    if socket_enabled and value is not None:
+        send_to_socket({
+            "value": value,
+            "unit": get_current_value_unit(shortcuts),
+            "title": function_title,
+        })
+
+def run_rotation_action(shortcuts, direction, modifiers, scroll_multiplier, function_title, show_value, value_source=None):
+    shortcut = emulate_shortcuts(
+        shortcuts,
+        direction,
+        1,
+        modifiers,
+        scroll_multiplier=scroll_multiplier,
+    )
+    if not shortcut or not show_value or not socket_enabled:
+        return
+
+    value_source = value_source if value_source is not None else shortcuts
+    value = get_current_value(shortcut)
+    unit = get_current_value_unit(shortcut)
+    if value is None:
+        value = get_current_value(value_source)
+    if unit is None:
+        unit = get_current_value_unit(value_source)
+
+    send_to_socket({
+        "input": direction,
+        "value": value,
+        "unit": unit,
+        "title": shortcut.get("title", function_title) if isinstance(shortcut, dict) else function_title,
+    })
+
+def run_center_action(shortcuts, modifiers, duration_held, function_title):
+    shortcut = emulate_shortcuts(
+        shortcuts,
+        "center",
+        0,
+        modifiers,
+        duration_held,
+    )
+    if not shortcut:
+        return
+    selected_shortcuts = shortcuts.get(function_title, {})
+    command = (
+        selected_shortcuts.get("command")
+        if isinstance(selected_shortcuts, dict)
+        else None
+    )
+    if command:
+        execute_command(command)
+
+def run_menu_action(selected_shortcuts, modifiers, selected_title):
+    if emulate_shortcuts(selected_shortcuts, "center", 0, modifiers):
+        log.info("Executed DialPad menu action %s", selected_title)
+
+def run_function_center_action(selected_shortcuts, modifiers, selected_title):
+    if emulate_shortcuts(selected_shortcuts, "center", 0, modifiers):
+        log.info("Executed centre action of %s", selected_title)
+        send_function_value(selected_shortcuts, selected_title)
+
+def function_has_center_action(function_title):
+    segment = app_specific_shortcuts.get(function_title) if function_title else None
+    return isinstance(segment, dict) and bool(segment.get("center"))
+
+def select_multifunction_segment():
+    """Select the highlighted radial-menu segment or invoke an action-only one."""
+    global center_activated, title
+
+    # A final touch-release frame can arrive after the DialPad was disabled.
+    # It must not select a function in the next session.
+    if not dialpad or not multi_app_mode or not title or title == "Menu":
+        return False
+
+    selected_shortcuts = app_specific_shortcuts.get(title, {})
+    if not isinstance(selected_shortcuts, dict):
+        return False
+
+    has_rotation = bool(
+        selected_shortcuts.get("clockwise")
+        or selected_shortcuts.get("counterclockwise")
+    )
+    if not has_rotation:
+        # Action-only segments (for example Mute or Notifications) are
+        # invoked by tapping their sector and then stay in the menu.
+        selected_title = title
+        title = None
+        show_multifunction_menu()
+        modifiers = set(active_modifiers)
+        enqueue_action(lambda: run_menu_action(selected_shortcuts, modifiers, selected_title))
+        return True
+
+    selected_title = title
+    enter_function(selected_title)
+    log.info("Selected DialPad function %s; hold the center to return to the menu", selected_title)
+    return True
+
+def return_to_multifunction_menu():
+    selected_title = title
+    reset_center()
+    # Leaving a function on purpose means the next activation opens the menu.
+    last_function_by_app.pop(app_name, None)
+    show_multifunction_menu()
+    log.info("Returned to the DialPad menu from %s", selected_title)
+
 window_binary = None
 
 def listen_touchpad_events():
-    global slices_minimum_count, activation_time, last_event_time, dialpad, active_modifiers, coactivator_keys, title, treshold, multi_app_mode_titles, app_specific_shortcuts, window_binary
+    global slices_minimum_count, activation_time, last_event_time, dialpad, active_modifiers, coactivator_keys, title, center_activated, treshold, multi_app_mode_titles, app_specific_shortcuts, window_binary
 
-    try:
+    DEBOUNCE_MS = 30
+    SETTLE_FRAMES = 3
 
-            # Define circle and slices
-            circle_radius = circle_diameter / 2
-            center_button_radius = center_button_diameter / 2
+    log.info("Listening to touchpad events...")
 
-            # Define the bounds for the top-right icon
-            top_right_icon_bounds = {
-                "x_min": max_x - top_right_icon_width,
-                "x_max": max_x,
-                "y_min": 0,
-                "y_max": top_right_icon_height
-            }
+    # BTN_TOUCH stays down while any finger touches. BTN_TOOL_FINGER drops
+    # to 0 when a second finger lands, which used to look like a release.
+    finger_key = EV_KEY.BTN_TOUCH if d_t.has(EV_KEY.BTN_TOUCH) else EV_KEY.BTN_TOOL_FINGER
 
-            log.info("Listening to touchpad events...")
+    # Frame buffer state
+    slots = {}
+    current_slot = 0
+    finger_down = False
 
-            touch_x, touch_y = None, None
-            finger_detected = False  # Track finger presence
-            touch_start_time = None  # Track the time when the touch started
-            within_top_right_icon = False  # Track if the touch is within the top-right icon bounds
-            icon_activated = False  # Track if the icon has already been activated during this touch
-            last_slice = None  # Track the last active slice in the circle
-            center_button_triggered = False
-            tap_disabled = False  # Track tap-to-click status
-            coactivator_blocked = False
-            center_enter_time = 0
-            title = None
-            center_activated = False
-            treshold = None
-            first_touch_outside = None
-            angle_accumulator = 0.0
-            last_trigger_angle = None
-            last_angle = None
+    # Gesture state
+    touch_start_time = None
+    within_top_right_icon = False
+    icon_activated = False
+    last_slice = None
+    center_button_triggered = False
+    tap_disabled = False
+    touching_sent = False
+    coactivator_blocked = False
+    center_enter_time = 0
+    center_hold_fired = False
+    last_pointer_angle = None
+    title = None
+    center_activated = False
+    treshold = None
+    first_touch_outside = None
+    settle_counter = 0
+    prev_finger_down = False
+    rotation = RotationTracker(angle_hysteresis, DEBOUNCE_MS)
 
+    while not stop_threads:
+        try:
             for event in d_t.events():
 
                 last_event_time = time()
 
-                # Handle finger detection
-                if event.matches(EV_KEY.BTN_TOOL_FINGER):
-                    if event.value == 1:  # Finger down
-                        key_press_times[event.code] = time()
-                        finger_detected = True
-                        coactivator_blocked = False
-                        touch_start_time = time()  # Record the touch start time
-                        within_top_right_icon = False  # Reset the flag
-                        icon_activated = False  # Reset activation status
-                        last_slice = None  # Reset the last slice
-                        angle_start = None
-                        angle_accumulator = 0.0
-                        log.debug("Finger detected.")
+                if event.matches(EV_SYN.SYN_REPORT):
+                    process_pending_driver_updates()
+                    rotation.hysteresis = angle_hysteresis
+                    circle_radius = circle_diameter / 2
+                    center_button_radius = center_button_diameter / 2
+                    top_right_icon_bounds = {
+                        "x_min": max_x - top_right_icon_width,
+                        "x_max": max_x,
+                        "y_min": 0,
+                        "y_max": top_right_icon_height
+                    }
 
-                    elif event.value == 0:  # Finger up
-                        finger_detected = False
-                        touch_start_time = None  # Reset the touch start time
-                        within_top_right_icon = False  # Reset the flag
-                        icon_activated = False  # Reset activation status
-                        last_slice = None  # Reset the last slice
-                        angle_start = None
-                        angle_accumulator = 0.0
-                        touch_x, touch_y = None, None
-                        log.debug("Finger lifted.")
-
-                        duration_held = time() - center_enter_time
-                        if center_button_triggered:
-
-                            if socket_enabled:
-                                if not multi_app_mode:
-                                    shortcut = emulate_shortcuts(app_specific_shortcuts, "center", event.value, active_modifiers, duration_held)
-                                    if shortcut:
-                                        center_button_triggered = False
- 
-                                        command = app_specific_shortcuts[title].get("command")
-                                        if command:
-                                            execute_command(command)
-                                elif title:
-                                    if app_specific_shortcuts['center']:
-                                        center_shortcut = emulate_shortcuts(app_specific_shortcuts, 'center', event.value, active_modifiers, duration_held)
-                                        if center_shortcut:
-                                            center_button_triggered = False
-
-                                            command = app_specific_shortcuts[title].get("command")
-                                            if command:
-                                                execute_command(command)
-                                            elif not center_activated:
-                                                center_activated = True
-                                                value = get_current_value(app_specific_shortcuts[title])
-                                                value_unit = get_current_value_unit(app_specific_shortcuts[title])
-                                                send_to_socket({"value": value, "unit": value_unit, "title": title})
-                                            else:
-                                                center_activated = False
-                                                send_to_socket({"input": "center", "value": 0, "title": title})
-                                                log.debug("Touch ended in center button area.")
-                                    else:
-                                        value = get_current_value(shortcut)
-                                        value_unit = get_current_value_unit(shortcut)
-                                        send_to_socket({"value": value, "unit": value_unit, "title": title})
-                                        center_button_triggered = False
-
-                                        if not center_activated:
-                                            center_activated = True
-                                        else:
-                                            reset_center()
-
-                        if multi_app_mode and not center_activated:
-                            if socket_enabled:
-                                send_to_socket({"titles": multi_app_mode_titles, "icons": multi_app_mode_icons, "title": None})
-
-                        # Re-enable tap-to-click
-                        if tap_disabled:
-                            set_touchpad_prop_send_events(1)
-                            tap_disabled = False
-
-                # Detect touch positions
-                if event.matches(EV_ABS.ABS_MT_POSITION_X):
-                    touch_x = event.value
-                elif event.matches(EV_ABS.ABS_MT_POSITION_Y):
-                    touch_y = event.value
-
-                # Check if the touch is in the top-right icon bounds
-                if touch_x is not None and touch_y is not None and finger_detected:
-                    if (top_right_icon_bounds["x_min"] <= touch_x <= top_right_icon_bounds["x_max"] and
-                            top_right_icon_bounds["y_min"] <= touch_y <= top_right_icon_bounds["y_max"]):
-                        if not within_top_right_icon:
-                            log.debug("Touch entered top-right icon bounds.")
-                        within_top_right_icon = True  # Mark that the touch is inside the bounds
-
-                        # Check if the touch duration exceeds the threshold and hasn't been activated yet
-                        if touch_start_time and not icon_activated and not coactivator_blocked:
-                            if (time() - touch_start_time) >= activation_time:
-
-                                if dialpad or (not dialpad and are_modifier_keys_pressed(coactivator_keys)):
-                                    toggle_top_right_icon(dialpad)
-                                    icon_activated = True
-                                else:
-                                    log.debug("DialPad activation blocked: co-activator key(s) not pressed: %s", " ".join(coactivator_keys))
-                                    coactivator_blocked = True
+                    # Frame completed — process gesture logic once per frame
+                    if finger_down:
+                        settle_counter += 1
                     else:
-                        if within_top_right_icon:
-                            log.debug("Touch left top-right icon bounds. Canceling the action.")
-                        within_top_right_icon = False  # Mark that the touch has left the bounds
-                        touch_start_time = None  # Cancel the action by resetting the start time
-                        icon_activated = False  # Reset the activation status to allow future activation
+                        settle_counter = 0
 
-                # Calculate distance and angle for circle-based detection
-                if touch_x is not None and touch_y is not None and finger_detected:
-                    dx = touch_x - circle_center_x
-                    dy = touch_y - circle_center_y
-                    distance = math.sqrt(dx**2 + dy**2)
-                    angle = (math.atan2(dy, dx) * 180 / math.pi + 90) % 360
+                    # Find first valid slot
+                    touch_x = None
+                    touch_y = None
+                    for slot_id in sorted(slots.keys()):
+                        s = slots[slot_id]
+                        if s.get('tracking_id', -1) >= 0 and 'x' in s and 'y' in s:
+                            touch_x = s['x']
+                            touch_y = s['y']
+                            break
 
-                    if angle_start is None:
-                        angle_start = angle
+                    if calibration is not None:
+                        # Calibration owns the touchpad: no activation and no
+                        # dial actions while the circles are traced.
+                        calibration_frame(touch_x, touch_y, finger_down, prev_finger_down)
+                        if not finger_down:
+                            slots = {}
+                        prev_finger_down = finger_down
+                        continue
 
-                    if distance <= circle_radius and dialpad:
+                    if touch_x is not None and touch_y is not None and finger_down:
+                        # Phase 1: top-right icon activation
+                        if (top_right_icon_bounds["x_min"] <= touch_x <= top_right_icon_bounds["x_max"] and
+                                top_right_icon_bounds["y_min"] <= touch_y <= top_right_icon_bounds["y_max"]):
+                            if not within_top_right_icon:
+                                log.debug("Touch entered top-right icon bounds.")
+                            within_top_right_icon = True
 
-                        first_touch_outside = True
-
-                        # Disable tap-to-click
-                        if not tap_disabled:
-                            set_touchpad_prop_send_events(0)
-                            tap_disabled = True
-
-                        if distance < center_button_radius and dialpad:
-                            
-                            if not center_button_triggered:
-
-                                log.debug("Touch detected in center button area. Title is: %s", title)
-
-                                if title:
-                                    send_to_socket({"input": "center", "value": 1, "title": title})
-                                    center_enter_time = time()
-                                    duration_held = time() - center_enter_time
-
-                                    center_button_triggered = True
-                                    icon_activated = True
-                        else:
-
-                            # Reset the center button triggered flag if the finger leaves the circle (but not the button area)
-                            if center_button_triggered:
-                                center_button_triggered = False
-                                icon_activated = False
-                                center_enter_time = 0
-                                send_to_socket({"input": "center", "value": 0, "title": title})
-                                log.debug("Touch ended in center button area.")
-
-                            if multi_app_mode and not center_activated:
-
-                                one_slice_angle = 360 / max(len(multi_app_mode_titles), slices_minimum_count)
-                                current_slice = int(angle // (one_slice_angle))
-
-                                if current_slice != last_slice or center_button_triggered:
-
-                                    if last_slice is None:
-                                        log.debug("Setting up the last_slice for first time.")
-                                        last_slice = current_slice
+                            if touch_start_time and not icon_activated and not coactivator_blocked:
+                                if (time() - touch_start_time) >= activation_time:
+                                    if dialpad or (not dialpad and are_modifier_keys_pressed(coactivator_keys)):
+                                        toggle_top_right_icon(dialpad)
+                                        icon_activated = True
                                     else:
-                                        pass
+                                        log.debug("DialPad activation blocked: co-activator key(s) not pressed: %s", " ".join(coactivator_keys))
+                                        coactivator_blocked = True
+                        else:
+                            if within_top_right_icon:
+                                log.debug("Touch left top-right icon bounds. Canceling the action.")
+                            within_top_right_icon = False
+                            touch_start_time = None
+                            icon_activated = False
 
-                                    log.debug(
-                                        "TOUCH x=%d y=%d | center x=%d y=%d | dx=%d dy=%d | "
-                                        "angle=%.1f° | one slice angle=%.1f° | default_treshold=%.1f°",
-                                        touch_x, touch_y,
-                                        circle_center_x, circle_center_y,
-                                        touch_x - circle_center_x,
-                                        touch_y - circle_center_y,
-                                        angle,
-                                        one_slice_angle,
-                                        default_treshold
-                                    )
+                        # Calculate distance and angle for circle-based detection
+                        dx = touch_x - circle_center_x
+                        dy = touch_y - circle_center_y
+                        distance = math.sqrt(dx**2 + dy**2)
+                        angle = touch_angle(dx, dy)
 
-                                    try:
-                                        title = multi_app_mode_titles[current_slice]
-                                    except:
-                                        title = None
+                        if distance <= circle_radius and dialpad:
 
-                                    if socket_enabled:
-                                        send_to_socket({"titles": multi_app_mode_titles, "icons": multi_app_mode_icons, "title": title})
-                                            
-                                    last_slice = current_slice
+                            first_touch_outside = True
+
+                            if not tap_disabled:
+                                set_touchpad_prop_send_events(0)
+                                tap_disabled = True
+
+                            if not touching_sent:
+                                touching_sent = True
+                                if socket_enabled:
+                                    send_to_socket({"touching": True})
+
+                            if distance < center_button_radius:
+
+                                # The ring reference restarts after the centre
+                                # so returning to the ring cannot jump.
+                                rotation.reset()
+                                if last_pointer_angle is not None:
+                                    last_pointer_angle = None
+                                    send_details(pointer=-1)
+
+                                # Holding the centre inside a function goes
+                                # back to the menu without lifting the finger.
+                                if (
+                                    center_button_triggered
+                                    and multi_app_mode
+                                    and center_activated
+                                    and not center_hold_fired
+                                    and time() - center_enter_time >= center_hold_time
+                                ):
+                                    center_hold_fired = True
+                                    return_to_multifunction_menu()
+
+                                if not center_button_triggered:
+
+                                    log.debug("Touch detected in center button area. Title is: %s", title)
+
+                                    if title:
+                                        if socket_enabled:
+                                            send_to_socket({"input": "center", "value": 1, "title": title})
+                                        center_enter_time = time()
+                                        center_hold_fired = False
+
+                                        center_button_triggered = True
+                                        icon_activated = True
                             else:
 
-                                try:
-                                    treshold = app_specific_shortcuts[title]["treshold"]
-                                except:
-                                    treshold = default_treshold
+                                if show_pointer_enabled() and (
+                                    last_pointer_angle is None
+                                    or abs((angle - last_pointer_angle + 180) % 360 - 180) >= 4
+                                ):
+                                    last_pointer_angle = angle
+                                    send_details(pointer=round(angle, 1))
 
-                                # Initialize angles if needed
-                                if last_angle is None:
-                                    last_angle = angle
-                                    last_trigger_angle = angle
-                                    angle_accumulator = 0
-                                    last_logged_accumulator = 0
-                                    continue
+                                if center_button_triggered:
+                                    center_button_triggered = False
+                                    center_hold_fired = False
+                                    icon_activated = False
+                                    center_enter_time = 0
+                                    if socket_enabled:
+                                        send_to_socket({"input": "center", "value": 0, "title": title})
+                                    log.debug("Touch ended in center button area.")
 
-                                # Compute delta for accumulator
-                                delta = angle - last_angle
-                                if delta > 180:
-                                    delta -= 360
-                                elif delta < -180:
-                                    delta += 360
+                                if multi_app_mode and not center_activated:
 
-                                angle_accumulator += delta
-                                last_angle = angle
-
-                                # Log every ~5° of accumulator movement
-                                if 'last_logged_accumulator' not in locals():
-                                    last_logged_accumulator = angle_accumulator
-
-                                acc_delta = abs(angle_accumulator - last_logged_accumulator)
-                                if acc_delta >= 5.0:
-                                    log.debug(
-                                        "ROTATE | angle=%.1f° | last_angle=%s | delta=%.2f° | acc=%.2f° | "
-                                        "start=%.1f | trigger_ref=%.1f | treshold=%.1f° | dir=%s | slice=%s | center=%s",
+                                    current_slice_idx = slice_index(
                                         angle,
-                                        f"{last_angle:.1f}" if last_angle is not None else "None",
-                                        delta,
-                                        angle_accumulator,
-                                        angle_start if angle_start is not None else -1,
-                                        last_trigger_angle if last_trigger_angle is not None else -1,
-                                        treshold,
-                                        "CW" if angle_accumulator > 0 else "CCW",
-                                        last_slice,
-                                        center_button_triggered
+                                        max(len(multi_app_mode_titles), slices_minimum_count),
                                     )
-                                    last_logged_accumulator = angle_accumulator
 
+                                    if current_slice_idx != last_slice:
+                                        log.debug(
+                                            "TOUCH x=%d y=%d | center x=%d y=%d | angle=%.1f° | slice=%d",
+                                            touch_x, touch_y,
+                                            circle_center_x, circle_center_y,
+                                            angle,
+                                            current_slice_idx,
+                                        )
 
-                                    if treshold >= socket_send_progress_above_treshold:
+                                        try:
+                                            title = multi_app_mode_titles[current_slice_idx]
+                                        except IndexError:
+                                            title = None
+
                                         if socket_enabled:
-                                            progress_percent = max(min(angle_accumulator / treshold * 100, 100), -100)
+                                            send_to_socket({"titles": multi_app_mode_titles, "icons": multi_app_mode_icons, "title": title})
+
+                                        last_slice = current_slice_idx
+                                elif settle_counter >= SETTLE_FRAMES:
+
+                                    settings = function_settings(title)
+                                    try:
+                                        treshold = int(settings["treshold"])
+                                    except (KeyError, TypeError, ValueError):
+                                        treshold = default_treshold
+
+                                    # A scroll uses a smaller angular step for smooth low-speed
+                                    # control.  Other actions retain their configured threshold.
+                                    if center_activated and title in app_specific_shortcuts:
+                                        sht = app_specific_shortcuts[title]
+                                    else:
+                                        sht = app_specific_shortcuts
+                                    is_scroll_action = shortcut_has_scroll_action(sht, "clockwise") or shortcut_has_scroll_action(sht, "counterclockwise")
+                                    trigger_threshold = min(treshold, SCROLL_TRIGGER_DEGREES) if is_scroll_action else treshold
+                                    # Per-application sensitivity, as in ASUS Dial settings.
+                                    trigger_threshold = max(2, trigger_threshold / profile_float("sensitivity"))
+                                    show_progress = trigger_threshold >= socket_send_progress_above_treshold
+
+                                    previous_progress = rotation.progress(trigger_threshold)
+                                    triggered = rotation.update(angle, time(), trigger_threshold)
+
+                                    if triggered is None:
+                                        progress = rotation.progress(trigger_threshold)
+                                        if show_progress and socket_enabled and abs(progress - previous_progress) >= 3:
                                             send_to_socket({
-                                                "value_angle_start": angle_start,
-                                                "value": int(progress_percent),
+                                                "value_angle_start": rotation.start_angle or 0.0,
+                                                "value": progress,
                                                 "title": title,
                                                 "value_show_only_progress": True
                                             })
-
-                                # Trigger threshold if accumulator exceeds it
-                                if abs(angle_accumulator) >= treshold:
-                                    direction = "clockwise" if angle_accumulator > 0 else "counterclockwise"
-                                    log.debug("Threshold crossed (%s), angle_accumulator=%.2f°", direction, angle_accumulator)
-
-                                    general_value = None
-                                    general_unit = None
-
-                                    if center_activated and title in app_specific_shortcuts:
-                                        sht = app_specific_shortcuts[title]
-                                        general_value = get_current_value(sht)
-                                        general_unit = get_current_value_unit(sht)
                                     else:
-                                        sht = app_specific_shortcuts
+                                        direction, degrees_per_second = triggered
+                                        scroll_multiplier = (
+                                            scroll_acceleration_multiplier(degrees_per_second)
+                                            * profile_float("scroll_speed")
+                                            if shortcut_has_scroll_action(sht, direction)
+                                            else 1
+                                        )
+                                        log.debug(
+                                            "Threshold crossed (%s) at %.0f°/s, scroll multiplier x%d",
+                                            direction,
+                                            degrees_per_second,
+                                            scroll_multiplier,
+                                        )
 
-                                    shortcut = emulate_shortcuts(sht, direction, event.value, active_modifiers)
-                                    if shortcut and socket_enabled:
-                                        value = get_current_value(shortcut)
-                                        unit = get_current_value_unit(shortcut)
-
-                                        if value is None:
-                                            value = general_value
-                                        if unit is None:
-                                            unit = general_unit
-
-                                        try:
-                                            title = shortcut.get("title", title)
-                                        except Exception:
-                                            pass
-
-                                        if treshold >= socket_send_progress_above_treshold:
+                                        if show_progress and socket_enabled:
                                             send_to_socket({
+                                                "value_angle_start": rotation.start_angle or 0.0,
                                                 "value": 0,
                                                 "title": title,
                                                 "value_show_only_progress": True
                                             })
-                                        else:
-                                            send_to_socket({
-                                                "input": direction,
-                                                "value": value,
-                                                "unit": unit,
-                                                "title": title
-                                            })
 
-                                    # Reset accumulator after threshold, but do not move angle_start
-                                    angle_accumulator = 0
+                                        function_title = title
+                                        modifiers = set(active_modifiers)
+                                        value_source = settings if settings else sht
+                                        enqueue_action(
+                                            lambda sht=sht, direction=direction, multiplier=scroll_multiplier,
+                                                   modifiers=modifiers, function_title=function_title, show_value=not show_progress,
+                                                   value_source=value_source:
+                                                run_rotation_action(sht, direction, modifiers, multiplier, function_title, show_value, value_source)
+                                        )
+                        else:
+                            rotation.reset()
+                            if first_touch_outside:
+                                log.debug("Touch outside the circle for first time. Ignoring.")
+                                first_touch_outside = None
+
+                    elif not finger_down and prev_finger_down:
+                        # Finger lifted — handle release cleanup
+                        within_top_right_icon = False
+                        icon_activated = False
+                        last_slice = None
+                        rotation.reset()
+
+                        duration_held = time() - center_enter_time
+                        if last_pointer_angle is not None:
+                            last_pointer_angle = None
+                            send_details(pointer=-1)
+                        if multi_app_mode:
+                            if center_button_triggered and center_hold_fired:
+                                pass
+                            elif center_button_triggered:
+                                if center_activated:
+                                    # Tap runs the function's own centre action
+                                    # (for example "Fit image"); a long press or a
+                                    # function without one returns to the menu.
+                                    if duration_held < center_hold_time and function_has_center_action(title):
+                                        selected_shortcuts = app_specific_shortcuts.get(title, {})
+                                        function_title = title
+                                        modifiers = set(active_modifiers)
+                                        enqueue_action(
+                                            lambda selected_shortcuts=selected_shortcuts, modifiers=modifiers, function_title=function_title:
+                                                run_function_center_action(selected_shortcuts, modifiers, function_title)
+                                        )
+                                    else:
+                                        return_to_multifunction_menu()
+                                else:
+                                    select_multifunction_segment()
+                            elif not center_activated and title:
+                                # A tap on an outer menu sector selects it directly.
+                                select_multifunction_segment()
+                        elif center_button_triggered:
+                            shortcuts = app_specific_shortcuts
+                            function_title = title
+                            modifiers = set(active_modifiers)
+                            enqueue_action(
+                                lambda shortcuts=shortcuts, modifiers=modifiers, duration_held=duration_held, function_title=function_title:
+                                    run_center_action(shortcuts, modifiers, duration_held, function_title)
+                            )
+
+                        if center_button_triggered and socket_enabled:
+                            send_to_socket({"input": "center", "value": 0, "title": title})
+
+                        center_button_triggered = False
+                        center_hold_fired = False
+                        center_enter_time = 0
+
+                        if multi_app_mode and not center_activated:
+                            show_multifunction_menu()
+
+                        if touching_sent:
+                            touching_sent = False
+                            if socket_enabled:
+                                send_to_socket({"touching": False})
+
+                        if tap_disabled:
+                            set_touchpad_prop_send_events(1)
+                            tap_disabled = False
+
+                        slots = {}
+
+                    prev_finger_down = finger_down
+
+                elif event.matches(EV_ABS.ABS_MT_SLOT):
+                    current_slot = event.value
+                    if current_slot not in slots:
+                        slots[current_slot] = {}
+
+                elif event.matches(EV_ABS.ABS_MT_POSITION_X):
+                    if current_slot not in slots:
+                        slots[current_slot] = {}
+                    slots[current_slot]['x'] = event.value
+
+                elif event.matches(EV_ABS.ABS_MT_POSITION_Y):
+                    if current_slot not in slots:
+                        slots[current_slot] = {}
+                    slots[current_slot]['y'] = event.value
+
+                elif event.matches(EV_ABS.ABS_MT_TRACKING_ID):
+                    if event.value == -1:
+                        slots.pop(current_slot, None)
                     else:
-                        if first_touch_outside:
-                            log.debug("Touch outside the circle for first time. Ignoring.")
-                            first_touch_outside = None
+                        if current_slot not in slots:
+                            slots[current_slot] = {}
+                        slots[current_slot]['tracking_id'] = event.value
 
-    except device.EventsDroppedException:
-        for e in dev.sync(True):
-            pass
+                elif event.matches(finger_key):
+                    if event.value == 1:
+                        key_press_times[event.code] = time()
+                        finger_down = True
+                        coactivator_blocked = False
+                        touch_start_time = time()
+                        within_top_right_icon = False
+                        icon_activated = False
+                        last_slice = None
+                        rotation.reset()
+                        log.debug("Finger detected.")
+                    elif event.value == 0:
+                        finger_down = False
 
-        listen_touchpad_events()
-    except Exception:
-        log.exception("Error in listen_touchpad_events")
+            # The event generator only ends when the device goes away.
+            break
+
+        except device.EventsDroppedException:
+            # The kernel buffer overflowed; resynchronise this device and keep
+            # the gesture state instead of restarting the listener.
+            log.debug("Touchpad events dropped; resynchronising")
+            for _ in d_t.sync(True):
+                pass
+        except Exception:
+            log.exception("Error in listen_touchpad_events")
+            break
 
 def check_config_values_changes():
     global config_lock, stop_threads, event_notifier
@@ -1577,6 +2376,8 @@ def check_config_values_changes():
                     # because file might be read so fast that changes will not be there yet
                     sleep(0.1)
                     load_all_config_values()
+                    # Settings from the GUI configuration take precedence.
+                    apply_gui_settings()
                 else:
                     log.info("check_config_values_changes: detected internal change of config file -> do nothing -> would be deadlock")
 
@@ -1718,22 +2519,29 @@ def listen_keyboard_events():
     try:
         fd_k = open('/dev/input/event' + str(keyboard), 'rb')
         d_k = Device(fd_k)
-
-        for event in d_k.events():
-            if event.code in modifiers or event.code in coactivator_modifiers:
-
-                if event.value == 1:  # Key Pressed
-                    active_modifiers.add(event.code)
-                elif event.value == 0:  # Key Released
-                    active_modifiers.discard(event.code)
-
-                log.debug(f"Active modifiers: {active_modifiers}")
-
-    except device.EventsDroppedException:
-        for e in dev.sync(True):
-            pass
     except Exception as e:
-        log.error(f"Error in listen_touchpad_events: {e}")
+        log.error(f"Error opening the keyboard device: {e}")
+        return
+
+    while not stop_threads:
+        try:
+            for event in d_k.events():
+                if event.code in modifiers or event.code in coactivator_modifiers:
+
+                    if event.value == 1:  # Key Pressed
+                        active_modifiers.add(event.code)
+                    elif event.value == 0:  # Key Released
+                        active_modifiers.discard(event.code)
+
+                    log.debug(f"Active modifiers: {active_modifiers}")
+            break
+
+        except device.EventsDroppedException:
+            for _ in d_k.sync(True):
+                pass
+        except Exception as e:
+            log.error(f"Error in listen_keyboard_events: {e}")
+            break
 
 # default are for unicode shortcuts + is loaded layout during start (BackSpace, Return - enter, asterisk, minus etc. can be found using xev)
 def set_defaults_keysym_name_associated_to_evdev_key_reflecting_current_layout():
@@ -1879,9 +2687,16 @@ def pad_to_minimum(arr, minimum):
         arr = []
     return arr + [None] * max(0, minimum - len(arr))
 
-def window_was_changed(window_binary_local):
+def window_was_changed(window_binary_local, force=False):
     global stop_threads, window_binary, window_title, app_name, app_specific_shortcuts, multi_app_mode, multi_app_mode_titles, multi_app_mode_icons,\
         center_activated, title
+
+    # GNOME's fallback window query exposes a title but no application id.
+    # Once the Shell extension has supplied an id over D-Bus, treating that
+    # empty fallback as a new window would immediately replace an
+    # application-specific profile (for example Darktable) with "none".
+    if xdg_session_type == "wayland" and window_binary_local is None and window_binary is not None:
+        return
 
     app_name_local, app_specific_shortcuts = get_appropriate_app_name_and_shortcuts(window_binary_local, window_title)
     multi_app_mode_local, multi_app_mode_titles_local, multi_app_mode_icons_local = is_multifunction(app_specific_shortcuts)
@@ -1892,7 +2707,8 @@ def window_was_changed(window_binary_local):
         window_binary = window_binary_local
         update = True
 
-    if app_name_local != app_name:
+    app_name_changed = app_name_local != app_name
+    if app_name_changed:
         app_name = app_name_local
         update = True
 
@@ -1900,18 +2716,33 @@ def window_was_changed(window_binary_local):
         multi_app_mode = multi_app_mode_local
         update = True
 
-    if multi_app_mode_titles_local != pad_to_minimum(multi_app_mode_titles, slices_minimum_count):
-        multi_app_mode_titles = pad_to_minimum(multi_app_mode_titles_local, slices_minimum_count)
+    padded_titles = pad_to_minimum(multi_app_mode_titles_local, slices_minimum_count)
+    if padded_titles != multi_app_mode_titles:
+        multi_app_mode_titles = padded_titles
         update = True
 
-    if multi_app_mode_icons_local != pad_to_minimum(multi_app_mode_icons, slices_minimum_count):
-        multi_app_mode_icons = pad_to_minimum(multi_app_mode_icons_local, slices_minimum_count)
+    padded_icons = pad_to_minimum(multi_app_mode_icons_local, slices_minimum_count)
+    if padded_icons != multi_app_mode_icons:
+        multi_app_mode_icons = padded_icons
         update = True
 
-    if update:
-        send_to_socket({"titles": multi_app_mode_titles, "icons": multi_app_mode_icons, "title": None})
-        center_activated = False
-        title = None
+    if not update and not force:
+        return
+
+    # The window watcher starts before the touch-event loop creates its
+    # gesture state, so treat that early state as "menu active".
+    current_title = globals().get("title")
+    if (
+        multi_app_mode
+        and globals().get("center_activated", False)
+        and current_title in multi_app_mode_titles
+        and app_name_changed is False
+    ):
+        # Configuration reload: keep the selected function, refresh its look.
+        send_function_details(current_title)
+        return
+
+    show_initial_function_state()
 
 
 def check_window():
@@ -1999,7 +2830,7 @@ def check_gnome_layout():
 
 
 def cleanup():
-    global dialpad, display, display_wayland, stop_threads, event_notifier, watch_manager, xkb_conn, sock
+    global dialpad, display, display_wayland, stop_threads, event_notifier, watch_manager, xkb_conn, sock, dbus_service
 
     log.info("Clean up started")
 
@@ -2013,6 +2844,10 @@ def cleanup():
 
         # then clean up
         stop_threads=True
+        try:
+            action_queue.put_nowait(None)
+        except Exception:
+            pass
 
         fd_t.close()
 
@@ -2045,6 +2880,13 @@ def cleanup():
     except:
         log.exception("Clean up error")
         pass
+    finally:
+        if dbus_service:
+            try:
+                dbus_service.stop()
+            except Exception:
+                log.exception("Failed to stop the DialPad D-Bus service")
+            dbus_service = None
 
 threads = []
 stop_threads = False
@@ -2251,7 +3093,7 @@ def on_window_activated(event):
 
         last_app = app_name_local
 
-        window_was_changed(app_name_local)
+        on_dbus_active_application(app_name_local)
     except Exception:
         pass
         
@@ -2267,6 +3109,9 @@ try:
 
     # init the socket
     init_socket()
+
+    # D-Bus startup runs independently so an unavailable session bus cannot delay the driver.
+    init_dbus()
 
     # init the device
     initialize_virtual_device()
@@ -2293,6 +3138,7 @@ try:
 
     # Load config values
     load_all_config_values()
+    apply_gui_settings()
     config_lock.acquire()
     config_save()
     config_lock.release()
@@ -2345,7 +3191,12 @@ try:
         threads.append(t)
         t.start()
 
-    # Start the touchpad listener in a separate thread
+    t = threading.Thread(target=action_worker, name="dialpad-actions")
+    t.daemon = True
+    threads.append(t)
+    t.start()
+
+    # The touchpad listener runs on the main thread
     listen_touchpad_events()
 except Exception:
     logging.exception("Listening touchpad events unexpectedly failed")

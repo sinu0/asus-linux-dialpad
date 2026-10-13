@@ -107,10 +107,12 @@ class FloatingWindow(QWidget):
             log.exception(f"Socket error")
             return
 
-        while "}" in self.buffer:
-            idx = self.buffer.find("}") + 1
-            chunk = self.buffer[:idx]
-            self.buffer = self.buffer[idx:]
+        # The driver terminates every JSON message with a newline; nested
+        # objects make splitting on "}" unreliable.
+        while "\n" in self.buffer:
+            chunk, self.buffer = self.buffer.split("\n", 1)
+            if not chunk.strip():
+                continue
             try:
                 obj = json.loads(chunk)
                 log.debug(obj)
@@ -124,37 +126,46 @@ class FloatingWindow(QWidget):
                     else:
                         self.hide()
 
-                value = obj.get("value", None)
-                value_angle_start = obj.get("value_angle_start", None)
-                unit = obj.get("unit", None)
-                input = obj.get("input", None)
-                if input == "center":
-                    self.center_pressed = value
+                # Partial updates (for example {"touching": true}) must not
+                # reset the menu or the value.
+                if "value" in obj or "input" in obj:
+                    value = obj.get("value", None)
+                    input = obj.get("input", None)
+                    if input == "center":
+                        self.center_pressed = value
 
-                    # If was any progress - reset value display
-                    if self.value_show_only_progress is True:
-                        self.value = None
-                        self.value_angle_start = None
-                        self.unit = None
-                else:
+                        # If was any progress - reset value display
+                        if self.value_show_only_progress is True:
+                            self.value = None
+                            self.value_angle_start = None
+                            self.unit = None
+                    else:
+                        self.center_pressed = False
+                        self.value = value
+                        self.value_angle_start = obj.get("value_angle_start", None)
+                        self.unit = obj.get("unit", None)
+
+                elif "title" in obj:
+                    # A menu or function change without a value clears it,
+                    # as the previous parser did.
                     self.center_pressed = False
-                    self.value = value
-                    self.value_angle_start = value_angle_start
-                    self.unit = unit
+                    self.value = None
+                    self.value_angle_start = None
+                    self.unit = None
 
-                value_show_only_progress = obj.get("value_show_only_progress", None)
-                self.value_show_only_progress = value_show_only_progress
+                if "value_show_only_progress" in obj or "title" in obj:
+                    self.value_show_only_progress = obj.get("value_show_only_progress", None)
 
-                titles = obj.get("titles", [])
+                titles = obj.get("titles")
                 if isinstance(titles, list):
                     self.titles = titles
 
-                icons = obj.get("icons", [])
+                icons = obj.get("icons")
                 if isinstance(icons, list):
                     self.icons = icons
 
-                title = obj.get("title", None)
-                self.title = title
+                if "title" in obj:
+                    self.title = obj.get("title")
 
                 self.update()
 
