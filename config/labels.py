@@ -152,3 +152,41 @@ def describe_macro(steps: list[MacroStep]) -> str:
         if step.type is not StepType.DELAY:
             return describe_step(step)
     return ""
+
+
+# Function names map to GNOME (Adwaita) symbolic icons; kept in sync with
+# ICON_RULES in gnome/extension/extension.js. First match wins.
+ICON_RULES = (
+    (("mute",), "audio-volume-muted"),
+    (("volume", "audio", "sound"), "audio-volume-high"),
+    (("keyboard",), "keyboard-brightness"),
+    (("bright", "exposure", "light"), "display-brightness"),
+    (("horizontal",), "object-flip-horizontal"),
+    (("scroll",), "view-continuous"),
+    (("timeline",), "zoom-fit-best"),
+    (("zoom",), "zoom-in"),
+    (("redo",), "edit-redo"),
+    (("undo", "history", "edit"), "edit-undo"),
+    (("seek", "shuttle"), "media-seek-forward"),
+    (("frame",), "media-skip-forward"),
+    (("media", "track", "play", "music"), "media-playback-start"),
+    (("workspace",), "view-grid"),
+    (("tab",), "tab-new"),
+    (("back", "forward", "arrow"), "go-next"),
+    (("brush", "opacity", "paint", "draw"), "document-edit"),
+    (("rotate",), "object-rotate-right"),
+    (("scale",), "object-select"),
+    (("photo", "image"), "image-x-generic"),
+    (("rating", "star"), "starred"),
+    (("label", "colour", "color"), "bookmark-new"),
+    (("font", "text"), "font-x-generic"),
+    (("notif",), "preferences-system-notifications"),
+)
+
+
+def icon_for_title(title: str) -> str:
+    name = (title or "").lower()
+    for words, icon in ICON_RULES:
+        if any(word in name for word in words):
+            return f"{icon}-symbolic"
+    return "input-dialpad-symbolic"

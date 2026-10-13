@@ -363,8 +363,8 @@ FUNCTION_LIBRARY: tuple[FunctionPreset, ...] = (
     FunctionPreset("Media", "Media", "media-playback-start-symbolic", "Next / previous track, tap to play", tracks),
     FunctionPreset("Seek", "Media", "media-seek-forward-symbolic", "Arrow-key seeking in players", seek),
     FunctionPreset("Undo / Redo", "Editing", "edit-undo-symbolic", "Step through history", undo_redo),
-    FunctionPreset("Font size", "Editing", "format-text-larger-symbolic", "LibreOffice-style Ctrl+[ / Ctrl+]", font_size),
-    FunctionPreset("Brush size", "Creative", "draw-freehand-symbolic", "[ and ] in GIMP, Krita, Photoshop", brush_size),
+    FunctionPreset("Font size", "Editing", "font-x-generic-symbolic", "LibreOffice-style Ctrl+[ / Ctrl+]", font_size),
+    FunctionPreset("Brush size", "Creative", "document-edit-symbolic", "[ and ] in GIMP, Krita, Photoshop", brush_size),
     FunctionPreset("Frame", "Creative", "media-skip-forward-symbolic", "Frame stepping in video editors", frame_step),
     FunctionPreset("Timeline zoom", "Creative", "zoom-fit-best-symbolic", "Ctrl+= / Ctrl+- timeline zoom", resolve_timeline_zoom),
 )

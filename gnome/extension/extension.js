@@ -38,10 +38,39 @@ const CENTER_R = 88;
 // Segment icons occupy the optical centre of the ring.  Keeping their
 // complete bounding box inside this radius avoids the bottom sectors looking
 // as if their icons spill over the dial edge.
-const ICON_R = 126;
-const SEGMENT_ICON_SCALE = 0.76;
+const ICON_R = 127;
 const TICK_COUNT = 56;
 const ICON_SIZE = 22;
+const CENTER_ICON_SIZE = 30;
+
+// Function names map to GNOME (Adwaita) symbolic icons, the same set the
+// settings app uses. First match wins, so specific words come first.
+const ICON_RULES = [
+    [['mute'], 'audio-volume-muted'],
+    [['volume', 'audio', 'sound'], 'audio-volume-high'],
+    [['keyboard'], 'keyboard-brightness'],
+    [['bright', 'exposure', 'light'], 'display-brightness'],
+    [['horizontal'], 'object-flip-horizontal'],
+    [['scroll'], 'view-continuous'],
+    [['timeline'], 'zoom-fit-best'],
+    [['zoom'], 'zoom-in'],
+    [['redo'], 'edit-redo'],
+    [['undo', 'history', 'edit'], 'edit-undo'],
+    [['seek', 'shuttle'], 'media-seek-forward'],
+    [['frame'], 'media-skip-forward'],
+    [['media', 'track', 'play', 'music'], 'media-playback-start'],
+    [['workspace'], 'view-grid'],
+    [['tab'], 'tab-new'],
+    [['back', 'forward', 'arrow'], 'go-next'],
+    [['brush', 'opacity', 'paint', 'draw'], 'document-edit'],
+    [['rotate'], 'object-rotate-right'],
+    [['scale'], 'object-select'],
+    [['photo', 'image'], 'image-x-generic'],
+    [['rating', 'star'], 'starred'],
+    [['label', 'colour', 'color'], 'bookmark-new'],
+    [['font', 'text'], 'font-x-generic'],
+    [['notif'], 'preferences-system-notifications'],
+];
 const FADE_IN_MS = 120;
 const FADE_OUT_MS = 260;
 
@@ -205,6 +234,8 @@ export default class DialPadExtension extends Extension {
         this._overlay.add_child(this._drawingArea);
         this._iconLayer = new St.Widget({ reactive: false });
         this._overlay.add_child(this._iconLayer);
+        this._centerIcon = new St.Icon({ style_class: 'dialpad-center-icon', visible: false });
+        this._overlay.add_child(this._centerIcon);
         Main.layoutManager.uiGroup.add_child(this._overlay);
         this._monitorsId = Main.layoutManager.connect('monitors-changed', () => this._applyGeometry());
         GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
@@ -227,6 +258,7 @@ export default class DialPadExtension extends Extension {
         this._overlay = null;
         this._drawingArea = null;
         this._iconLayer = null;
+        this._centerIcon = null;
         this._iconKey = '';
         this._shown = false;
     }
@@ -258,6 +290,8 @@ export default class DialPadExtension extends Extension {
         const y = Math.round(positions[this._appearance.position] ?? positions.lower);
         this._drawingArea.set_position(x, y);
         this._iconLayer.set_position(x, y);
+        this._dialOrigin = [x, y];
+        this._updateIcons();
         this._drawingArea.queue_repaint();
     }
 
@@ -452,9 +486,28 @@ export default class DialPadExtension extends Extension {
         return Number.isFinite(number) ? number : null;
     }
 
-    _iconPath(icons, index) {
-        const path = icons[index] || '';
-        return path.startsWith('/') && GLib.file_test(path, GLib.FileTest.EXISTS) ? path : '';
+    _gicon(title, configured) {
+        // A configured icon wins when it exists: an absolute file path or an
+        // icon name from the theme.
+        if (configured) {
+            if (configured.startsWith('/')) {
+                if (GLib.file_test(configured, GLib.FileTest.EXISTS))
+                    return Gio.FileIcon.new(Gio.File.new_for_path(configured));
+            } else {
+                return Gio.ThemedIcon.new(configured);
+            }
+        }
+        const name = (title || '').toLowerCase();
+        for (const [words, icon] of ICON_RULES) {
+            if (words.some(word => name.includes(word)))
+                return Gio.ThemedIcon.new(`${icon}-symbolic`);
+        }
+        return Gio.ThemedIcon.new('input-dialpad-symbolic');
+    }
+
+    _cssColor(color, alpha = 1) {
+        const [r, g, b] = color.map(channel => Math.round(channel * 255));
+        return `color: rgba(${r}, ${g}, ${b}, ${alpha});`;
     }
 
     _updateIcons() {
@@ -471,12 +524,11 @@ export default class DialPadExtension extends Extension {
             const slice = (2 * Math.PI) / count;
             const size = Math.round(ICON_SIZE * scale);
             for (let index = 0; index < count; index++) {
-                const path = titles[index] ? this._iconPath(icons, index) : '';
-                if (!path)
+                if (!titles[index])
                     continue;
                 const angle = (index + 0.5) * slice - Math.PI / 2;
                 const icon = new St.Icon({
-                    gicon: Gio.FileIcon.new(Gio.File.new_for_path(path)),
+                    gicon: this._gicon(titles[index], icons[index] || ''),
                     icon_size: size,
                     style_class: 'dialpad-segment-icon',
                 });
@@ -493,12 +545,38 @@ export default class DialPadExtension extends Extension {
         this._iconLayer.visible = !this._isSelectedMode();
         for (const icon of this._iconLayer.get_children()) {
             const active = icon._dialpadTitle === activeTitle;
-            icon.opacity = active ? 255 : 170;
+            icon.opacity = active ? 255 : 190;
             if (active)
                 icon.add_style_pseudo_class('active');
             else
                 icon.remove_style_pseudo_class('active');
         }
+        this._updateCenterIcon();
+    }
+
+    _updateCenterIcon() {
+        const icon = this._centerIcon;
+        if (!icon)
+            return;
+        const title = this._state.title;
+        const selected = this._isSelectedMode();
+        const hovered = Boolean(title) && title !== 'Menu' && !selected;
+        icon.visible = selected || hovered;
+        if (!icon.visible || !this._dialOrigin)
+            return;
+
+        const { titles, icons } = this._segmentState();
+        const index = titles.indexOf(title);
+        const scale = this._appearance.scale;
+        const size = Math.round(CENTER_ICON_SIZE * scale);
+        icon.gicon = this._gicon(title, index >= 0 ? icons[index] || '' : '');
+        icon.icon_size = size;
+        icon.set_style(this._cssColor(selected ? this._functionColor() : PALETTE.champagne));
+        const [x, y] = this._dialOrigin;
+        const offset = selected ? 36 : 28;
+        icon.set_position(
+            Math.round(x + DIAL_R * scale - size / 2),
+            Math.round(y + (DIAL_R - offset) * scale - size / 2));
     }
 
     // --- painting -------------------------------------------------------
@@ -562,7 +640,7 @@ export default class DialPadExtension extends Extension {
     }
 
     _drawSegments(cr, cx, cy) {
-        const { titles, icons, count } = this._segmentState();
+        const { titles, count } = this._segmentState();
         const slice = (2 * Math.PI) / count;
         const activeTitle = this._state.title === 'Menu' ? '' : this._state.title;
 
@@ -592,19 +670,6 @@ export default class DialPadExtension extends Extension {
                 cr.stroke();
                 cr.restore();
             }
-
-            if (!label || this._iconPath(icons, index))
-                continue;
-            const angle = (index + 0.5) * slice - Math.PI / 2;
-            this._drawFunctionIcon(
-                cr,
-                label,
-                cx + Math.cos(angle) * ICON_R,
-                cy + Math.sin(angle) * ICON_R,
-                active ? PALETTE.paper : PALETTE.muted,
-                1,
-                SEGMENT_ICON_SCALE,
-            );
         }
     }
 
@@ -703,7 +768,6 @@ export default class DialPadExtension extends Extension {
         const title = this._state.title;
         const profile = (this._details.profile || '').toUpperCase();
         if (selectedMode) {
-            this._drawFunctionIcon(cr, title, cx, cy - 34, accent, 0.9, 0.9);
             this._drawCenteredText(cr, title, cx, cy + 4, title.length > 12 ? 15 : 19, PALETTE.paper, true);
             const value = !this._state.valueShowOnlyProgress && this._state.unit
                 ? `${this._state.value}${this._state.unit}`
@@ -713,7 +777,6 @@ export default class DialPadExtension extends Extension {
             else if (profile)
                 this._drawCenteredText(cr, profile, cx, cy + 30, 9, PALETTE.muted, false);
         } else if (title && title !== 'Menu') {
-            this._drawFunctionIcon(cr, title, cx, cy - 25, PALETTE.champagne, 0.7, 0.86);
             this._drawCenteredText(cr, title, cx, cy + 15, title.length > 12 ? 14 : 18, PALETTE.paper, true);
             this._drawCenteredText(cr, 'Release to select', cx, cy + 39, 9, PALETTE.champagne, false);
         } else {
@@ -797,210 +860,6 @@ export default class DialPadExtension extends Extension {
         cr.arc(x + radius, y + height - radius, radius, Math.PI / 2, Math.PI);
         cr.arc(x + radius, y + radius, radius, Math.PI, 1.5 * Math.PI);
         cr.closePath();
-    }
-
-    _drawFunctionIcon(cr, title, x, y, color, opacity = 1, scale = 1) {
-        const name = (title || '').toLowerCase();
-        cr.save();
-        cr.translate(x, y);
-        cr.scale(scale, scale);
-        x = 0;
-        y = 0;
-        cr.setLineWidth(2.2);
-        cr.setLineCap(Cairo.LineCap.ROUND);
-        cr.setLineJoin(Cairo.LineJoin.ROUND);
-        cr.setSourceRGBA(color[0], color[1], color[2], color[3] * opacity);
-
-        if (name.includes('volume') || name.includes('mute') || name.includes('audio')) {
-            cr.moveTo(x - 14, y - 5);
-            cr.lineTo(x - 7, y - 5);
-            cr.lineTo(x + 1, y - 13);
-            cr.lineTo(x + 1, y + 13);
-            cr.lineTo(x - 7, y + 5);
-            cr.lineTo(x - 14, y + 5);
-            cr.closePath();
-            cr.stroke();
-            if (name.includes('mute')) {
-                cr.moveTo(x + 7, y - 8);
-                cr.lineTo(x + 18, y + 8);
-                cr.moveTo(x + 18, y - 8);
-                cr.lineTo(x + 7, y + 8);
-            } else {
-                cr.arc(x + 3, y, 10, -0.75, 0.75);
-                cr.arc(x + 3, y, 16, -0.58, 0.58);
-            }
-            cr.stroke();
-        } else if (name.includes('keyboard')) {
-            cr.rectangle(x - 16, y - 2, 32, 16);
-            cr.moveTo(x - 9, y + 9);
-            cr.lineTo(x + 9, y + 9);
-            cr.moveTo(x, y - 8);
-            cr.lineTo(x, y - 14);
-            cr.moveTo(x - 9, y - 7);
-            cr.lineTo(x - 12, y - 11);
-            cr.moveTo(x + 9, y - 7);
-            cr.lineTo(x + 12, y - 11);
-            cr.stroke();
-        } else if (name.includes('bright') || name.includes('light')) {
-            cr.arc(x, y, 7, 0, 2 * Math.PI);
-            cr.stroke();
-            for (let index = 0; index < 8; index++) {
-                const angle = index / 8 * Math.PI * 2;
-                cr.moveTo(x + Math.cos(angle) * 13, y + Math.sin(angle) * 13);
-                cr.lineTo(x + Math.cos(angle) * 18, y + Math.sin(angle) * 18);
-            }
-            cr.stroke();
-        } else if (name.includes('horizontal')) {
-            cr.moveTo(x - 15, y - 7);
-            cr.lineTo(x + 15, y - 7);
-            cr.moveTo(x - 15, y + 7);
-            cr.lineTo(x + 15, y + 7);
-            cr.moveTo(x + 10, y - 11);
-            cr.lineTo(x + 15, y - 7);
-            cr.lineTo(x + 10, y - 3);
-            cr.moveTo(x - 10, y + 3);
-            cr.lineTo(x - 15, y + 7);
-            cr.lineTo(x - 10, y + 11);
-            cr.stroke();
-        } else if (name.includes('scroll')) {
-            cr.moveTo(x - 8, y - 15);
-            cr.lineTo(x - 8, y + 15);
-            cr.moveTo(x + 8, y - 15);
-            cr.lineTo(x + 8, y + 15);
-            cr.moveTo(x - 12, y - 10);
-            cr.lineTo(x - 8, y - 15);
-            cr.lineTo(x - 4, y - 10);
-            cr.moveTo(x + 4, y + 10);
-            cr.lineTo(x + 8, y + 15);
-            cr.lineTo(x + 12, y + 10);
-            cr.stroke();
-        } else if (name.includes('zoom')) {
-            cr.arc(x - 3, y - 3, 10, 0, 2 * Math.PI);
-            cr.moveTo(x + 5, y + 5);
-            cr.lineTo(x + 16, y + 16);
-            cr.moveTo(x - 3, y - 8);
-            cr.lineTo(x - 3, y + 2);
-            cr.moveTo(x - 8, y - 3);
-            cr.lineTo(x + 2, y - 3);
-            cr.stroke();
-        } else if (name.includes('brush') || name.includes('opacity')) {
-            cr.moveTo(x - 13, y + 12);
-            cr.lineTo(x + 9, y - 10);
-            cr.lineTo(x + 15, y - 4);
-            cr.lineTo(x - 7, y + 18);
-            cr.lineTo(x - 15, y + 18);
-            cr.closePath();
-            cr.stroke();
-        } else if (name.includes('photo') || name.includes('image')) {
-            cr.rectangle(x - 15, y - 11, 30, 22);
-            cr.moveTo(x - 11, y + 7);
-            cr.lineTo(x - 3, y - 2);
-            cr.lineTo(x + 3, y + 4);
-            cr.lineTo(x + 8, y - 1);
-            cr.lineTo(x + 13, y + 7);
-            cr.arc(x + 7, y - 6, 2, 0, 2 * Math.PI);
-            cr.stroke();
-        } else if (name.includes('rotate')) {
-            cr.arc(x, y, 13, -2.35, 1.3);
-            cr.moveTo(x + 8, y - 13);
-            cr.lineTo(x + 14, y - 13);
-            cr.lineTo(x + 13, y - 7);
-            cr.stroke();
-        } else if (name.includes('history') || name.includes('undo') || name.includes('back')) {
-            cr.arc(x + 2, y, 13, -0.9, 3.7);
-            cr.moveTo(x - 11, y - 5);
-            cr.lineTo(x - 15, y - 11);
-            cr.lineTo(x - 7, y - 12);
-            cr.stroke();
-        } else if (name.includes('rating')) {
-            for (let point = 0; point < 10; point++) {
-                const angle = -Math.PI / 2 + point * Math.PI / 5;
-                const radius = point % 2 === 0 ? 15 : 6.5;
-                const px = x + Math.cos(angle) * radius;
-                const py = y + Math.sin(angle) * radius;
-                if (point === 0)
-                    cr.moveTo(px, py);
-                else
-                    cr.lineTo(px, py);
-            }
-            cr.closePath();
-            cr.stroke();
-        } else if (name.includes('label')) {
-            cr.moveTo(x - 15, y - 8);
-            cr.lineTo(x + 4, y - 8);
-            cr.lineTo(x + 15, y);
-            cr.lineTo(x + 4, y + 8);
-            cr.lineTo(x - 15, y + 8);
-            cr.closePath();
-            cr.arc(x + 3, y, 2.4, 0, 2 * Math.PI);
-            cr.stroke();
-        } else if (name.includes('exposure')) {
-            cr.arc(x, y, 13, 0, 2 * Math.PI);
-            cr.moveTo(x - 6, y);
-            cr.lineTo(x + 6, y);
-            cr.moveTo(x, y - 6);
-            cr.lineTo(x, y + 6);
-            cr.stroke();
-        } else if (name.includes('media') || name.includes('track') || name.includes('seek') || name.includes('shuttle')) {
-            cr.moveTo(x - 14, y - 10);
-            cr.lineTo(x - 2, y);
-            cr.lineTo(x - 14, y + 10);
-            cr.closePath();
-            cr.moveTo(x - 1, y - 10);
-            cr.lineTo(x + 11, y);
-            cr.lineTo(x - 1, y + 10);
-            cr.closePath();
-            cr.moveTo(x + 15, y - 10);
-            cr.lineTo(x + 15, y + 10);
-            cr.stroke();
-        } else if (name.includes('frame') || name.includes('timeline')) {
-            cr.rectangle(x - 16, y - 11, 32, 22);
-            for (const offset of [-9, 0, 9]) {
-                cr.moveTo(x + offset, y - 11);
-                cr.lineTo(x + offset, y + 11);
-            }
-            cr.stroke();
-        } else if (name.includes('tab') || name.includes('workspace')) {
-            cr.rectangle(x - 15, y - 6, 30, 18);
-            cr.moveTo(x - 15, y - 6);
-            cr.lineTo(x - 15, y - 12);
-            cr.lineTo(x - 3, y - 12);
-            cr.lineTo(x - 3, y - 6);
-            cr.stroke();
-        } else if (name.includes('font') || name.includes('text')) {
-            cr.moveTo(x - 14, y + 12);
-            cr.lineTo(x - 5, y - 12);
-            cr.lineTo(x + 4, y + 12);
-            cr.moveTo(x - 10, y + 3);
-            cr.lineTo(x, y + 3);
-            cr.moveTo(x + 8, y + 12);
-            cr.lineTo(x + 12, y + 1);
-            cr.lineTo(x + 16, y + 12);
-            cr.stroke();
-        } else if (name.includes('arrow') || name.includes('forward')) {
-            cr.moveTo(x - 15, y);
-            cr.lineTo(x + 15, y);
-            cr.moveTo(x + 7, y - 8);
-            cr.lineTo(x + 15, y);
-            cr.lineTo(x + 7, y + 8);
-            cr.stroke();
-        } else if (name.includes('notif')) {
-            cr.moveTo(x - 11, y + 8);
-            cr.curveTo(x - 9, y - 14, x + 9, y - 14, x + 11, y + 8);
-            cr.closePath();
-            cr.moveTo(x - 3, y + 12);
-            cr.lineTo(x + 3, y + 12);
-            cr.stroke();
-        } else {
-            cr.rectangle(x - 12, y - 12, 24, 24);
-            cr.stroke();
-            for (let col = 0; col < 2; col++) {
-                for (let row = 0; row < 2; row++)
-                    cr.rectangle(x - 8 + col * 9, y - 8 + row * 9, 4, 4);
-            }
-            cr.fill();
-        }
-        cr.restore();
     }
 
     _setFont(cr, size, bold) {

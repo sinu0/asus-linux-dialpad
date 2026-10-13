@@ -19,7 +19,7 @@ gi.require_version("Gtk", "4.0")
 
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk
 
-from config.labels import describe_macro, describe_step, format_keys
+from config.labels import describe_macro, describe_step, format_keys, icon_for_title
 from config.presets import (
     FUNCTION_LIBRARY,
     LIBRARY_CATEGORIES,
@@ -993,7 +993,8 @@ class Application(Adw.Application):
         if segment.value_command:
             parts.append(f"shows value{(' in ' + segment.unit) if segment.unit else ''}")
         row.set_subtitle(GLib.markup_escape_text("  ·  ".join(parts) or "No actions yet"))
-        row.add_prefix(_colour_swatch(segment_color(segment, index), 16))
+        row.add_prefix(_colour_swatch(segment_color(segment, index), 12))
+        row.add_prefix(Gtk.Image.new_from_icon_name(icon_for_title(segment.title)))
         if not segment.enabled:
             row.add_css_class("dim-label")
         row.set_activatable(True)
@@ -1149,7 +1150,7 @@ class Application(Adw.Application):
 
             extras = []
             if profile.app_id == DARKTABLE_APP_ID:
-                extras.append(("Darktable", "Colour labels", "tag-symbolic", "F1 / F2 / F3 colour labels", darktable_colour_labels_segment))
+                extras.append(("Darktable", "Colour labels", "bookmark-new-symbolic", "F1 / F2 / F3 colour labels", darktable_colour_labels_segment))
             entries = [
                 (preset.category, preset.title, preset.icon_name, preset.description, preset.factory)
                 for preset in FUNCTION_LIBRARY
