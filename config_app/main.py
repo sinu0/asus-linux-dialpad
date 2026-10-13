@@ -1750,6 +1750,11 @@ class Application(Adw.Application):
             self.config.overlay.show_hints,
             lambda active: self._set_config("overlay", "show_hints", active),
         ))
+        overlay.add(_spin_row(
+            "Progress arc from", "Show a progress arc while turning functions whose step is at least this many degrees",
+            self.config.overlay.progress_above_degrees, 5, 360, 5, 0,
+            lambda value: self._set_config("overlay", "progress_above_degrees", int(value)),
+        ))
         overlay.add(_switch_row(
             "Show finger position", "A dot follows the finger around the ring",
             self.config.overlay.show_pointer,

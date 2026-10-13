@@ -423,7 +423,7 @@ def apply_gui_settings():
     global top_right_icon_width, top_right_icon_height
     global activation_time, coactivator_keys, default_treshold
     global slices_minimum_count, disable_due_inactivity_time, angle_hysteresis
-    global center_hold_time
+    global center_hold_time, socket_send_progress_above_treshold
 
     if gui_config is None:
         return False
@@ -454,6 +454,7 @@ def apply_gui_settings():
     disable_due_inactivity_time = gesture.disable_inactivity_time
     angle_hysteresis = max(0, gesture.hysteresis)
     center_hold_time = max(0.2, float(gesture.center_hold_time))
+    socket_send_progress_above_treshold = int(gui_config.overlay.progress_above_degrees)
 
     if keymap_loaded and "load_evdev_keys_for_coactivator_modifiers" in globals():
         try:

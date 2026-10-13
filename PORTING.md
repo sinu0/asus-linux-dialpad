@@ -8,7 +8,7 @@ the corner LED. Both can be handled without code changes:
 1. **Install** with `bash install.sh` and pick the closest layout when asked
    (`proartp16`, `asusvivobook16x` or `zenbookpro14`). Known touchpads are
    listed in `laptop_touchpad_dialpad_layouts.csv`.
-2. **Calibrate.** Open *DialPad Control → Calibration → Guided calibration*,
+2. **Calibrate.** Open *ProArt DialPad Control → Calibration → Guided calibration*,
    press *Start*, trace the printed outer ring once with one finger, lift it,
    then trace the edge of the centre button. The measured geometry is saved
    to `~/.config/asus-dialpad/config.json` together with the layout name.

@@ -22,7 +22,7 @@ cd asus-linux-dialpad
 bash install.sh
 ```
 
-The installer needs `sudo`, asks no questions (use `bash install.sh --interactive` to choose layout, co-activator key and services yourself), keeps your existing configuration, and collects no data. Afterwards log out and back in, hold the illuminated corner icon to switch the DialPad on, and open **ProArt DialPad** from the applications menu. To update, `git pull` and run `bash install.sh` again; to remove, run `bash uninstall.sh`.
+The installer needs `sudo`, asks no questions (use `bash install.sh --interactive` to choose layout, co-activator key and services yourself), keeps your existing configuration, and collects no data. Afterwards log out and back in, hold the illuminated corner icon to switch the DialPad on, and open **ProArt DialPad Control** from the applications menu. To update, `git pull` and run `bash install.sh` again; to remove, run `bash uninstall.sh`.
 
 Configuration lives in `~/.config/asus-dialpad/config.json`; the original `dialpad_dev` + `layouts/*.py` setup keeps working as a fallback.
 
@@ -54,95 +54,40 @@ The sections below come from the original project and describe the base driver.
 
 [FAQ](#faq)
 
-## Features of User Interface
-
-- Support for own icons in `.svg` format
-- Double-clicking by left mouse button unlocks / locks the element position allowing it to be moved across the screen
-
 ## Features
 
-- The original project collects anonymous installation data; **this fork removed it** and sends nothing.
-- Driver (including backlighting if hardware supported) installed for the current user
-- Driver creates own virtual environment of currently installed version of `Python3`
-- Multiple pre-created [DialPad layouts](https://github.com/asus-linux-drivers/asus-dialpad-driver#layouts) with the possibility of [creating custom layouts or improving existing ones (circle_diameter, center_button_diameter, circle_center_x..)](https://github.com/asus-linux-drivers/asus-dialpad-driver#keyboard-layout)
-- Customization through 2-way sync [configuration file](https://github.com/asus-linux-drivers/asus-dialpad-driver#configuration-file) (when `$ bash ./install.sh` is run, changes previously made in the config file will not be overwritten without user permission, similarly when `$ bash ./uninstall.sh` is run the config file will be kept. In either case, when the config file or parts of it do not exist they will be automatically created or completed with default values)
-- Automatic DialPad layout detection
-- Activation/deactivation of DialPad by pressing and holding the top-right icon (activation time by default is 1s)
-- Optional co-activator key requirement (`Shift`, `Control`, `Alt`) to prevent accidental DialPad activation
-- Recognize of currently focused app by binary path (e.g. `/usr/share/code/code`) or part of the title (during finding the first matched shortcut wins so `visual studio code` defined after `code` will be never be matched)
-- For each configured app a possibility to define single-function or multi-function mode (when is app not recognized is used `None` block)
-- Single-function mode (distinction of shortcuts for each app is possible only by key modifier like `Shift`; for each shortcut is possible to use `clockwise`, `counterclockwise` or `center`)
-- Adding events with `EV_KEY` which contain press and release events (e.g. key volume up, down and mute: `EV_KEY.KEY_VOLUMEUP, EV_KEY.KEY_VOLUMEDOWN, EV_KEY.KEY_MUTE`)
+Everything is set up in the **ProArt DialPad Control** app (applications menu); changes apply immediately, no restart or file editing needed.
 
-```
-...
-app_shortcuts = {
-    ...
-    "none": {
-        "center": [
-          {"key": EV_KEY.KEY_MUTE, "trigger": "release", "duration": 1, "modifier": EV_KEY.KEY_LEFTSHIFT}
-        ],
-        "clockwise": [
-          {"key": [EV_REL.REL_WHEEL, EV_REL.REL_WHEEL_HI_RES], "value": [1, 120], "trigger": "immediate", "title": "Scroll"},
-          # works even better with `dconf write /org/gnome/desktop/sound/allow-volume-above-100-percent true`
-          {"key": EV_KEY.KEY_VOLUMEUP, "trigger": "immediate", "modifier": EV_KEY.KEY_LEFTSHIFT, "value": "pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '\d+%' | head -n 1 | tr -d '%'", "unit": "%", "title": "Volume"}
-        ],
-        "counterclockwise": [
-          {"key": [EV_REL.REL_WHEEL, EV_REL.REL_WHEEL_HI_RES], "value": [-1, -120], "trigger": "immediate", "title": "Scroll"},
-          # works even better with `dconf write /org/gnome/desktop/sound/allow-volume-above-100-percent true`
-          {"key": EV_KEY.KEY_VOLUMEDOWN, "trigger": "immediate", "modifier": EV_KEY.KEY_LEFTSHIFT, "value": "pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '\d+%' | head -n 1 | tr -d '%'", "unit": "%", "title": "Volume"}
-        ]
-    }
-}
-```
+**Profiles**
 
-- Multi-function mode (not possible to use `center` because middle button is used as configuration button / return button between functions; by default is grid of circle rendered for 5 apps `slices_minimum_count=5`)
-- Using `EV_REL` with values (e.g. scrolling: `EV_REL.REL_WHEEL, EV_REL.REL_WHEEL_HI_RES` and values: `-1, -120`)
+- A default profile plus profiles per application, switched automatically with the focused window (desktop ID on GNOME, window title or binary elsewhere)
+- Radial-menu mode with several functions, or single-function mode where the dial always controls one function
+- Per-profile sensitivity, scroll speed and "remember last function"
+- Pre-programmed packs for browsers, GIMP, Krita, Inkscape, Blender, Kdenlive, DaVinci Resolve, LibreOffice, code editors, Spotify, video players and darktable; import/export of profiles
 
-```
-        "Scroll": {
-            "icon": "/usr/share/icons/elementary/status/symbolic/rotation-allowed-symbolic.svg",
-            "clockwise": [
-               {"key": [EV_REL.REL_WHEEL, EV_REL.REL_WHEEL_HI_RES], "value": [1, 120], "trigger": "immediate"},
-            ],
-            "counterclockwise": [
-              {"key": [EV_REL.REL_WHEEL, EV_REL.REL_WHEEL_HI_RES], "value": [-1, -120], "trigger": "immediate"},
-            ]
-        },
-```
-- Using `command` for toggling instead of sending any key
-- Have icon displayed according to current state determined by `value` command
+**Functions**
 
-```
-        "Notifications": {
-          "value": "dconf read /io/elementary/notifications/do-not-disturb",
-          "icons": {
-              "true": "/usr/share/icons/elementary/status/symbolic/notification-disabled-symbolic.svg",
-              "false": "/usr/share/icons/elementary/status/symbolic/notification-symbolic.svg"
-          },
-          # toggle do-not-disturb ("command" with toggle effect is preferred if exists over going into and clockwise/counterclockwise)
-          "command": 'dconf write /io/elementary/notifications/do-not-disturb "$( [ "$(dconf read /io/elementary/notifications/do-not-disturb)" = "true" ] && echo false || echo true )"',
-        },
-```
+- Library of ready functions: volume, brightness, keyboard light, mute, workspaces, vertical/horizontal scroll, zoom, tabs, back/forward, arrow keys, media tracks, seek, undo/redo, font size, brush size, frame stepping, timeline zoom
+- Own colour, order on the dial, show/hide, rotation step and an optional live value (e.g. volume in % with a level gauge)
+- Separate actions for turning clockwise, counter-clockwise and tapping; each action can be a captured keyboard shortcut, media key, volume, brightness, vertical or horizontal scroll (optionally with Ctrl/Shift/Alt held, e.g. Ctrl + wheel zoom), a shell command or a wait — several steps run in order
 
-- Possibility to trigger both types `EV_REL` and `EV_KEY` on `release` or `immediately`
-- Using for a less continous function with increasing `treshold` (e.g. editing changes undo and redo)
+**Using the dial**
 
-```
-        "Edit": {
-            "icon": "/usr/share/icons/elementary/status/symbolic/media-playlist-repeat-symbolic-rtl.svg",
-            "treshold": 180,
-            "clockwise": [
-              {"key": [EV_KEY.KEY_LEFTCTRL, EV_KEY.KEY_Y], "trigger": "immediate"}
-            ],
-            "counterclockwise": [
-              {"key": [EV_KEY.KEY_LEFTCTRL, EV_KEY.KEY_Z], "trigger": "immediate"}
-            ]
-        },
-```
+- Hold the illuminated corner icon to switch the DialPad on or off (optionally only together with a co-activator key)
+- In the menu, touch a sector and release to choose a function; a function that only has a tap action runs straight away
+- In a function, turn around the ring; tap the centre for the function's tap action (or to go back when it has none), hold the centre to return to the menu
+- Fast spins accelerate scrolling; the DialPad switches itself off after a period of inactivity
 
-- Possibility to temporary force using not app specific shortcut without removing app specific shortcuts from layout (`config_supress_app_specifics_shortcuts`)
-- Disabling the Touchpad (e.g. Fn+special key) disables by default the DialPad as well (can be disabled)
+**On-screen dial**
+
+- GNOME Shell 45–51: native overlay with colours, level gauge, rotation hints and finger position; size, position and accent colour are configurable
+- Other desktops: the original PySide overlay (own `.svg` icons; double-click to unlock its position and move it)
+
+**Base driver** (from the original project)
+
+- Runs as a user service in its own Python virtual environment, on Wayland and X11
+- Automatic layout detection for known laptops, plus guided calibration for others ([PORTING.md](PORTING.md))
+- The original project collects anonymous installation data; **this fork removed it** and sends nothing
 
 ## Installation
 
@@ -355,7 +300,7 @@ Layouts below are named by laptop models, but the name is not important. What is
 
 **How to start DialPad without systemd service?**
 
-- install in standard way using `bash install.sh` and answer no to the question about using `systemd`
+- install with `bash install.sh --interactive` and answer no to the question about using `systemd`
 - layout name is required as first argument and as second argument can be optionally passed path to directory where will be autocreated config `dialpad_dev` (default is current working directory):
 
 ```
@@ -404,119 +349,72 @@ $ pyenv global system
 
 **How can DialPad be activated via CLI?**
 
-- directly just change `enabled` in the appropriate lines of the config file:
+Normally you hold the illuminated corner icon. From a terminal, change `enabled` in the driver's state file; the running driver picks it up:
 
 ```
 # enabling DialPad via command line
-sed -i "s/enabled = 0/enabled = 1/g" dialpad_dev
 sed -i "s/enabled = 0/enabled = 1/g" /usr/share/asus-dialpad-driver/dialpad_dev
 # disabling
-sed -i "s/enabled = 1/enabled = 0/g" dialpad_dev
 sed -i "s/enabled = 1/enabled = 0/g" /usr/share/asus-dialpad-driver/dialpad_dev
 ```
 
 ## Configuration
 
-### Keyboard layout
+Use the **ProArt DialPad Control** app for every setting:
 
-During the install process `bash ./install.sh`, you're required to select your keyboard layout:
+| App page | What it configures |
+| --- | --- |
+| **Dial Controls** | Functions of the selected profile (add from the library, order, colour, show/hide, actions for turning and tapping, live value), dial mode, sensitivity, scroll speed, remembering the last function |
+| **Apps & Profiles** | Default and application profiles, pre-programmed packs, duplicate/rename/remove, import and export |
+| **Behaviour** | Corner icon hold time, co-activator keys, switching off after inactivity, default rotation step, jitter filter, centre hold time, minimum menu sectors, on-screen dial size, position, visibility time, hints, finger position, progress arc and accent colour |
+| **Calibration** | Guided calibration (trace the ring and the centre button) or manual dial geometry and corner icon area |
+| **Driver** | Driver status, active profile and function, reload, configuration folder |
 
-```
-...
-1) asusvivobook16x.py
-2) proartp16.py
-3) zenbookpro14.py
-4) Quit
-Please enter your choice
-...
-```
+The layout (touchpad family) is chosen automatically during installation; to force one, run `LAYOUT_NAME=proartp16 bash install.sh` (or `bash install.sh --interactive`). Known layouts are listed in [Layouts](#layouts).
 
-| Option                                        | Required | Default           | Description |
-| --------------------------------------------- | -------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Position of DialPad**                                |          |
-| `circle_diameter`                                        | Required |                   | in px
-| `center_button_diameter`                                        | Required |                   | in px
-| `circle_center_x`                                        | Required |                   | in px
-| `circle_center_y`                                        | Required |                   | in px
-| **Associated apps**                                |          |          |
-| `app_shortcuts`                                        | Optional | Yes                  | | required format like in `default` layout
+### Where the settings are stored
 
-### Co-activator keys
+You do not need to edit these files; they are described for backups and troubleshooting.
 
-To prevent accidental DialPad activation while using the touchpad, you can configure a co-activator key. This requires holding a modifier key like `Alt` while touching the top right icon to activate the DialPad.
+| File | Content |
+| --- | --- |
+| `~/.config/asus-dialpad/config.json` | Everything set in the app: profiles, functions, behaviour, on-screen dial and dial geometry. Written atomically; the driver and the GNOME extension reload it after every change. Use *Import/Export* to move profiles between computers. |
+| `/usr/share/asus-dialpad-driver/dialpad_dev` | Runtime state of the driver: `enabled` (DialPad on/off) and `socket_enabled` (overlay messages, keep `1`). Its other keys come from the original driver and are ignored while `config.json` exists. |
+| `/usr/share/asus-dialpad-driver/layouts/*.py` | Default geometry of each touchpad family and the original Python format of shortcuts. Used only until `config.json` exists — the first start of the app converts them. |
 
-During installation, you will be prompted to select a co-activator key:
-
-```
-Select co-activator key:
-1) None
-2) Shift
-3) Control
-4) Alt
-6) Quit
-```
-
-The co-activator is configured by modifying the `top_right_icon_coactivator_key` in your config file. When a co-activator is set, the `top_right_icon_coactivator_key` value becomes:
-
-```
-...
-top_right_icon_coactivator_key = Alt
-```
-
-### Configuration file
-
-Attributes which do not depend on a specific DialPad keyboard can be changed according to the table below in the config `dialpad_dev` in the installed driver location `/usr/share/asus-dialpad-driver`. See the example below showing the default attibutes:
-
-```
-[main]
-disable_due_inactivity_time = 0
-touchpad_disables_dialpad = 1
-activation_time = 1
-enabled = 0
-socket_enabled = 1
-top_right_icon_coactivator_key = Alt
-default_treshold = 90
-slices_minimum_count = 5
-```
-
-| Option                                        | Required | Default           | Description |
-| --------------------------------------------- | -------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **System**                                    |          |                   |
-| `enabled`                                     |          | `0`               | DialPad running status (enabled/disabled)
-| `disable_due_inactivity_time`                 |          | `0` [s]            | DialPad is automatically disabled when no event received for this interval<br><br>decimal numbers allowed (e.g. `60.0` [s] is one minute, `0` set up by default disables this functionality)
-| `touchpad_disables_dialpad`                    |          | `1`            | when Touchpad is disabled DialPad is disabled aswell
-| **User Interface**                                |          |
-| `socket_enabled`                                     |          | `0`               | DialPad is sending to the socket what is the user doing (enabled/disabled)
-| `socket_send_progress_above_treshold`                                     |          | `120`               | Is send progress when command `value` is not defined and angle is above this
-| **Layout**                                |          |
-| `slices_minimum_count`              |          | `5`             | minimum count of slices in the circle for multi-functional mode
-| `default_treshold`              |          | `90` [angle]             | this angle is considered as one step when moving with finger around
-| `suppress_app_specifics_shortcuts`              |          | `0`             | app specific shortcuts are ignored when is specific window with app opened
-| **Top right icon**                            |          |                   |
-| `activation_time`              |          | `1.0` [seconds]             | amount of time you have to hold `top_right_icon`
-| `top_right_icon_coactivator_key`                     |          | ``            | empty default means no co-activator keys are required (valid values are `Shift`, `Control` or `Alt` delimeted by space)<br><br>this works only for activation by touching the top right icon
+If `config.json` is deleted, the app recreates it from the layout on its next start.
 
 ## Debugging
 
 - The driver can be installed like `LOG=DEBUG bash install.sh` to extend the logs to a debug level (**recommended only for short-term debugging purpose**)
 
-At first check systemd service logs:
+The **Driver** page of the app shows whether the driver is reachable, the focused application, the active profile and function.
+
+Then check the service logs:
 
 ```
 $ journalctl --user -u asus_dialpad_driver@$USER.service
+$ systemctl --user restart asus_dialpad_driver@$USER.service
 ```
 
-For further debugging stop installed systemd services:
+The driver state and the messages for the on-screen dial are available on the session D-Bus:
 
 ```
-systemctl --user stop asus_dialpad_driver@ldrahnik.service
-systemctl --user disable asus_dialpad_driver@ldrahnik.service
+$ gdbus call --session --dest io.github.asuslinuxdrivers.DialPad --object-path /io/github/asuslinuxdrivers/DialPad --method io.github.asuslinuxdrivers.DialPad.GetStatus
+$ gdbus monitor --session --dest io.github.asuslinuxdrivers.DialPad
+```
 
-systemctl --user stop asus_dialpad_driver_ui@ldrahnik.service
-systemctl --user disable asus_dialpad_driver_ui@ldrahnik.service
+GNOME extension errors (the extension reloads only after logging out and back in):
 
-systemctl --user stop asus_numberpad_driver@ldrahnik.service
-systemctl --user disable asus_numberpad_driver@ldrahnik.service
+```
+$ gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Extensions.GetExtensionErrors dialpad@asus-linux-drivers
+```
+
+For further debugging stop the installed services:
+
+```
+systemctl --user stop asus_dialpad_driver@$USER.service
+systemctl --user stop asus_dialpad_driver_ui@$USER.service
 ```
 
 And listen on socket using `socat` (e.g. `$ sudo apt install socat`):

@@ -281,7 +281,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
       if [ -z "$LAYOUT_NAME" ] && [ "$INTERACTIVE" != "1" ]; then
         LAYOUT_NAME="proartp16"
         echo "No known layout for this laptop; using $LAYOUT_NAME."
-        echo "Run Calibration -> Guided calibration in the ProArt DialPad app after installing."
+        echo "Run Calibration -> Guided calibration in the ProArt DialPad Control app after installing."
       fi
 
       if [ -z "$LAYOUT_NAME" ]; then
@@ -313,7 +313,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
     echo "Next steps:"
     echo "  1. Log out and back in (new user groups and the GNOME extension load at login)."
     echo "  2. Hold the illuminated corner icon of the touchpad to switch the DialPad on."
-    echo "  3. Open \"ProArt DialPad\" from the applications menu to set up functions;"
+    echo "  3. Open \"ProArt DialPad Control\" from the applications menu to set up functions;"
     echo "     on a laptop that is not listed, run Calibration -> Guided calibration."
 
     echo

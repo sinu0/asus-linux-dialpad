@@ -64,6 +64,9 @@ class OverlayConfig:
     show_hints: bool = True
     show_pointer: bool = True
     accent: str = "#e7b98d"
+    # Functions whose rotation step is at least this many degrees show a
+    # progress arc while turning instead of waiting silently.
+    progress_above_degrees: int = 120
 
 
 @dataclass
