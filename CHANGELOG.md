@@ -1,5 +1,24 @@
 # Changelog
 
+## Fork (unreleased)
+
+### Feature
+
+- JSON configuration with per-application profiles, single-function and radial-menu modes, per-profile sensitivity, scroll speed and remembered last function
+- GTK4/libadwaita settings application with function library, pre-programmed application packs, colours, ordering, import/export
+- GNOME Shell overlay extension (45–51) with colours, value gauge, rotation hints and finger pointer; session D-Bus interface `io.github.asuslinuxdrivers.DialPad`
+- Tap the centre for the function's own action, hold it to return to the menu
+- Horizontal scrolling and scrolling with held modifiers (Ctrl + wheel zoom)
+- Guided calibration that fits the ring and centre button from finger traces
+
+### Fixed
+
+- Centre actions of rotating functions were unreachable in the radial menu
+- Switching application kept the previous application's selected function
+- GUI configuration overridden after `dialpad_dev` reloads
+- Socket overlay parsing of partial and nested messages
+- Configuration written atomically
+
 ## 2.3.0 (22.6.2026)
 
 ### Fixed

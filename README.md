@@ -1,4 +1,22 @@
-# Asus touchpad DialPad driver
+# Asus touchpad DialPad driver — ASUS Dial-style fork
+
+> **This is a personal fork** of [asus-linux-drivers/asus-dialpad-driver](https://github.com/asus-linux-drivers/asus-dialpad-driver)
+> by Lukáš Drahník (GPL-2.0). It adds features modelled on the Windows
+> [ASUS Dial & Control Panel](https://www.asus.com/proart/software-solutions/asus-dial-and-control-panel/).
+> It was written with substantial help from an AI assistant and has been tested
+> only on a ProArt PX13 (HN7306WV) with GNOME 51 on Wayland. Expect rough edges.
+> Not affiliated with ASUS; "ASUS", "ASUS Dial" and "ProArt" are trademarks of ASUSTeK.
+
+What the fork adds:
+
+- **Settings app** (GTK4/libadwaita): per-application profiles, a function library, pre-programmed packs (browsers, GIMP, Krita, Inkscape, Blender, Kdenlive, DaVinci Resolve, LibreOffice, code editors, Spotify, video players), function colours and order, import/export.
+- **ASUS Dial behaviour**: radial menu or single-function mode, per-app sensitivity and scroll speed, remembered last function, tap centre for the function's action, hold centre for the menu, horizontal scroll and Ctrl+wheel zoom.
+- **GNOME Shell overlay**: native radial dial with value gauge, rotation hints and finger position; size and position configurable.
+- **Guided calibration** that measures the dial on any DialPad touchpad — see [PORTING.md](PORTING.md).
+
+Configuration lives in `~/.config/asus-dialpad/config.json`; the original `dialpad_dev` + `layouts/*.py` setup keeps working as a fallback.
+
+---
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 ![Maintainer](https://img.shields.io/badge/maintainer-ldrahnik-blue)
