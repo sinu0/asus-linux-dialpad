@@ -1,5 +1,5 @@
 [Unit]
-Description=User Interface of the Asus DialPad Driver
+Description=Turnpad on-screen dial (legacy window)
 PartOf=graphical-session.target
 After=plasma-workspace.target
 StartLimitBurst=20

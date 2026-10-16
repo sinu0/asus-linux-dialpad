@@ -1,0 +1,49 @@
+name: 🖥️ Desktop support request
+description: Ask for Turnpad on a desktop other than GNOME (KDE Plasma, Hyprland, sway, COSMIC…)
+title: '[Desktop] Name and version'
+labels: ['desktop-support']
+assignees:
+  - sinu0
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Turnpad currently supports **GNOME** (Shell 45–51). The driver itself runs on any desktop; what each desktop needs is an on-screen dial and focused-window detection. [ARCHITECTURE.md](https://github.com/sinu0/asus-linux-dialpad/blob/master/ARCHITECTURE.md#adding-a-desktop-environment) explains what that takes.
+
+  - type: input
+    attributes:
+      label: Desktop and version
+      placeholder: e.g. KDE Plasma 6.4, Hyprland 0.50
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: Session
+      options:
+        - Wayland
+        - X11
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: Distribution
+      placeholder: e.g. Fedora 43, Arch Linux
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: Laptop model
+      placeholder: e.g. ProArt PX13 HN7306WV
+
+  - type: checkboxes
+    attributes:
+      label: Testing
+      options:
+        - label: I can test development versions on this desktop.
+
+  - type: textarea
+    attributes:
+      label: Additional Info

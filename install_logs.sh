@@ -2,10 +2,7 @@
 
 source non_sudo_check.sh
 
-# ENV VARS
-if [ -z "$LOGS_DIR_PATH" ]; then
-    LOGS_DIR_PATH="/var/log/asus-dialpad-driver"
-fi
+source install_paths.sh
 
 sudo groupadd "dialpad"
 

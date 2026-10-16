@@ -26,6 +26,26 @@
 - Socket overlay parsing of partial and nested messages
 - Configuration written atomically
 
+### Renamed to Turnpad (asus-turnpad), standard install layout
+
+Run `bash install.sh` to update; it moves settings and removes the old install.
+
+| | Before | Now |
+| --- | --- | --- |
+| Program | `/usr/share/asus-dialpad-driver`, owned by the user | `/opt/asus-turnpad`, owned by root |
+| Settings, skins, driver state | `~/.config/asus-dialpad`, `dialpad_dev` in the program directory | `~/.config/asus-turnpad` |
+| User services | `asus_dialpad_driver@$USER`, `asus_dialpad_driver_ui@$USER` | `asus-turnpad`, `asus-turnpad-ui` |
+| Session D-Bus | `io.github.asuslinuxdrivers.DialPad` | `io.github.sinu0.AsusTurnpad.Driver` |
+| Settings app id | `io.github.asuslinuxdrivers.DialPadControl` | `io.github.sinu0.AsusTurnpad` |
+| GNOME extension | `dialpad@asus-linux-drivers` | `asus-turnpad@sinu0.github.io` |
+| udev rules, modules | `/usr/lib/udev/rules.d/99-…`, two files in `/etc/modules-load.d` | `/etc/udev/rules.d/70-asus-turnpad-*.rules`, `/etc/modules-load.d/asus-turnpad.conf` |
+| Legacy overlay socket | `/tmp/dialpad.sock` | `$XDG_RUNTIME_DIR/asus-turnpad.sock` |
+| Logs | `/var/log/asus-dialpad-driver` | `/var/log/asus-turnpad` |
+
+- The I2C rule now sorts before `73-seat-late.rules`, so its `uaccess` tag takes effect
+- `uninstall.sh` is one script that also removes pre-rename leftovers and keeps your settings unless asked
+- Supported desktops: GNOME; other desktops via a desktop support request
+
 ### Taken over from the original project (2.4.0–2.6.0)
 
 The fork stops following the original driver here; these fixes were reviewed and ported once.

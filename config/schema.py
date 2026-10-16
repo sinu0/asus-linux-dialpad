@@ -67,7 +67,7 @@ class OverlayConfig:
     show_pointer: bool = True
     accent: str = "#e7b98d"
     # Built-in skin id (gnome/extension/skins.json) or the name of a file
-    # in ~/.config/asus-dialpad/skins/ without ".json".
+    # in ~/.config/asus-turnpad/skins/ without ".json".
     skin: str = "glass"
     # With follow_system_style the dial uses skin_light while GNOME is in
     # light style and skin in dark style.

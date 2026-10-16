@@ -2,19 +2,7 @@
 
 source non_sudo_check.sh
 
-# ENV VARS
-if [ -z "$INSTALL_DIR_PATH" ]; then
-    INSTALL_DIR_PATH="/usr/share/asus-dialpad-driver"
-fi
-if [ -z "$CONFIG_FILE_DIR_PATH" ]; then
-    CONFIG_FILE_DIR_PATH="$INSTALL_DIR_PATH"
-fi
-if [ -z "$CONFIG_FILE_NAME" ]; then
-    CONFIG_FILE_NAME="dialpad_dev"
-fi
-if [ -z "$CONFIG_FILE_PATH" ]; then
-    CONFIG_FILE_PATH="$CONFIG_FILE_DIR_PATH/$CONFIG_FILE_NAME"
-fi
+source install_paths.sh
 
 echo
 echo "Co-activator key for DialPad activation"

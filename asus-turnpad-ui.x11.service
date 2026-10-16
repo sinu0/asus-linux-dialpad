@@ -1,5 +1,5 @@
 [Unit]
-Description=Asus DialPad Driver
+Description=Turnpad on-screen dial (legacy window)
 # Stop with the graphical session and start again with the next one, so a
 # logout does not leave the service restarting without a display.
 PartOf=graphical-session.target
@@ -9,7 +9,7 @@ StartLimitIntervalSec=300
 
 [Service]
 Type=simple
-ExecStart=$INSTALL_DIR_PATH/.env/bin/python3 $INSTALL_DIR_PATH/dialpad.py $LAYOUT_NAME $CONFIG_FILE_DIR_PATH
+ExecStart=$INSTALL_DIR_PATH/.env/bin/python3 $INSTALL_DIR_PATH/dialpad_ui.py
 TimeoutSec=5
 Restart=on-failure
 RestartSec=1
@@ -21,7 +21,6 @@ Environment="XAUTHORITY=$XAUTHORITY"
 Environment="DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
 Environment="XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
 Environment="XDG_SESSION_TYPE=$XDG_SESSION_TYPE"
-Environment="PATH=/usr/sbin:/usr/bin:/bin"
 $LOG_ENV_LINE
 
 [Install]

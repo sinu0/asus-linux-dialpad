@@ -43,6 +43,7 @@ import socket
 import json
 import queue
 
+from config.identity import SLUG, socket_path
 from desktop.active_window import ActiveWindow, Context as ActiveWindowContext
 from dial_gesture import (
     CalibrationSession,
@@ -78,7 +79,7 @@ except Exception:
     MacroExecutor = None
     CONFIG_APP_AVAILABLE = False
 
-SOCKET_PATH = "/tmp/dialpad.sock"
+SOCKET_PATH = socket_path()
 sock = None
 dbus_service = None
 driver_state_lock = threading.RLock()
@@ -304,7 +305,7 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)s %(message)s',
     level=os.environ.get('LOG', 'INFO')
 )
-log = logging.getLogger('asus-dialpad-driver')
+log = logging.getLogger(SLUG)
 if SYSTEMD_JOURNAL_AVAILABLE:
     log.addHandler(JournalHandler())
 

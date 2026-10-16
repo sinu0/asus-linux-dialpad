@@ -21,7 +21,9 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Callable
 
-log = logging.getLogger("asus-dialpad-driver")
+from config.identity import SLUG
+
+log = logging.getLogger(SLUG)
 
 WindowInfo = tuple  # (binary path or None, title or None)
 

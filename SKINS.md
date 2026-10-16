@@ -12,7 +12,7 @@ The GNOME Shell dial comes in five built-in skins:
 
 ![Built-in skins](./preview/overlay-skins.png)
 
-Pick one in **DialPad Control → Behaviour → Skin**. With **Match system style** on, the dial uses one skin while GNOME is dark and another while it is light (Frost by default), switching together with the quick-settings style toggle.
+Pick one in **Turnpad → Behaviour → Skin**. With **Match system style** on, the dial uses one skin while GNOME is dark and another while it is light (Frost by default), switching together with the quick-settings style toggle.
 
 ## Making your own
 
@@ -24,7 +24,7 @@ Click the pencil on a built-in skin (or **+**) to start a copy. The editor shows
 - **Menu style**: icon bubbles or a ring of sectors.
 - **Colours**: every part of the dial, with opacity. A reset button appears next to a changed colour.
 
-**Save** writes the skin to `~/.config/asus-dialpad/skins/<id>.json` and selects it.
+**Save** writes the skin to `~/.config/asus-turnpad/skins/<id>.json` and selects it.
 
 ### With an AI assistant
 
@@ -34,7 +34,7 @@ Click the pencil on a built-in skin (or **+**) to start a copy. The editor shows
 
 ### By hand
 
-Drop a JSON file into `~/.config/asus-dialpad/skins/`. The file name without `.json` is the skin's id; a file named like a built-in skin replaces it. The dial reloads when a file changes, with no restart needed.
+Drop a JSON file into `~/.config/asus-turnpad/skins/`. The file name without `.json` is the skin's id; a file named like a built-in skin replaces it. The dial reloads when a file changes, with no restart needed.
 
 ```json
 {

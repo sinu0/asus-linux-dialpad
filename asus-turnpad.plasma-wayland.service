@@ -1,5 +1,5 @@
 [Unit]
-Description=Asus DialPad Driver
+Description=Turnpad driver (ASUS DialPad)
 PartOf=graphical-session.target
 After=plasma-workspace.target
 StartLimitBurst=20

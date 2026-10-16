@@ -4,16 +4,17 @@ source non_sudo_check.sh
 
 source install_common.sh "$@"
 
+source install_paths.sh
+
+source install_migrate.sh
+
 source install_security_check.sh
 
 echo
 
 START_TIME=${EPOCHREALTIME::-7}
 
-# ENV VARS
-if [ -z "$LOGS_DIR_PATH" ]; then
-    LOGS_DIR_PATH="/var/log/asus-dialpad-driver"
-fi
+migrate_legacy_logs
 
 source install_logs.sh
 
@@ -213,17 +214,8 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         sudo rm -rf layouts/__pycache__
     fi
 
-    # ENV VARS
-    if [ -z "$INSTALL_DIR_PATH" ]; then
-      INSTALL_DIR_PATH="/usr/share/asus-dialpad-driver"
-    fi
-    if [ -z "$CONFIG_FILE_DIR_PATH" ]; then
-      CONFIG_FILE_DIR_PATH="$INSTALL_DIR_PATH"
-    fi
-    if [ -z "$CONFIG_FILE_NAME" ]; then
-      CONFIG_FILE_NAME="dialpad_dev"
-    fi
-    CONFIG_FILE_PATH="$CONFIG_FILE_DIR_PATH/$CONFIG_FILE_NAME"
+    # Settings and driver state of an install from before the rename.
+    migrate_legacy_config
 
     sudo mkdir -p "$INSTALL_DIR_PATH/layouts" "$INSTALL_DIR_PATH/config" "$INSTALL_DIR_PATH/config_app" "$INSTALL_DIR_PATH/desktop" "$INSTALL_DIR_PATH/overlay" "$INSTALL_DIR_PATH/gnome/extension"
     sudo install dialpad.py "$INSTALL_DIR_PATH"
@@ -234,19 +226,17 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
     sudo install -m 644 -t "$INSTALL_DIR_PATH/desktop" desktop/*.py
     sudo install -m 644 -t "$INSTALL_DIR_PATH/overlay" overlay/*.py
     sudo install -m 755 config_app/main.py "$INSTALL_DIR_PATH/config_app/main.py"
-    sudo install -m 644 config_app/__init__.py config_app/icon.svg config_app/style.css config_app/io.github.asuslinuxdrivers.DialPadControl.desktop "$INSTALL_DIR_PATH/config_app/"
+    sudo install -m 644 config_app/__init__.py config_app/icon.svg config_app/style.css "config_app/$APP_ID.desktop" "$INSTALL_DIR_PATH/config_app/"
     sudo install -m 644 gnome/extension/extension.js gnome/extension/dial.js gnome/extension/layers.js gnome/extension/skins.json gnome/extension/metadata.json gnome/extension/stylesheet.css "$INSTALL_DIR_PATH/gnome/extension/"
-    sudo chown -R $USER "$INSTALL_DIR_PATH"
 
-    mkdir -p "$HOME/.local/share/applications"
-    sed "s|@INSTALL_DIR@|$INSTALL_DIR_PATH|g" config_app/io.github.asuslinuxdrivers.DialPadControl.desktop > "$HOME/.local/share/applications/io.github.asuslinuxdrivers.DialPadControl.desktop"
-    mkdir -p "$HOME/.local/share/icons/hicolor/scalable/apps"
-    install -m 644 config_app/icon.svg "$HOME/.local/share/icons/hicolor/scalable/apps/io.github.asuslinuxdrivers.DialPadControl.svg"
+    mkdir -p "$(dirname "$LAUNCHER_PATH")" "$(dirname "$ICON_PATH")"
+    sed "s|@INSTALL_DIR@|$INSTALL_DIR_PATH|g" "config_app/$APP_ID.desktop" > "$LAUNCHER_PATH"
+    install -m 644 config_app/icon.svg "$ICON_PATH"
 
     if [[ -f "$CONFIG_FILE_PATH" ]]; then
         if ask "In system remains config file from previous installation. Do you want replace that config with default config?" n; then
             # default will be autocreated, that is why is removed
-            sudo rm -f $CONFIG_FILE_PATH
+            rm -f "$CONFIG_FILE_PATH"
             if [[ $? != 0 ]]; then
                 echo "$CONFIG_FILE_PATH cannot be removed correctly..."
                 exit 1
@@ -282,12 +272,11 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         sudo ln -sf /usr/include/wayland/* /usr/include/
     fi
 
-    # create Python virtual environment
+    # create Python virtual environment (owned by root like the program)
     # System site packages bring distribution-only modules such as pyatspi.
-    virtualenv --python="$PYTHON" --system-site-packages "$INSTALL_DIR_PATH/.env"
-    source $INSTALL_DIR_PATH/.env/bin/activate
-    pip3 install --upgrade pip
-    pip3 install --upgrade setuptools
+    sudo virtualenv --python="$PYTHON" --system-site-packages "$INSTALL_DIR_PATH/.env"
+    venv_pip install --upgrade pip
+    venv_pip install --upgrade setuptools
 
     # https://github.com/asus-linux-drivers/asus-dialpad-driver/issues/43
     # https://github.com/sde1000/python-xkbcommon/issues/26
@@ -302,18 +291,25 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
     fi
 
     if [ ${#constraints[@]} -gt 0 ]; then
-        pip3 install -r requirements.txt -c <(printf '%s\n' "${constraints[@]}")
+        # A file, not <(...): sudo closes the descriptor of a substitution.
+        CONSTRAINTS_FILE=$(mktemp)
+        printf '%s\n' "${constraints[@]}" > "$CONSTRAINTS_FILE"
+        venv_pip install -r requirements.txt -c "$CONSTRAINTS_FILE"
+        rm -f "$CONSTRAINTS_FILE"
     else
-        pip3 install -r requirements.txt
+        venv_pip install -r requirements.txt
     fi
 
     if [ "$XDG_SESSION_TYPE" == "x11" ]; then
-        pip3 install -r requirements.x11.txt
+        venv_pip install -r requirements.x11.txt
     fi
 
     if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
-        pip3 install -r requirements.wayland.txt
+        venv_pip install -r requirements.wayland.txt
     fi
+
+    # The program directory is read-only for the user, so compile it once.
+    sudo "$INSTALL_DIR_PATH/.env/bin/python3" -m compileall -q -x '/\.env/' "$INSTALL_DIR_PATH"
 
     echo
 
@@ -342,6 +338,11 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
     echo
 
     source install_user_interface.sh
+
+    echo
+
+    # The old services, extension and files go just before the new ones start.
+    remove_legacy_install
 
     echo
 

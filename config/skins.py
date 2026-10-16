@@ -1,7 +1,7 @@
 """Skins of the on-screen dial.
 
 Built-in skins live in ``gnome/extension/skins.json`` (shipped with the Shell
-extension); each ``~/.config/asus-dialpad/skins/<id>.json`` adds or replaces
+extension); each ``~/.config/asus-turnpad/skins/<id>.json`` adds or replaces
 one. The format is described in ``SKINS.md``. Resolution mirrors
 ``resolveSkin()`` in ``gnome/extension/dial.js``.
 """

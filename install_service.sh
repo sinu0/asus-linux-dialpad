@@ -2,25 +2,35 @@
 
 source non_sudo_check.sh
 
-# ENV VARS
-if [ -z "$CONFIG_FILE_DIR_PATH" ]; then
-    CONFIG_FILE_DIR_PATH="/usr/share/asus-dialpad-driver"
-fi
+source install_paths.sh
+
 if [ -z "$LAYOUT_NAME" ]; then
     LAYOUT_NAME="asusvivobook16x"
-fi
-if [ -z "$LOGS_DIR_PATH" ]; then
-    LOGS_DIR_PATH="/var/log/asus-dialpad-driver"
-fi
-if [ -z "$SERVICE_INSTALL_DIR_PATH" ]; then
-    SERVICE_INSTALL_DIR_PATH="$HOME/.config/systemd/user"
-fi
-if [ -z "$INSTALL_DIR_PATH" ]; then
-    INSTALL_DIR_PATH="/usr/share/asus-dialpad-driver"
 fi
 if [ -z "$USER_INTERFACE" ]; then
     USER_INTERFACE=1
 fi
+
+# install_unit <template> <installed name>: fills in the paths and the
+# session environment and places the user service.
+install_unit() {
+    local template=$1
+    local name=$2
+    INSTALL_DIR_PATH=$INSTALL_DIR_PATH LAYOUT_NAME=$LAYOUT_NAME CONFIG_FILE_DIR_PATH="$CONFIG_FILE_DIR_PATH/" \
+    DISPLAY=$DISPLAY WAYLAND_DISPLAY=$WAYLAND_DISPLAY XAUTHORITY=$XAUTHORITY XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR \
+    XDG_SESSION_TYPE=$XDG_SESSION_TYPE DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS LOG_ENV_LINE=$LOG_ENV_LINE \
+        envsubst '$INSTALL_DIR_PATH $LAYOUT_NAME $CONFIG_FILE_DIR_PATH $DISPLAY $WAYLAND_DISPLAY $XAUTHORITY $XDG_RUNTIME_DIR $XDG_SESSION_TYPE $DBUS_SESSION_BUS_ADDRESS $LOG_ENV_LINE' \
+        < "$template" > "$SERVICE_INSTALL_DIR_PATH/$name"
+}
+
+# start_unit <name>: enables the service and (re)starts it now.
+start_unit() {
+    local name=$1
+    systemctl --user daemon-reload || { echo "Something went wrong when reloading the systemd user manager"; exit 1; }
+    systemctl --user enable "$name" || { echo "Something went wrong when enabling $name"; exit 1; }
+    systemctl --user restart "$name" || { echo "Something went wrong when starting $name"; exit 1; }
+    echo "$name enabled and started"
+}
 
 echo "Systemctl service(s)"
 echo
@@ -60,25 +70,12 @@ if ask "Do you want install systemctl service(s)?" y; then
     elif command -v eopkg >/dev/null 2>&1; then
         sudo eopkg install -y systemd-devel python-systemd
     else
-        echo "Not detected package manager. Driver may not work properly because required packages have not been installed. Please create an issue (https://github.com/asus-linux-drivers/asus-dialpad-driver/issues)."
+        echo "Not detected package manager. Driver may not work properly because required packages have not been installed. Please create an issue (https://github.com/sinu0/asus-linux-dialpad/issues)."
     fi
 
-    source $INSTALL_DIR_PATH/.env/bin/activate
-    pip3 install -r requirements.systemd.txt
+    venv_pip install -r requirements.systemd.txt
 
     SERVICE=1
-
-    SERVICE_WAYLAND_FILE_PATH=asus_dialpad_driver.wayland.service
-    SERVICE_X11_FILE_PATH=asus_dialpad_driver.x11.service
-    SERVICE_INSTALL_FILE_NAME="asus_dialpad_driver@.service"
-
-    XDG_RUNTIME_DIR=$(echo $XDG_RUNTIME_DIR)
-    DBUS_SESSION_BUS_ADDRESS=$(echo $DBUS_SESSION_BUS_ADDRESS)
-    XAUTHORITY=$(echo $XAUTHORITY)
-    DISPLAY=$(echo $DISPLAY)
-    WAYLAND_DISPLAY=$(echo $WAYLAND_DISPLAY)
-    XDG_SESSION_TYPE=$(echo $XDG_SESSION_TYPE)
-    ERROR_LOG_FILE_PATH="$LOGS_DIR_PATH/error.log"
 
     echo
     echo "LAYOUT_NAME: $LAYOUT_NAME"
@@ -86,16 +83,15 @@ if ask "Do you want install systemctl service(s)?" y; then
     echo
     echo "env var DISPLAY: $DISPLAY"
     echo "env var WAYLAND_DISPLAY: $WAYLAND_DISPLAY"
-    echo "env var AUTHORITY: $XAUTHORITY"
+    echo "env var XAUTHORITY: $XAUTHORITY"
     echo "env var XDG_RUNTIME_DIR: $XDG_RUNTIME_DIR"
     echo "env var DBUS_SESSION_BUS_ADDRESS: $DBUS_SESSION_BUS_ADDRESS"
     echo "env var XDG_SESSION_TYPE: $XDG_SESSION_TYPE"
 
     # with no gdm is env var XDG_SESSION_TYPE tty - https://github.com/asus-linux-drivers/asus-numberpad-driver/issues/185
     if [ "$XDG_SESSION_TYPE" == "tty" ] || [ "$XDG_SESSION_TYPE" == "" ]; then
-
         echo
-        echo "Env var XDG_SESSION_TYPE is: `$XDG_SESSION_TYPE`"
+        echo "Env var XDG_SESSION_TYPE is: \"$XDG_SESSION_TYPE\""
         echo
         echo "Please, select your display manager:"
         echo
@@ -105,18 +101,14 @@ if ask "Do you want install systemctl service(s)?" y; then
             if [ "$SELECTED_OPT" = "Quit" ]; then
                 exit 0
             fi
-
-            XDG_SESSION_TYPE=$SELECTED_OPT
-
-            echo
-            echo "(SET UP FOR DRIVER ONLY) env var XDG_SESSION_TYPE: $XDG_SESSION_TYPE"
-            echo
-
-            if [ -z "$LAYOUT_NAME" ]; then
-                echo "invalid option $REPLY"
-            else
+            if [ -n "$SELECTED_OPT" ]; then
+                XDG_SESSION_TYPE=$SELECTED_OPT
+                echo
+                echo "(SET UP FOR DRIVER ONLY) env var XDG_SESSION_TYPE: $XDG_SESSION_TYPE"
+                echo
                 break
             fi
+            echo "invalid option $REPLY"
         done
     fi
 
@@ -128,100 +120,25 @@ if ask "Do you want install systemctl service(s)?" y; then
         LOG_ENV_LINE=""
     fi
 
-    USER_INTERFACE_SERVICE_WAYLAND_FILE_PATH=asus_dialpad_driver_ui.wayland.service
+    # Plasma brings its own session environment and session target.
+    SESSION_KIND=$XDG_SESSION_TYPE
     if [ "$XDG_SESSION_TYPE" == "wayland" ] && \
        { [[ ":$XDG_CURRENT_DESKTOP:" == *:KDE:* ]] || [[ "$DESKTOP_SESSION" == plasma* ]]; }; then
-        SERVICE_WAYLAND_FILE_PATH=asus_dialpad_driver.plasma-wayland.service
-        USER_INTERFACE_SERVICE_WAYLAND_FILE_PATH=asus_dialpad_driver_ui.plasma-wayland.service
+        SESSION_KIND=plasma-wayland
     fi
-
-    if [ "$XDG_SESSION_TYPE" == "x11" ]; then
-        cat "$SERVICE_X11_FILE_PATH" | INSTALL_DIR_PATH=$INSTALL_DIR_PATH LAYOUT_NAME=$LAYOUT_NAME CONFIG_FILE_DIR_PATH="$CONFIG_FILE_DIR_PATH/" DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR XDG_SESSION_TYPE=$XDG_SESSION_TYPE DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS LOG_ENV_LINE=$LOG_ENV_LINE envsubst '$INSTALL_DIR_PATH $LAYOUT_NAME $CONFIG_FILE_DIR_PATH $DISPLAY $XAUTHORITY $XDG_RUNTIME_DIR $XDG_SESSION_TYPE $DBUS_SESSION_BUS_ADDRESS $LOG_ENV_LINE' | tee "$SERVICE_INSTALL_DIR_PATH/$SERVICE_INSTALL_FILE_NAME" >/dev/null
-    else
+    if [ "$XDG_SESSION_TYPE" != "x11" ]; then
         echo "Unfortunatelly you will not be able use feature: Disabling Touchpad (e.g. Fn+special key) disables DialPad aswell, at this moment is supported only X11"
-        # DISPLAY=$DISPLAY for Xwayland
-        cat "$SERVICE_WAYLAND_FILE_PATH" | INSTALL_DIR_PATH=$INSTALL_DIR_PATH LAYOUT_NAME=$LAYOUT_NAME CONFIG_FILE_DIR_PATH="$CONFIG_FILE_DIR_PATH/" DISPLAY=$DISPLAY WAYLAND_DISPLAY=$WAYLAND_DISPLAY XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR XDG_SESSION_TYPE=$XDG_SESSION_TYPE DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS LOG_ENV_LINE=$LOG_ENV_LINE envsubst '$INSTALL_DIR_PATH $LAYOUT_NAME $CONFIG_FILE_DIR_PATH $DISPLAY $WAYLAND_DISPLAY $XDG_RUNTIME_DIR $XDG_SESSION_TYPE $DBUS_SESSION_BUS_ADDRESS $LOG_ENV_LINE' | tee "$SERVICE_INSTALL_DIR_PATH/$SERVICE_INSTALL_FILE_NAME" >/dev/null
     fi
 
-    if [[ $? != 0 ]]; then
-        echo "Something went wrong when moving the asus_dialpad_driver.service"
-        exit 1
-    else
-        echo "Asus DialPad Driver service placed"
-    fi
-
-    systemctl --user daemon-reload
-
-    if [[ $? != 0 ]]; then
-        echo "Something went wrong when was called systemctl daemon reload"
-        exit 1
-    else
-        echo "Systemctl daemon reloaded"
-    fi
-
-    systemctl enable --user asus_dialpad_driver@$USER.service
-
-    if [[ $? != 0 ]]; then
-        echo "Something went wrong when enabling the asus_dialpad_driver.service"
-        exit 1
-    else
-        echo "Asus DialPad driver service enabled"
-    fi
-
-    systemctl restart --user asus_dialpad_driver@$USER.service
-    if [[ $? != 0 ]]; then
-        echo "Something went wrong when starting the asus_dialpad_driver.service"
-        exit 1
-    else
-        echo "Asus DialPad driver service started"
-    fi
+    mkdir -p "$SERVICE_INSTALL_DIR_PATH"
+    install_unit "$SLUG.$SESSION_KIND.service" "$DRIVER_SERVICE" || { echo "Something went wrong when placing $DRIVER_SERVICE"; exit 1; }
+    echo "$DRIVER_SERVICE placed"
+    start_unit "$DRIVER_SERVICE"
 
     if [ "$USER_INTERFACE" -eq 1 ]; then
-
-        USER_INTERFACE_SERVICE_X11_FILE_PATH=asus_dialpad_driver_ui.x11.service
-        USER_INTERFACE_SERVICE_INSTALL_FILE_NAME="asus_dialpad_driver_ui@.service"
-
-        if [ "$XDG_SESSION_TYPE" == "x11" ]; then
-            cat "$USER_INTERFACE_SERVICE_X11_FILE_PATH" | INSTALL_DIR_PATH=$INSTALL_DIR_PATH LAYOUT_NAME=$LAYOUT_NAME CONFIG_FILE_DIR_PATH="$CONFIG_FILE_DIR_PATH/" DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR XDG_SESSION_TYPE=$XDG_SESSION_TYPE DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS LOG_ENV_LINE=$LOG_ENV_LINE envsubst '$INSTALL_DIR_PATH $LAYOUT_NAME $CONFIG_FILE_DIR_PATH $DISPLAY $XAUTHORITY $XDG_RUNTIME_DIR $XDG_SESSION_TYPE $DBUS_SESSION_BUS_ADDRESS $LOG_ENV_LINE' | tee "$SERVICE_INSTALL_DIR_PATH/$USER_INTERFACE_SERVICE_INSTALL_FILE_NAME" >/dev/null
-        else
-            # DISPLAY=$DISPLAY for Xwayland
-            cat "$USER_INTERFACE_SERVICE_WAYLAND_FILE_PATH" | INSTALL_DIR_PATH=$INSTALL_DIR_PATH LAYOUT_NAME=$LAYOUT_NAME CONFIG_FILE_DIR_PATH="$CONFIG_FILE_DIR_PATH/" DISPLAY=$DISPLAY WAYLAND_DISPLAY=$WAYLAND_DISPLAY XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR XDG_SESSION_TYPE=$XDG_SESSION_TYPE DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS LOG_ENV_LINE=$LOG_ENV_LINE envsubst '$INSTALL_DIR_PATH $LAYOUT_NAME $CONFIG_FILE_DIR_PATH $DISPLAY $WAYLAND_DISPLAY $XDG_RUNTIME_DIR $XDG_SESSION_TYPE $DBUS_SESSION_BUS_ADDRESS $LOG_ENV_LINE' | tee "$SERVICE_INSTALL_DIR_PATH/$USER_INTERFACE_SERVICE_INSTALL_FILE_NAME" >/dev/null
-        fi
-
         echo
-
-        if [[ $? != 0 ]]; then
-            echo "Something went wrong when moving the asus_dialpad_driver_ui.service"
-            exit 1
-        else
-            echo "Asus DialPad Driver User Interface service placed"
-        fi
-
-        systemctl --user daemon-reload
-
-        if [[ $? != 0 ]]; then
-            echo "Something went wrong when was called systemctl daemon reload"
-            exit 1
-        else
-            echo "Systemctl daemon reloaded"
-        fi
-
-        systemctl enable --user asus_dialpad_driver_ui@$USER.service
-
-        if [[ $? != 0 ]]; then
-            echo "Something went wrong when enabling the asus_dialpad_driver.service"
-            exit 1
-        else
-            echo "Asus DialPad driver User Interface service enabled"
-        fi
-
-        systemctl restart --user asus_dialpad_driver_ui@$USER.service
-        if [[ $? != 0 ]]; then
-            echo "Something went wrong when starting the asus_dialpad_driver.service"
-            exit 1
-        else
-            echo "Asus DialPad driver User Interface service started"
-        fi
-
+        install_unit "$SLUG-ui.$SESSION_KIND.service" "$UI_SERVICE" || { echo "Something went wrong when placing $UI_SERVICE"; exit 1; }
+        echo "$UI_SERVICE placed"
+        start_unit "$UI_SERVICE"
     fi
 fi

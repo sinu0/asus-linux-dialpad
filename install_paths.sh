@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+# Names and locations of an installed Turnpad, sourced by every install and
+# uninstall script. Twins in config/identity.py; tests/test_identity.py
+# checks that both agree. Each path can be overridden from the environment.
+#
+# Layout (Filesystem Hierarchy Standard for software installed outside the
+# package manager):
+#   /opt/asus-turnpad                  program and its Python environment (root)
+#   ~/.config/asus-turnpad             config.json, skins/, driver state (user)
+#   ~/.config/systemd/user             user services
+#   /etc/udev/rules.d, /etc/modules-load.d   device access, kernel modules
+#   /var/log/asus-turnpad              installer logs
+
+SLUG="asus-turnpad"
+APP_ID="io.github.sinu0.AsusTurnpad"
+GNOME_EXTENSION_UUID="asus-turnpad@sinu0.github.io"
+
+DRIVER_SERVICE="$SLUG.service"
+UI_SERVICE="$SLUG-ui.service"
+
+: "${INSTALL_DIR_PATH:=/opt/asus-turnpad}"
+: "${CONFIG_FILE_DIR_PATH:=${XDG_CONFIG_HOME:-$HOME/.config}/$SLUG}"
+: "${CONFIG_FILE_NAME:=dialpad_dev}"
+: "${CONFIG_FILE_PATH:=$CONFIG_FILE_DIR_PATH/$CONFIG_FILE_NAME}"
+: "${LOGS_DIR_PATH:=/var/log/$SLUG}"
+: "${SERVICE_INSTALL_DIR_PATH:=$HOME/.config/systemd/user}"
+: "${INSTALL_UDEV_DIR_PATH:=/etc/udev}"
+: "${MODULES_LOAD_FILE_PATH:=/etc/modules-load.d/$SLUG.conf}"
+
+GNOME_EXTENSION_DIR="$HOME/.local/share/gnome-shell/extensions/$GNOME_EXTENSION_UUID"
+LAUNCHER_PATH="$HOME/.local/share/applications/$APP_ID.desktop"
+ICON_PATH="$HOME/.local/share/icons/hicolor/scalable/apps/$APP_ID.svg"
+
+# udev rules sort before 73-seat-late.rules so their uaccess tags apply.
+UDEV_RULE_UINPUT="$INSTALL_UDEV_DIR_PATH/rules.d/70-$SLUG-uinput.rules"
+UDEV_RULE_I2C="$INSTALL_UDEV_DIR_PATH/rules.d/70-$SLUG-i2c-dev.rules"
+UDEV_RULE_HIDRAW="$INSTALL_UDEV_DIR_PATH/rules.d/70-$SLUG-hidraw.rules"
+
+# pip of the program's Python environment, which root owns.
+venv_pip() {
+    sudo env PIP_ROOT_USER_ACTION=ignore "$INSTALL_DIR_PATH/.env/bin/pip3" "$@"
+}

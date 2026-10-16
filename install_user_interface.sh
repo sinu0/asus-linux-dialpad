@@ -2,19 +2,7 @@
 
 source non_sudo_check.sh
 
-# ENV VARS
-if [ -z "$INSTALL_DIR_PATH" ]; then
-    INSTALL_DIR_PATH="/usr/share/asus-dialpad-driver"
-fi
-if [ -z "$CONFIG_FILE_DIR_PATH" ]; then
-    CONFIG_FILE_DIR_PATH="$INSTALL_DIR_PATH"
-fi
-if [ -z "$CONFIG_FILE_NAME" ]; then
-    CONFIG_FILE_NAME="dialpad_dev"
-fi
-if [ -z "$CONFIG_FILE_PATH" ]; then
-    CONFIG_FILE_PATH="$CONFIG_FILE_DIR_PATH/$CONFIG_FILE_NAME"
-fi
+source install_paths.sh
 
 echo
 echo "DialPad User Interface Installation"
@@ -33,13 +21,11 @@ fi
 
 if ask "Do you want to install the DialPad User Interface?" "$UI_DEFAULT"; then
 
-    source $INSTALL_DIR_PATH/.env/bin/activate
-    pip3 install -r requirements.ui.txt
+    venv_pip install -r requirements.ui.txt
 
     USER_INTERFACE=1
 
     sudo install dialpad_ui.py "$INSTALL_DIR_PATH"
-    sudo chown -R $USER "$INSTALL_DIR_PATH"
 
     echo
 

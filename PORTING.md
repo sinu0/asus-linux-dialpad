@@ -8,16 +8,16 @@ the corner LED. Both can be handled without code changes:
 1. **Install** with `bash install.sh` and pick the closest layout when asked
    (`proartp16`, `asusvivobook16x` or `zenbookpro14`). Known touchpads are
    listed in `laptop_touchpad_dialpad_layouts.csv`.
-2. **Calibrate.** Open *ProArt DialPad Control → Calibration → Guided calibration*,
+2. **Calibrate.** Open *Turnpad → Calibration → Guided calibration*,
    press *Start*, trace the printed outer ring once with one finger, lift it,
    then trace the edge of the centre button. The measured geometry is saved
-   to `~/.config/asus-dialpad/config.json` together with the layout name.
+   to `~/.config/asus-turnpad/config.json` together with the layout name.
 3. **Corner icon.** If holding the illuminated corner does not toggle the
    DialPad, adjust the activation area (width / height, top-right corner) on
    the same page.
 4. **Overlay.** On GNOME 45–51 the Shell extension draws the dial (tested on
    GNOME 51 only). Other desktops use the original PySide overlay service
-   `asus_dialpad_driver_ui@.service`.
+   `asus-turnpad-ui.service`.
 
 If the corner LED does not light up, the touchpad probably needs the other
 I2C address: the driver uses `0x38` for `ASUF1416`, `ASUF1205` and

@@ -2,28 +2,33 @@
 
 ## Workflow / architecture
 
-- **Name:** the project is shown as **Turnpad** (`config/identity.py`). Technical identifiers (D-Bus `io.github.asuslinuxdrivers.DialPad`, `/usr/share/asus-dialpad-driver`, `~/.config/asus-dialpad`, extension UUID) are unchanged for compatibility; "DialPad" in docs names the ASUS hardware feature.
+- **Name:** the project is shown as **Turnpad**; the technical name is `asus-turnpad`. All identifiers live in `config/identity.py` (Python) and `install_paths.sh` (shell); `tests/test_identity.py` keeps them and their JS/JSON/.desktop twins in sync. "DialPad" in docs names the ASUS hardware feature.
+- **Supported desktops:** GNOME only for now. Other desktops start with an issue (`.github/ISSUE_TEMPLATE/desktop-support.yml`); do not add one unasked.
+- **Before the rename** the project was installed as `asus-dialpad-driver` (`/usr/share/asus-dialpad-driver`, `~/.config/asus-dialpad`, D-Bus `io.github.asuslinuxdrivers.DialPad`, extension `dialpad@asus-linux-drivers`, services `asus_dialpad_driver@$USER`). `install_migrate.sh` moves settings and removes those leftovers on every install and uninstall.
 - **Root:** Single-repo, single-app. No monorepo, no build steps, no CI; unit tests in `tests/`.
 - **Entrypoints:**
-  - `dialpad.py` – main driver daemon, ~3000 lines, monolithic. Runs from systemd `asus_dialpad_driver@.service` via a Python venv at `/usr/share/asus-dialpad-driver/.env`.
-  - `dialpad_ui.py` – legacy PySide6 overlay, separate `asus_dialpad_driver_ui@.service`. On GNOME replaced by `gnome/extension/`.
+  - `dialpad.py` – main driver daemon, ~3000 lines, monolithic. Runs as the user service `asus-turnpad.service` via a Python venv at `/opt/asus-turnpad/.env`.
+  - `dialpad_ui.py` – legacy PySide6 overlay, separate `asus-turnpad-ui.service`. On GNOME replaced by `gnome/extension/`.
   - `install.sh` – interactive bash installer, sources sub-scripts from repo root.
-- **Install target:** `/usr/share/asus-dialpad-driver/`. Source and installed versions can diverge; diff before debugging.
+- **Install target:** `/opt/asus-turnpad/`, owned by root (FHS layout in `install_paths.sh`). User data: `~/.config/asus-turnpad/` (`config.json`, `skins/`, driver state `dialpad_dev`). Source and installed versions can diverge; diff before debugging.
 - **Fork additions:**
-  - `dialpad_dbus.py` – session D-Bus service (`io.github.asuslinuxdrivers.DialPad`), signal `OverlayState(bsasasidsbbb)`.
+  - `dialpad_dbus.py` – session D-Bus service (`io.github.sinu0.AsusTurnpad.Driver`), signal `OverlayState(bsasasidsbbb)`.
   - `dial_gesture.py` – pure gesture maths (angle, slices, `RotationTracker`), no hardware imports; unit tested.
   - `tests/` – `unittest` suite for gesture maths, legacy adapter and D-Bus overlay state.
   - `config/` – JSON config model, macro runtime, legacy adapter, migration from old `dialpad_dev` INI + `layouts/*.py`.
   - `config/presets.py` – ASUS Dial-style function library and pre-programmed app packs (browser, GIMP, Krita, Inkscape, Blender, Kdenlive, Resolve, LibreOffice, code editors, Spotify, video players); `suggested_color()` colours functions without one.
   - `config/labels.py` – key/macro labels shared by the GUI and the overlay hints (includes the evdev code table for old numeric keys).
-  - `config_app/` – GTK4/Libadwaita settings GUI (`io.github.asuslinuxdrivers.DialPadControl`).
-  - `gnome/extension/` – GNOME Shell 50 extension (`dialpad@asus-linux-drivers`), renders radial dial natively. `dial.js` holds all painting and imports only `cairo` (shared with `tools/`); `extension.js` owns actors, D-Bus and config watching; `layers.js` paints in three layers (background, content, finger dot) that repaint only when their look changes, see "Rendering cost" in `ARCHITECTURE.md`. Every extension file must be listed in `install.sh` and `install_gnome_extension.sh` (`tests/test_install.py`).
-  - `gnome/extension/skins.json` – built-in skins (`glass`, `midnight`, `frost`, `proart`, `classic`); user skins are `~/.config/asus-dialpad/skins/<id>.json`. Format and AI workflow in `SKINS.md`.
+  - `config_app/` – GTK4/Libadwaita settings GUI (`io.github.sinu0.AsusTurnpad`).
+  - `gnome/extension/` – GNOME Shell 45–51 extension (`asus-turnpad@sinu0.github.io`), renders radial dial natively. `dial.js` holds all painting and imports only `cairo` (shared with `tools/`); `extension.js` owns actors, D-Bus and config watching; `layers.js` paints in three layers (background, content, finger dot) that repaint only when their look changes, see "Rendering cost" in `ARCHITECTURE.md`. Every extension file must be listed in `install.sh` and `install_gnome_extension.sh` (`tests/test_install.py`).
+  - `gnome/extension/skins.json` – built-in skins (`glass`, `midnight`, `frost`, `proart`, `classic`); user skins are `~/.config/asus-turnpad/skins/<id>.json`. Format and AI workflow in `SKINS.md`.
   - `config/skins.py` – loads/resolves skins in Python (mirrors `resolveSkin()` in `dial.js`, keep both in sync); `PALETTE_KEYS` drives the editor, `SKINS.md` and the AI prompt.
   - `overlay/painter.py` – toolkit-free Cairo port of `dial.js` (settings app previews now, overlays on other desktops later); icons come through a callback, `overlay/gtk_icons.py` for GTK. Keep geometry in sync with `dial.js`.
   - `desktop/` – everything that differs per desktop on the Python side: `active_window.py` (focused-window backends registered with `@backend`, tried in order) and `color_scheme.py` (light/dark via the XDG portal, gsettings fallback).
   - `config/identity.py` – display name (`Turnpad`) and all technical identifiers; `tests/test_identity.py` checks their twins in JS, JSON, `.desktop` and shell files.
   - `install_overlay.sh` – picks the on-screen dial frontend per desktop (GNOME → `install_gnome_extension.sh`).
+  - `install_paths.sh` – every installed path and name for the shell scripts (FHS: `/opt`, `~/.config`, `/etc/udev/rules.d`, `/etc/modules-load.d`, `/var/log`); scripts source it and never set their own defaults (`tests/test_identity.py`). The program directory is root-owned: install Python packages with `venv_pip`, never write to it at runtime.
+  - `install_migrate.sh` – moves installs from before the rename (see Name above).
+  - `uninstall.sh` – removes everything installed plus pre-rename leftovers; keeps `~/.config/asus-turnpad` unless confirmed with `--interactive`.
   - `ARCHITECTURE.md` – component map and how to add a desktop environment.
   - `tools/` – `render_overlay_preview.js` (gjs, paints `preview/overlay-*.png` with `dial.js`) and `screenshot_settings.py` (opens the app on a demo config, saves `preview/settings-*.png`; never writes the user's config).
   - `install_gnome_extension.sh` – sourced by `install.sh`.
@@ -33,10 +38,10 @@
 - **Unit tests:** `python3 -m unittest discover -s tests -v`
 - **Syntax check driver:** `python3 -c "import ast; ast.parse(open('dialpad.py').read())"`
 - **Check all Python:** `python3 -m compileall -q config config_app desktop overlay tools dialpad_dbus.py`
-- **Verify bash scripts:** `bash -n install.sh install_gnome_extension.sh`
+- **Verify bash scripts:** `bash -n install*.sh uninstall.sh`
 - **Smoke test config:** `python3 -m config.runtime && python3 -m config.legacy_adapter`
 - **Validate GNOME extension (outside Shell):** `gjs -m gnome/extension/extension.js` – will fail with resource import errors because `resource:///org/gnome/shell/ui/main.js` only exists inside the shell process; that is expected and confirms ESM syntax is valid.
-- **Desktop file validate:** `desktop-file-validate config_app/io.github.asuslinuxdrivers.DialPadControl.desktop`
+- **Desktop file validate:** `desktop-file-validate config_app/io.github.sinu0.AsusTurnpad.desktop`
 - **Regenerate README pictures:** `gjs -m tools/render_overlay_preview.js && python3 tools/screenshot_settings.py` (the second one briefly opens a window).
 - **Test D-Bus service standalone:** `python3 dialpad_dbus.py` – starts, emits one invisible state, exits.
 
@@ -51,16 +56,16 @@
 
 - GNOME Shell **does not reload extension code** on disable/enable; a full Shell restart (logout/login) is required after code changes.
 - `gnome-extensions enable` will report ERROR until Shell has loaded the extension once.
-- Use `gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Extensions.GetExtensionErrors 'dialpad@asus-linux-drivers'` to read errors.
+- Use `gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Extensions.GetExtensionErrors 'asus-turnpad@sinu0.github.io'` to read errors.
 - `import * as Main` (named), not `import Main from` (default) for `resource:///org/gnome/shell/ui/main.js`.
-- Extension replaces `asus_dialpad_driver_ui@.service` on GNOME; the config app calls `ReloadConfig` via D-Bus after saving.
+- Extension replaces `asus-turnpad-ui.service` on GNOME; the config app calls `ReloadConfig` via D-Bus after saving.
 
 ## D-Bus contract
 
 | Item | Value |
 |---|---|
-| Bus name / Interface | `io.github.asuslinuxdrivers.DialPad` |
-| Object path | `/io/github/asuslinuxdrivers/DialPad` |
+| Bus name / Interface | `io.github.sinu0.AsusTurnpad.Driver` |
+| Object path | `/io/github/sinu0/AsusTurnpad/Driver` |
 | Signal | `OverlayState` – signature `bsasasidsbbb` (enabled, title, titles, icons, value, value_angle_start, unit, center_pressed, value_show_only_progress, touching) – keep it fixed for older extensions |
 | Signal | `OverlayDetails(s)` – JSON: profile, mode (`multi`/`single`), colors[] (menu order), color, hints {cw, ccw, center}, hold_returns, pointer (degrees, -1 = none). Emitted before `OverlayState` in the same idle callback. Driver sends it via `send_to_socket({"details": {...}})`; details-only payloads emit no `OverlayState`. |
 | Signal | `CalibrationProgress(s)` – JSON from `CalibrationSession.state()` plus layout, touchpad_max_x/y and the latest `point` |
@@ -68,7 +73,7 @@
 
 ## Config migration behavior
 
-- First launch of `DialPad Control` app migrates old `dialpad_dev` INI + `layouts/proartp16.py` into `~/.config/asus-dialpad/config.json`.
+- First launch of the Turnpad app migrates old `dialpad_dev` INI + `layouts/proartp16.py` into `~/.config/asus-turnpad/config.json`.
 - If JSON exists, migration is skipped. To re-migrate: delete the JSON file first.
 - The driver loads JSON config at startup if it exists; otherwise falls back to legacy layout Python.
 - Macros (`MacroStep` list) appear as `{"macro": [...]}` inside legacy `app_shortcuts` dict entries. `emulate_shortcuts()` handles them before legacy key/command logic.

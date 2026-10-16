@@ -30,9 +30,11 @@ Turnpad is a set of separately running parts that talk over the session D-Bus an
 
 ## Names and identifiers
 
-`config/identity.py` holds the display name and every technical identifier (D-Bus name and path, settings app id, config directory, extension UUID, install directory). Each identifier has twins in JavaScript, JSON, `.desktop` and shell files; `tests/test_identity.py` fails when they drift apart. Changing a technical identifier breaks existing installs (their config directory and running extension), so it also needs a migration.
+`config/identity.py` holds the display name and every technical identifier (D-Bus name and path, settings app id, config directory, extension UUID, install directory); `install_paths.sh` is its shell twin and also holds every installed path. Each identifier has twins in JavaScript, JSON and `.desktop` files; `tests/test_identity.py` fails when they drift apart. Changing a technical identifier breaks existing installs (their config directory and running extension), so it also needs a step in `install_migrate.sh`, like the one from the old `asus-dialpad-driver` names.
 
 ## Adding a desktop environment
+
+Turnpad supports GNOME only for now. A new desktop starts with a [desktop support request](https://github.com/sinu0/asus-linux-dialpad/issues/new?template=desktop-support.yml), ideally from someone who can test on it.
 
 Three integration points, all optional. The driver already works everywhere evdev and uinput do.
 
@@ -54,8 +56,8 @@ It returns `(binary path, title)` or raises. Backends are tried in registration 
 
 A frontend is a transparent, click-through window or layer above all others that does three things:
 
-1. Subscribes to `OverlayState` and `OverlayDetails` on `io.github.asuslinuxdrivers.DialPad`. Call `GetOverlayDetails()` once at start. The signal contract is in `AGENTS.md`.
-2. Reads the `overlay` section of `~/.config/asus-dialpad/config.json` (scale, position, hide delay, hints, pointer, accent, skin, skin_light, follow_system_style) and reloads it when the file changes.
+1. Subscribes to `OverlayState` and `OverlayDetails` on `io.github.sinu0.AsusTurnpad.Driver`. Call `GetOverlayDetails()` once at start. The signal contract is in `AGENTS.md`.
+2. Reads the `overlay` section of `~/.config/asus-turnpad/config.json` (scale, position, hide delay, hints, pointer, accent, skin, skin_light, follow_system_style) and reloads it when the file changes.
 3. Paints with `overlay.painter.paint_dial()` (Python and Cairo; icons through `overlay.gtk_icons.draw_icon` in GTK) or with `gnome/extension/dial.js` (GJS). Skins then work without extra code.
 
 On wlroots compositors, KDE Plasma and COSMIC, `gtk4-layer-shell` gives such a surface without stealing focus or appearing in Alt-Tab. GNOME needs the Shell extension, because Mutter has no layer-shell.

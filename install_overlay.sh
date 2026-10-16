@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Installs the on-screen dial that suits the running desktop. Every desktop
-# frontend reads the same D-Bus signals (io.github.asuslinuxdrivers.DialPad)
+# frontend reads the same D-Bus signals (io.github.sinu0.AsusTurnpad.Driver)
 # and config.json; see ARCHITECTURE.md. A new frontend gets its own
 # install_<desktop>_overlay.sh and a case here.
 

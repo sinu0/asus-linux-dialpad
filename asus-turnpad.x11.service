@@ -1,5 +1,5 @@
 [Unit]
-Description=Asus DialPad Driver
+Description=Turnpad driver (ASUS DialPad)
 # Stop with the graphical session and start again with the next one, so a
 # logout does not leave the service restarting without a display.
 PartOf=graphical-session.target
@@ -17,7 +17,7 @@ RestartSec=1
 StandardOutput=null
 StandardError=null
 Environment="DISPLAY=$DISPLAY"
-Environment="WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
+Environment="XAUTHORITY=$XAUTHORITY"
 Environment="DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS"
 Environment="XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
 Environment="XDG_SESSION_TYPE=$XDG_SESSION_TYPE"

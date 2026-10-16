@@ -26,7 +26,11 @@ bash install.sh
 
 The installer needs `sudo`, asks no questions (use `bash install.sh --interactive` to choose layout, co-activator key and services yourself), keeps your existing configuration, and collects no data. Afterwards log out and back in, hold the illuminated corner icon to switch the DialPad on, and open **Turnpad** from the applications menu. To update, `git pull` and run `bash install.sh` again; to remove, run `bash uninstall.sh`.
 
-Configuration lives in `~/.config/asus-dialpad/config.json`; the original `dialpad_dev` + `layouts/*.py` setup keeps working as a fallback.
+Configuration lives in `~/.config/asus-turnpad/config.json`; the original `dialpad_dev` + `layouts/*.py` setup keeps working as a fallback. Updating from a version before the rename (`asus-dialpad-driver`) moves your settings over and removes the old files and services.
+
+### Supported desktops
+
+Turnpad currently supports **GNOME** (Shell 45–51). The driver itself also runs on other desktops, but without the native on-screen dial and skins. Support for another desktop (KDE Plasma, Hyprland, sway, COSMIC…) starts with an issue: [request your desktop](https://github.com/sinu0/asus-linux-dialpad/issues/new?template=desktop-support.yml). [ARCHITECTURE.md](ARCHITECTURE.md#adding-a-desktop-environment) describes what a port involves.
 
 ---
 
@@ -113,29 +117,37 @@ $ cd asus-linux-dialpad
 or customized install:
 
 ```
-# ENV VARS (with the defaults)
-INSTALL_DIR_PATH="/usr/share/asus-dialpad-driver"
-LOGS_DIR_PATH="/var/log/asus-dialpad-driver" # only for install and uninstall logs
-INSTALL_UDEV_DIR_PATH="/usr/lib/udev"
+# ENV VARS (with the defaults, see install_paths.sh)
+INSTALL_DIR_PATH="/opt/asus-turnpad"                 # program and its Python environment, owned by root
+CONFIG_FILE_DIR_PATH="$HOME/.config/asus-turnpad"    # settings, skins and driver state
+LOGS_DIR_PATH="/var/log/asus-turnpad"                # only for install and uninstall logs
+INSTALL_UDEV_DIR_PATH="/etc/udev"
 ```
+
+Where things go follows the Filesystem Hierarchy Standard for software installed outside the package manager:
+
+| Path | Content |
+| --- | --- |
+| `/opt/asus-turnpad` | Driver, settings app, GNOME extension source and the Python environment (read-only for users) |
+| `~/.config/asus-turnpad` | `config.json`, `skins/`, driver state `dialpad_dev` |
+| `~/.config/systemd/user/asus-turnpad.service` | The driver as a user service, started with the graphical session |
+| `~/.local/share/gnome-shell/extensions/asus-turnpad@sinu0.github.io` | The on-screen dial for GNOME |
+| `/etc/udev/rules.d/70-asus-turnpad-*.rules`, `/etc/modules-load.d/asus-turnpad.conf` | Access to the touchpad's I2C and hidraw nodes and to uinput; kernel modules loaded at boot |
+| `/var/log/asus-turnpad` | Logs of the installer and uninstaller |
 
 ### Installation on Immutable Systems (BazziteOS, Fedora Silverblue, Kinoite)
 
-For immutable Linux distributions, use custom paths and expect two reboots:
+The default paths are writable on immutable distributions (`/opt` and `/etc`); expect two reboots:
 
 ```bash
 # First run - installs system packages
-$ INSTALL_DIR_PATH="/home/$USER/.local/share/asus-dialpad-driver" \
-  INSTALL_UDEV_DIR_PATH="/etc/udev" \
-  bash install.sh
+$ bash install.sh
 
 # Reboot when prompted (required for package layering)
 $ systemctl reboot
 
 # Second run - completes driver installation
-$ INSTALL_DIR_PATH="/home/$USER/.local/share/asus-dialpad-driver" \
-  INSTALL_UDEV_DIR_PATH="/etc/udev" \
-  bash install.sh
+$ bash install.sh
 
 # Final reboot (required for group membership)
 $ systemctl reboot
@@ -274,28 +286,11 @@ Then you can enable the service, `services.asus-dialpad-driver`, in your `config
 To uninstall run
 
 ```bash
-$ bash uninstall.sh
-
-# ENV VARS (with the defaults)
-INSTALL_DIR_PATH="/usr/share/asus-dialpad-driver"
-CONFIG_FILE_DIR_PATH="$INSTALL_DIR_PATH"
-CONFIG_FILE_NAME="dialpad_dev"
-LOGS_DIR_PATH="/var/log/asus-dialpad-driver" # only for install and uninstall logs
-SERVICE_INSTALL_DIR_PATH="$HOME/.config/systemd/user"
-INSTALL_UDEV_DIR_PATH="/usr/lib/udev"
-
-# e.g. for BazziteOS (https://github.com/asus-linux-drivers/asus-numberpad-driver/issues/198)
-$ INSTALL_DIR_PATH="/home/$USER/.local/share/asus-dialpad-driver"\
-INSTALL_UDEV_DIR_PATH="/etc/udev/"\
-bash uninstall.sh
+$ bash uninstall.sh                  # keeps your settings in ~/.config/asus-turnpad
+$ bash uninstall.sh --interactive    # asks whether to remove them too
 ```
 
-or run separately parts of the uninstall script
-
-```bash
-$ bash uninstall_service.sh
-$ bash uninstall_user_groups.sh
-```
+It removes the services, the GNOME extension, `/opt/asus-turnpad`, the udev rules and module list, and anything left from a version before the rename. It uses the same paths as the installer (`install_paths.sh`), so pass the same environment variables if you changed them. Group memberships (`input`, `uinput`, `i2c`) stay.
 
 ## Layouts
 
@@ -316,7 +311,7 @@ Layouts below are named by laptop models, but the name is not important. What is
 - layout name is required as first argument and as second argument can be optionally passed path to directory where will be autocreated config `dialpad_dev` (default is current working directory):
 
 ```
-/usr/share/asus-dialpad-driver/.env/bin/python3 /usr/share/asus-dialpad-driver/dialpad.py <asusvivobook16x|proartp16|..>
+/opt/asus-turnpad/.env/bin/python3 /opt/asus-turnpad/dialpad.py <asusvivobook16x|proartp16|..> ~/.config/asus-turnpad/
 ```
 
 **How to install the driver when is used conda for managing multiple Python versions?**
@@ -331,7 +326,7 @@ $ conda activate conda_env
 Python 3.11.13
 (conda_env) $ bash install.sh
 ...
-$ (conda_env) $ /usr/share/asus-numberpad-driver/.env/bin/python3 --version
+$ (conda_env) $ /opt/asus-turnpad/.env/bin/python3 --version
 Python 3.11.13
 (conda_env) $ conda deactivate
 $
@@ -365,9 +360,9 @@ Normally you hold the illuminated corner icon. From a terminal, change `enabled`
 
 ```
 # enabling DialPad via command line
-sed -i "s/^enabled = 0/enabled = 1/" /usr/share/asus-dialpad-driver/dialpad_dev
+sed -i "s/^enabled = 0/enabled = 1/" ~/.config/asus-turnpad/dialpad_dev
 # disabling
-sed -i "s/^enabled = 1/enabled = 0/" /usr/share/asus-dialpad-driver/dialpad_dev
+sed -i "s/^enabled = 1/enabled = 0/" ~/.config/asus-turnpad/dialpad_dev
 ```
 
 ## Configuration
@@ -390,9 +385,9 @@ You do not need to edit these files; they are described for backups and troubles
 
 | File | Content |
 | --- | --- |
-| `~/.config/asus-dialpad/config.json` | Everything set in the app: profiles, functions, behaviour, on-screen dial and dial geometry. Written atomically; the driver and the GNOME extension reload it after every change. Use *Import/Export* to move profiles between computers. |
-| `/usr/share/asus-dialpad-driver/dialpad_dev` | Runtime state of the driver: `enabled` (DialPad on/off) and `socket_enabled` (messages for the PySide overlay on other desktops; the GNOME overlay does not need it). Its other keys come from the original driver and are ignored while `config.json` exists. |
-| `/usr/share/asus-dialpad-driver/layouts/*.py` | Default geometry of each touchpad family and the original Python format of shortcuts. Used only until `config.json` exists — the first start of the app converts them. |
+| `~/.config/asus-turnpad/config.json` | Everything set in the app: profiles, functions, behaviour, on-screen dial and dial geometry. Written atomically; the driver and the GNOME extension reload it after every change. Use *Import/Export* to move profiles between computers. |
+| `~/.config/asus-turnpad/dialpad_dev` | Runtime state of the driver: `enabled` (DialPad on/off) and `socket_enabled` (messages for the PySide overlay on other desktops; the GNOME overlay does not need it). Its other keys come from the original driver and are ignored while `config.json` exists. |
+| `/opt/asus-turnpad/layouts/*.py` | Default geometry of each touchpad family and the original Python format of shortcuts. Used only until `config.json` exists — the first start of the app converts them. |
 
 If `config.json` is deleted, the app recreates it from the layout on its next start.
 
@@ -405,28 +400,28 @@ The **Driver** page of the app shows whether the driver is reachable, the focuse
 Then check the service logs:
 
 ```
-$ journalctl --user -u asus_dialpad_driver@$USER.service
-$ systemctl --user restart asus_dialpad_driver@$USER.service
+$ journalctl --user -u asus-turnpad.service
+$ systemctl --user restart asus-turnpad.service
 ```
 
 The driver state and the messages for the on-screen dial are available on the session D-Bus:
 
 ```
-$ gdbus call --session --dest io.github.asuslinuxdrivers.DialPad --object-path /io/github/asuslinuxdrivers/DialPad --method io.github.asuslinuxdrivers.DialPad.GetStatus
-$ gdbus monitor --session --dest io.github.asuslinuxdrivers.DialPad
+$ gdbus call --session --dest io.github.sinu0.AsusTurnpad.Driver --object-path /io/github/sinu0/AsusTurnpad/Driver --method io.github.sinu0.AsusTurnpad.Driver.GetStatus
+$ gdbus monitor --session --dest io.github.sinu0.AsusTurnpad.Driver
 ```
 
 GNOME extension errors (the extension reloads only after logging out and back in):
 
 ```
-$ gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Extensions.GetExtensionErrors dialpad@asus-linux-drivers
+$ gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Extensions.GetExtensionErrors asus-turnpad@sinu0.github.io
 ```
 
 For further debugging stop the installed services:
 
 ```
-systemctl --user stop asus_dialpad_driver@$USER.service
-systemctl --user stop asus_dialpad_driver_ui@$USER.service
+systemctl --user stop asus-turnpad.service
+systemctl --user stop asus-turnpad-ui.service
 ```
 
 And listen on socket using `socat` (e.g. `$ sudo apt install socat`):
@@ -434,7 +429,7 @@ And listen on socket using `socat` (e.g. `$ sudo apt install socat`):
 **Is necessary to have enabled in config `socket_enabled`.**
 
 ```
-$ socat - UNIX-RECV:/tmp/dialpad.sock
+$ socat - UNIX-RECV:$XDG_RUNTIME_DIR/asus-turnpad.sock
 {"ts": 1767791846.2734825, "enabled": true}
 {"ts": 1767791846.3734825, "input": "center", "value": 1}
 {"ts": 1767791846.3737416, "input": "center", "value": 0}
@@ -458,9 +453,9 @@ $ socat - UNIX-RECV:/tmp/dialpad.sock
 or use log level `DEBUG`:
 
 ```
-$ source /usr/share/asus-dialpad-driver/.env/bin/activate
+$ cd /opt/asus-turnpad && source .env/bin/activate
 (.env) $ LOG=DEBUG python3 dialpad_ui.py
-Listening on /tmp/dialpad.sock
+Listening on /run/user/1000/asus-turnpad.sock
 2026-01-15 12:34:23,980 DEBUG {'ts': 1768476870.9540725, 'enabled': True}
 2026-01-15 12:34:26,281 DEBUG {'ts': 1768476866.2752297, 'titles': ['Volume', 'Scroll', 'Brightness'], 'icons': ['/usr/share/icons/elementary/status/symbolic/audio-volume-medium-symbolic.svg', '/usr/share/icons/elementary/status/symbolic/rotation-allowed-symbolic.svg', '/usr/share/icons/elementary/status/symbolic/display-brightness-symbolic.svg'], 'title': None}
 2026-01-15 12:34:27,481 DEBUG {'ts': 1768476867.4463465, 'enabled': False}

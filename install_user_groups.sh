@@ -2,10 +2,7 @@
 
 source non_sudo_check.sh
 
-# ENV VARS
-if [ -z "$INSTALL_UDEV_DIR_PATH" ]; then
-    INSTALL_UDEV_DIR_PATH="/usr/lib/udev"
-fi
+source install_paths.sh
 
 UINPUT_GID=$(getent group "uinput" | cut -d: -f3)
 
@@ -97,13 +94,14 @@ echo "  i2c:    SUBSYSTEM=$I2C_SUBSYSTEM"
 
 # create uinput udev rule
 echo 'SUBSYSTEM=="'"$UINPUT_SUBSYSTEM"'", KERNEL=="'"$UINPUT_KERNEL"'", OPTIONS+="static_node=uinput", GROUP="uinput", MODE="0660"' \
-  | sudo tee "$INSTALL_UDEV_DIR_PATH"/rules.d/99-asus-dialpad-driver-uinput.rules >/dev/null
-echo 'uinput' | sudo tee /etc/modules-load.d/uinput-asus-dialpad-driver.conf >/dev/null
+  | sudo tee "$UDEV_RULE_UINPUT" >/dev/null
 
 # create i2c udev rule
 echo 'ACTION!="remove", KERNEL=="i2c-[0-9]*", SUBSYSTEM=="'"$I2C_SUBSYSTEM"'", TAG+="uaccess", GROUP="i2c", MODE="0660"' \
-  | sudo tee "$INSTALL_UDEV_DIR_PATH"/rules.d/99-asus-dialpad-driver-i2c-dev.rules >/dev/null
-echo "i2c-dev" | sudo tee /etc/modules-load.d/i2c-dev-asus-dialpad-driver.conf >/dev/null
+  | sudo tee "$UDEV_RULE_I2C" >/dev/null
+
+# load uinput and i2c-dev at boot
+printf 'uinput\ni2c-dev\n' | sudo tee "$MODULES_LOAD_FILE_PATH" >/dev/null
 
 # create hidraw udev rule (hidraw node of the touchpad is the preferred way how to control
 # the DialPad backlight, I2C above is used as a fallback)
@@ -116,7 +114,7 @@ TOUCHPAD_PHYS=$(grep -A5 -i touchpad /proc/bus/input/devices | grep -o 'Phys=i2c
 
 if [ -n "$TOUCHPAD_PHYS" ]; then
     echo 'ACTION!="remove", SUBSYSTEM=="hidraw", KERNELS=="'"$TOUCHPAD_PHYS"'", TAG+="uaccess", GROUP="i2c", MODE="0660"' \
-      | sudo tee "$INSTALL_UDEV_DIR_PATH"/rules.d/70-asus-dialpad-driver-hidraw.rules >/dev/null
+      | sudo tee "$UDEV_RULE_HIDRAW" >/dev/null
 else
     echo "Touchpad Phys not detected, skipping adding hidraw udev rule"
 fi

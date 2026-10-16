@@ -17,10 +17,10 @@ import {
 } from './dial.js';
 import { DialLayers } from './layers.js';
 
-const BUS_NAME = 'io.github.asuslinuxdrivers.DialPad';
-const BUS_PATH = '/io/github/asuslinuxdrivers/DialPad';
+const BUS_NAME = 'io.github.sinu0.AsusTurnpad.Driver';
+const BUS_PATH = '/io/github/sinu0/AsusTurnpad/Driver';
 const BUS_IFACE = BUS_NAME;
-const CONFIG_DIR = GLib.build_filenamev([GLib.get_user_config_dir(), 'asus-dialpad']);
+const CONFIG_DIR = GLib.build_filenamev([GLib.get_user_config_dir(), 'asus-turnpad']);
 const CONFIG_NAME = 'config.json';
 const SKINS_DIR = GLib.build_filenamev([CONFIG_DIR, 'skins']);
 const SKINS_NAME = 'skins.json';
@@ -90,7 +90,7 @@ export default class DialPadExtension extends Extension {
             this._createOverlay();
             this._fetchDetails();
         } catch (error) {
-            log(`dialpad: unable to start overlay: ${error}`);
+            log(`turnpad: unable to start overlay: ${error}`);
         }
     }
 

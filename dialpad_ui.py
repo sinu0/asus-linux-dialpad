@@ -12,7 +12,9 @@ import logging
 import signal
 import math
 
-SOCKET_PATH = "/tmp/dialpad.sock"
+from config.identity import SLUG, socket_path
+
+SOCKET_PATH = socket_path()
 
 SYSTEMD_JOURNAL_AVAILABLE = False
 try:
@@ -26,7 +28,7 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)s %(message)s',
     level=os.environ.get('LOG', 'INFO')
 )
-log = logging.getLogger('asus-dialpad-driver-ui')
+log = logging.getLogger(f'{SLUG}-ui')
 if SYSTEMD_JOURNAL_AVAILABLE:
     log.addHandler(JournalHandler())
 

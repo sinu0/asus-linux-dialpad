@@ -3,12 +3,12 @@ description: Report errors or unexpected behavior
 title: '[Bug]: '
 labels: ['bug']
 assignees:
-  - ldrahnik
+  - sinu0
 body:
   - type: markdown
     attributes:
       value: |
-        Please make sure to [search for existing issues](https://github.com/asus-linux-drivers/asus-dialpad-driver/issues) before filing a new one!
+        Please make sure to [search for existing issues](https://github.com/sinu0/asus-linux-dialpad/issues) before filing a new one!
 
   - type: textarea
     id: what-happened
@@ -31,7 +31,7 @@ body:
     id: logs
     attributes:
       label: Relevant log output
-      description: Please copy and paste any relevant log output. The install and uninstall logs are here `/var/log/asus-dialpad-driver/*.log`. The runtime logs can be found using `journalctl -f | grep asus-dialpad-driver` or `journalctl -f --user-unit asus_dialpad_driver@ldrahnik.service`. This will be automatically formatted into code, so no need for backticks.
+      description: Please copy and paste any relevant log output. The install and uninstall logs are here `/var/log/asus-turnpad/*.log`. The runtime logs can be found using `journalctl --user -u asus-turnpad.service -b`. This will be automatically formatted into code, so no need for backticks.
       render: shell
 
   - type: textarea
