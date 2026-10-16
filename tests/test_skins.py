@@ -28,6 +28,7 @@ from config.skins import (
 )
 
 DIAL_JS = Path(__file__).resolve().parents[1] / "gnome" / "extension" / "dial.js"
+EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "skins"
 
 
 class BuiltinSkinsTest(unittest.TestCase):
@@ -163,6 +164,22 @@ class UserSkinsTest(unittest.TestCase):
         overlay = _decoder({"skin_light": None, "follow_system_style": 1}, OverlayConfig)
         self.assertEqual(overlay.skin_light, "frost")
         self.assertIs(overlay.follow_system_style, True)
+
+
+class ExampleSkinsTest(unittest.TestCase):
+    def test_examples_load_as_written(self):
+        skins = load_skins(EXAMPLES)
+        examples = sorted(path.stem for path in EXAMPLES.glob("*.json"))
+        self.assertTrue(examples)
+        for skin_id in examples:
+            with self.subTest(skin=skin_id):
+                written = json.loads((EXAMPLES / f"{skin_id}.json").read_text())
+                resolved = resolve_skin(skins, skin_id)
+                if written.get("outline"):
+                    # Within the limits, so loading changes nothing.
+                    self.assertEqual(resolved["outline"]["points"], written["outline"]["points"])
+                if written.get("background"):
+                    self.assertTrue(Path(resolved["background"]["path"]).is_file())
 
 
 if __name__ == "__main__":

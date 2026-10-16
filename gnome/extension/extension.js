@@ -8,11 +8,10 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import {
     DEFAULT_SKIN,
-    DIAL_D,
-    HINT_H,
     clearImageCache,
     iconLayout,
     iconNameFor,
+    overlayPlacement,
     parseColor,
     resolveSkin,
 } from './dial.js';
@@ -58,6 +57,7 @@ export default class DialPadExtension extends Extension {
         this._shown = false;
         this._appearance = { ...DEFAULT_APPEARANCE };
         this._skin = resolveSkin(null, DEFAULT_SKIN);
+        this._skinId = '';
         this._state = {
             enabled: false,
             title: '',
@@ -118,8 +118,13 @@ export default class DialPadExtension extends Extension {
                         appearance[key] = overlay[key];
                 }
             }
-        } catch (_) {
-            // A missing or half-written file keeps the defaults.
+        } catch (error) {
+            // An unreadable file keeps the last good look instead of
+            // jumping to the default skin.
+            if (this._skinId) {
+                log(`turnpad: keeping the current look, config.json unreadable: ${error}`);
+                return;
+            }
         }
         appearance.scale = Math.max(0.6, Math.min(1.6, Number(appearance.scale) || 1));
         appearance.hide_delay_ms = Math.max(0, Math.min(10000, Number(appearance.hide_delay_ms) || 0));
@@ -132,8 +137,18 @@ export default class DialPadExtension extends Extension {
         const appearance = this._appearance;
         const light = appearance.follow_system_style && !this._systemPrefersDark();
         const id = light ? appearance.skin_light : appearance.skin;
+        const wanted = String(id || DEFAULT_SKIN);
+        const skins = this._loadSkins();
+        if (!skins[wanted]) {
+            log(`turnpad: skin "${wanted}" not found`);
+            // Keep a skin that was shown already (its file may be in the
+            // middle of being replaced); a new choice falls back to the default.
+            if (this._skinId === wanted)
+                return;
+        }
         clearImageCache();
-        this._skin = resolveSkin(this._loadSkins(), String(id || DEFAULT_SKIN));
+        this._skin = resolveSkin(skins, wanted);
+        this._skinId = wanted;
     }
 
     _systemPrefersDark() {
@@ -296,25 +311,12 @@ export default class DialPadExtension extends Extension {
         if (!monitor)
             return;
         const scale = this._appearance.scale;
-        const width = Math.round(DIAL_D * scale);
-        const height = Math.round((DIAL_D + HINT_H) * scale);
+        const { x, y, width, height } = overlayPlacement(monitor, scale, this._appearance.position);
         // The overlay is only as large as the dial, so fading it composites
         // the dial and not the whole screen.
         this._overlay.set_size(width, height);
         this._layers.setSize(width, height, scale);
         this._iconLayer.set_size(width, width);
-
-        const x = Math.round((monitor.width - width) / 2);
-        const centred = (monitor.height - width) / 2;
-        const positions = {
-            center: centred,
-            // A slightly lower placement mirrors the unobtrusive Windows ASUS
-            // Dial overlay without obscuring the focused application's toolbar.
-            lower: centred + Math.min(84, monitor.height * 0.08),
-            bottom: monitor.height - height - Math.round(monitor.height * 0.06),
-            top: Math.round(monitor.height * 0.08),
-        };
-        const y = Math.round(positions[this._appearance.position] ?? positions.lower);
         this._overlay.set_position(monitor.x + x, monitor.y + y);
         this._dialOrigin = [0, 0];
         this._updateIcons();

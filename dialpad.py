@@ -811,8 +811,12 @@ def load_evdev_keys_for_coactivator_modifiers(coactivator_keys):
     coactivator_modifiers.clear()
     for coactivator_key_name in coactivator_keys:
 
-        coactivator_keysym_name = mod_name_to_specific_keysym_name(coactivator_key_name)
-        coactivator_evdev_key = get_keysym_name_associated_to_evdev_key_reflecting_current_layout()[coactivator_keysym_name]
+        try:
+            coactivator_keysym_name = mod_name_to_specific_keysym_name(coactivator_key_name)
+            coactivator_evdev_key = get_keysym_name_associated_to_evdev_key_reflecting_current_layout()[coactivator_keysym_name]
+        except KeyError:
+            log.warning("Unknown co-activator key %r; use Control, Shift or Alt", coactivator_key_name)
+            continue
         coactivator_modifiers.add(coactivator_evdev_key)
 
     log.debug("Loaded co-activator modifiers succesfully")
@@ -2426,7 +2430,9 @@ def mod_name_to_specific_keysym_name(mod_name):
         'AltGr': 'Alt_R',
         'Meta': 'Meta_L',
         'Super': 'Meta_L',
-        'Hyper': 'Hyper_L'
+        'Hyper': 'Hyper_L',
+        'Ctrl': 'Control_L',
+        'Win': 'Meta_L'
     }
 
     if display and X11_LIBS_AVAILABLE:

@@ -88,6 +88,11 @@
   border-radius: 8px;
 }
 
+.proart-key-capture.listening {
+  border-color: #f1c296;
+  box-shadow: 0 0 0 2px alpha(#f1c296, 0.35);
+}
+
 .proart-key-choice {
   min-width: 44px;
   min-height: 30px;

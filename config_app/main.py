@@ -20,7 +20,20 @@ gi.require_version("GdkPixbuf", "2.0")
 
 from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk
 
-from config.labels import describe_macro, describe_step, format_keys, icon_for_title
+from config.profile_share import ProfileTextError, profile_json, profiles_from_text
+from config.profile_share import ai_prompt as profile_ai_prompt
+from config.labels import (
+    EVDEV_CODE_NAMES,
+    ICON_CHOICES,
+    MODIFIER_KEYS,
+    describe_macro,
+    describe_step,
+    format_keys,
+    keys_to_text,
+    order_keys,
+    parse_keys,
+    segment_icon,
+)
 from config.presets import (
     FUNCTION_LIBRARY,
     LIBRARY_CATEGORIES,
@@ -38,7 +51,6 @@ from config.schema import (
     Profile,
     Segment,
     StepType,
-    _decoder,
     _encoder,
     darktable_colour_labels_segment,
     load_config,
@@ -82,9 +94,9 @@ DEFAULT_TOUCHPAD = (4010, 2443)
 
 TRIGGERS = (
     ("macro_cw", "Turn clockwise", "object-rotate-right-symbolic",
-     "Runs once per rotation step"),
+     "Runs once per rotation step. Several actions run from top to bottom."),
     ("macro_ccw", "Turn counter-clockwise", "object-rotate-left-symbolic",
-     "Runs once per rotation step"),
+     "Runs once per rotation step. Several actions run from top to bottom."),
     ("macro_center", "Tap", "input-touchpad-symbolic",
      "Tap the centre while the function is active; a function with only a tap "
      "action runs straight from its menu sector"),
@@ -154,6 +166,20 @@ def _rgba_to_hex(rgba):
     return "#{:02x}{:02x}{:02x}".format(
         round(rgba.red * 255), round(rgba.green * 255), round(rgba.blue * 255)
     )
+
+
+def _set_icon_image(image, icon):
+    """Show a theme icon name or an absolute picture path."""
+    if icon.startswith("/"):
+        image.set_from_file(icon)
+    else:
+        image.set_from_icon_name(icon)
+
+
+def _icon_image(icon):
+    image = Gtk.Image()
+    _set_icon_image(image, icon)
+    return image
 
 
 def _icon_button(icon_name, tooltip, callback, *css):
@@ -282,6 +308,7 @@ class Application(Adw.Application):
         pages = (
             (self._build_actions_page(), "actions", "Dial Controls", "input-dialpad-symbolic"),
             (self._build_profiles_page(), "profiles", "Apps & Profiles", "applications-graphics-symbolic"),
+            (self._build_look_page(), "look", "Skins", "preferences-desktop-appearance-symbolic"),
             (self._build_behaviour_page(), "device", "Behaviour", "preferences-system-symbolic"),
             (self._build_calibration_page(), "calibration", "Calibration", "find-location-symbolic"),
             (self._build_diagnostics_page(), "diagnostics", "Driver", "utilities-terminal-symbolic"),
@@ -737,51 +764,142 @@ class Application(Adw.Application):
         def finish(file_dialog, result):
             try:
                 file = file_dialog.open_finish(result)
-                data = json.loads(Path(file.get_path()).read_text())
-                profiles = [_decoder(item, Profile) for item in data.get("profiles", [])]
-            except (GLib.Error, OSError, ValueError, KeyError, TypeError) as error:
+                profiles = profiles_from_text(Path(file.get_path()).read_text())
+            except (GLib.Error, OSError, ValueError) as error:
                 self._toast(f"Import failed: {error}")
                 return
-            commands = shell_commands(profiles)
-            if not commands:
-                apply(profiles)
-                return
+            self._confirm_profiles(profiles, lambda: self._add_profiles(profiles))
+
+        dialog.open(self._window, None, finish)
+
+    def _confirm_profiles(self, profiles, apply, heading=None, body="", responses=None):
+        """Ask before using imported profiles; always when they run commands.
+
+        responses maps response ids to labels and apply takes the chosen id;
+        without them there is one "Import" choice and apply takes nothing.
+        """
+        commands = shell_commands(profiles)
+        if not commands and responses is None:
+            apply()
+            return
+        if commands:
             # Shared profiles can carry shell commands; they run as you.
             listing = "\n".join(f"• {profile} › {function}: {command}" for profile, function, command in commands[:12])
             if len(commands) > 12:
                 listing += f"\n… and {len(commands) - 12} more"
-            alert = Adw.AlertDialog(
-                heading="Run these commands?",
-                body="The imported profiles start programs or shell commands with your rights when you use "
-                "their functions. Import only if you trust where the file comes from.\n\n" + listing,
+            body = (body + "\n\n" if body else "") + (
+                ("These profiles start" if len(profiles) > 1 else "This profile starts")
+                + " programs or shell commands with your rights when you use its functions. "
+                "Use it only if you trust where it comes from.\n\n" + listing
             )
-            alert.add_response("cancel", "Cancel")
-            alert.add_response("import", "Import")
-            alert.set_response_appearance("import", Adw.ResponseAppearance.DESTRUCTIVE)
-            alert.set_default_response("cancel")
-            alert.set_close_response("cancel")
-            alert.connect("response", lambda _alert, response: apply(profiles) if response == "import" else None)
-            alert.present(self._window)
+        alert = Adw.AlertDialog(heading=heading or "Run these commands?", body=body)
+        alert.add_response("cancel", "Cancel")
+        for response, label in (responses or {"import": "Import"}).items():
+            alert.add_response(response, label)
+            if commands:
+                alert.set_response_appearance(response, Adw.ResponseAppearance.DESTRUCTIVE)
+        if not commands:
+            alert.set_response_appearance(next(iter(responses)), Adw.ResponseAppearance.SUGGESTED)
+        alert.set_default_response("cancel")
+        alert.set_close_response("cancel")
 
-        def apply(profiles):
-            replaced = 0
-            for profile in profiles:
-                existing = next(
-                    (item for item in self.config.profiles if profile.app_id and item.app_id == profile.app_id),
-                    None,
-                )
-                if existing is not None:
-                    self.config.profiles[self.config.profiles.index(existing)] = profile
-                    replaced += 1
-                else:
-                    self.config.profiles.append(profile)
-            self._changed()
-            message = f"Imported {len(profiles)} profiles"
-            if replaced:
-                message += f" ({replaced} replaced)"
+        def chosen(_alert, response):
+            if response == "cancel":
+                return
+            if responses is None:
+                apply()
+            else:
+                apply(response)
+
+        alert.connect("response", chosen)
+        alert.present(self._window)
+
+    def _add_profiles(self, profiles):
+        """Add profiles; one for an application that has a profile replaces it."""
+        replaced = 0
+        for profile in profiles:
+            existing = next(
+                (item for item in self.config.profiles if profile.app_id and item.app_id == profile.app_id),
+                None,
+            )
+            if existing is not None:
+                self.config.profiles[self.config.profiles.index(existing)] = profile
+                replaced += 1
+            else:
+                self.config.profiles.append(profile)
+        self._changed()
+        message = f"Imported {len(profiles)} profiles"
+        if replaced:
+            message += f" ({replaced} replaced)"
+        self._toast(message)
+
+    def _profile_ai_group(self, profile):
+        group = Adw.PreferencesGroup(
+            title="Build with AI",
+            description="Copy the prompt into ChatGPT, Claude or any other assistant and describe what you "
+            "want, e.g. “functions for Inkscape with zoom, rotate and layers”. Then copy its whole answer "
+            "and paste it here; it is checked before anything changes.",
+        )
+        clipboard = self._window.get_display().get_clipboard()
+
+        def action_row(title, subtitle, icon, callback):
+            row = Adw.ActionRow(title=title, subtitle=subtitle, activatable=True)
+            row.add_suffix(Gtk.Image.new_from_icon_name(icon))
+            row.connect("activated", lambda _row: callback())
+            group.add(row)
+
+        def copy(text, message):
+            clipboard.set(text)
             self._toast(message)
 
-        dialog.open(self._window, None, finish)
+        action_row("Copy prompt for AI", "Format description and this profile, ready to paste into a chat",
+                   "edit-copy-symbolic",
+                   lambda: copy(profile_ai_prompt(profile), "Prompt copied — paste it into your AI assistant"))
+        action_row("Copy JSON", "Share this profile or keep a copy", "edit-copy-symbolic",
+                   lambda: copy(profile_json(profile), "Profile copied as JSON"))
+        action_row("Paste from AI", "Use a profile from the clipboard: the assistant's answer or copied JSON",
+                   "edit-paste-symbolic", lambda: clipboard.read_text_async(
+                       None, lambda source, result: self._paste_profiles(profile, source, result)))
+        return group
+
+    def _paste_profiles(self, current, source, result):
+        try:
+            text = source.read_text_finish(result) or ""
+        except GLib.Error:
+            text = ""
+        try:
+            profiles = profiles_from_text(text)
+        except ProfileTextError as error:
+            alert = Adw.AlertDialog(heading="Not a usable profile", body=str(error))
+            alert.add_response("close", "Close")
+            alert.present(self._window)
+            return
+        if len(profiles) > 1:
+            self._confirm_profiles(profiles, lambda: self._add_profiles(profiles))
+            return
+
+        (pasted,) = profiles
+        owner = next((item for item in self.config.profiles
+                      if pasted.app_id and item.app_id == pasted.app_id and item is not current), None)
+        functions = ", ".join(segment.title for segment in pasted.segments) or "no functions"
+        body = f"“{pasted.name}”: {functions}."
+        if owner is not None:
+            # One profile per application.
+            responses = {"replace": f"Replace “{owner.name}”"}
+        else:
+            responses = {"replace": f"Replace “{current.name}”", "add": "Add as new profile"}
+
+        def apply(response):
+            if response == "add":
+                self.config.profiles.append(pasted)
+            else:
+                target = owner or current
+                self.config.profiles[self.config.profiles.index(target)] = pasted
+            self._selected_profile = pasted
+            self._changed()
+            self._toast(f"Using “{pasted.name}” with {len(pasted.segments)} functions")
+
+        self._confirm_profiles([pasted], apply, heading="Use the pasted profile?", body=body, responses=responses)
 
     # --- Dial Controls --------------------------------------------------------
 
@@ -873,6 +991,7 @@ class Application(Adw.Application):
         )
         self._actions_box.append(self._profile_settings_group(profile))
         self._actions_box.append(self._functions_group(profile))
+        self._actions_box.append(self._profile_ai_group(profile))
         if self._dial_preview is not None:
             self._dial_preview.queue_draw()
 
@@ -978,7 +1097,7 @@ class Application(Adw.Application):
             parts.append(f"shows value{(' in ' + segment.unit) if segment.unit else ''}")
         row.set_subtitle(GLib.markup_escape_text("  ·  ".join(parts) or "No actions yet"))
         row.add_prefix(_colour_swatch(segment_color(segment, index), 12))
-        row.add_prefix(Gtk.Image.new_from_icon_name(icon_for_title(segment.title)))
+        row.add_prefix(_icon_image(segment_icon(segment)))
         if not segment.enabled:
             row.add_css_class("dim-label")
         row.set_activatable(True)
@@ -1229,6 +1348,7 @@ class Application(Adw.Application):
                 profile.single_function = unique
             segment.title = unique
             dialog.set_title(unique)
+            show_icon()
             changed()
 
         name.connect("changed", rename)
@@ -1249,6 +1369,70 @@ class Application(Adw.Application):
         colour_button.connect("notify::rgba", colour_changed)
         colour_row.add_suffix(colour_button)
         general.add(colour_row)
+
+        icon_row = Adw.ActionRow(title="Icon")
+        icon_preview = Gtk.Image(pixel_size=20)
+        icon_row.add_prefix(icon_preview)
+        icon_choices = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, max_children_per_line=8,
+                                   min_children_per_line=8, homogeneous=True)
+        icon_popover = Gtk.Popover()
+        icon_menu = Gtk.MenuButton(label="Choose…", popover=icon_popover, valign=Gtk.Align.CENTER)
+        icon_row.add_suffix(icon_menu)
+        icon_row.set_activatable_widget(icon_menu)
+
+        def show_icon():
+            icon = segment_icon(segment)
+            _set_icon_image(icon_preview, icon)
+            icon_row.set_subtitle(
+                GLib.markup_escape_text(Path(icon).name if icon.startswith("/") else "Your choice")
+                if segment.icon_url else "Automatic: matches the function name"
+            )
+
+        def choose_icon(icon):
+            segment.icon_url = icon
+            icon_popover.popdown()
+            show_icon()
+            changed()
+
+        def choose_file(_button):
+            icon_popover.popdown()
+            images = Gtk.FileFilter(name="Icons (SVG, PNG)")
+            images.add_suffix("svg")
+            images.add_suffix("png")
+            filters = Gio.ListStore.new(Gtk.FileFilter)
+            filters.append(images)
+            chooser = Gtk.FileDialog(title="Choose an icon", filters=filters)
+
+            def opened(source, result):
+                try:
+                    file = source.open_finish(result)
+                except GLib.Error:
+                    return
+                if file is not None and file.get_path():
+                    choose_icon(file.get_path())
+
+            chooser.open(self._window, None, opened)
+
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        for icon_name in ICON_CHOICES:
+            icon_name = f"{icon_name}-symbolic"
+            if not theme.has_icon(icon_name):
+                continue
+            button = Gtk.Button(icon_name=icon_name, tooltip_text=icon_name.removesuffix("-symbolic"))
+            button.add_css_class("flat")
+            button.connect("clicked", lambda _button, name=icon_name: choose_icon(name))
+            icon_choices.append(button)
+        icon_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        automatic = Gtk.Button(label="Automatic (from the name)")
+        automatic.connect("clicked", lambda _button: choose_icon(None))
+        from_file = Gtk.Button(label="Picture file…")
+        from_file.connect("clicked", choose_file)
+        icon_box.append(automatic)
+        icon_box.append(icon_choices)
+        icon_box.append(from_file)
+        icon_popover.set_child(icon_box)
+        show_icon()
+        general.add(icon_row)
 
         general.add(_spin_row(
             "Rotation step",
@@ -1304,7 +1488,7 @@ class Application(Adw.Application):
                 group.set_header_suffix(add)
                 steps = getattr(segment, field)
                 if not steps:
-                    empty = Adw.ActionRow(title="No action")
+                    empty = Adw.ActionRow(title="No action", subtitle="Press + to add one")
                     empty.add_css_class("dim-label")
                     group.add(empty)
                 for index, step in enumerate(steps):
@@ -1322,6 +1506,7 @@ class Application(Adw.Application):
         row.set_subtitle(GLib.markup_escape_text(self._step_hint(step)))
         row.add_prefix(Gtk.Image.new_from_icon_name(self._icon_for_step(step)))
         row.set_activatable(True)
+        row.set_tooltip_text("Click to edit")
         row.connect("activated", lambda _row: self._show_step_dialog(segment, field, index, changed))
 
         def move(offset):
@@ -1380,8 +1565,14 @@ class Application(Adw.Application):
         return step.type.value
 
     @staticmethod
-    def _event_keys(keyval, state):
-        """Translate a captured GTK shortcut into the evdev names the driver uses."""
+    def _event_keys(keyval, keycode, state):
+        """Translate a captured key press into the evdev names the driver uses.
+
+        Returns [] for a modifier on its own (the rest of the shortcut is
+        still to come) and None for a key the driver cannot send. The
+        hardware keycode (evdev code + 8) names the physical key, which is
+        what the driver presses; the key symbol is only the fallback.
+        """
         modifiers = []
         if state & Gdk.ModifierType.CONTROL_MASK:
             modifiers.append("KEY_LEFTCTRL")
@@ -1391,6 +1582,12 @@ class Application(Adw.Application):
             modifiers.append("KEY_LEFTALT")
         if state & Gdk.ModifierType.SUPER_MASK:
             modifiers.append("KEY_LEFTMETA")
+
+        key = EVDEV_CODE_NAMES.get(keycode - 8)
+        if key in MODIFIER_KEYS:
+            return []
+        if key and key != "KEY_RESERVED":
+            return [*modifiers, key]
 
         name = Gdk.keyval_name(Gdk.keyval_to_lower(keyval)) or ""
         special = {
@@ -1449,6 +1646,46 @@ class Application(Adw.Application):
             return None
         return [*modifiers, key]
 
+    @staticmethod
+    def _is_laptop_hotkey(key):
+        """Volume, brightness and similar keys that laptops put on the F keys."""
+        code = next((code for code, name in EVDEV_CODE_NAMES.items() if name == key), 0)
+        return code >= 113 and not 183 <= code <= 194 and key not in MODIFIER_KEYS
+
+    @staticmethod
+    def _boxed_list(row):
+        rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        rows.add_css_class("boxed-list")
+        rows.append(row)
+        return rows
+
+    @staticmethod
+    def _shortcut_help_button():
+        text = (
+            "<b>One action presses one shortcut.</b> All its keys go down together "
+            "(Ctrl, Shift, Alt and Super first) and are released again.\n\n"
+            "<b>Three ways to set it</b>\n"
+            "• <b>Record:</b> click the field and press the whole shortcut, "
+            "e.g. hold Ctrl and press F12.\n"
+            "• <b>Click:</b> toggle keys below. Every highlighted key is part of the shortcut; "
+            "F1–F12 and more are under “More keys”.\n"
+            "• <b>Type:</b> key names joined with +, e.g. <tt>F12</tt>, <tt>Ctrl+F12</tt>, "
+            "<tt>Ctrl+Shift+Z</tt>, <tt>Alt+Left</tt>.\n\n"
+            "<b>Several shortcuts in a row</b> (e.g. Ctrl+C, then Ctrl+V): save this action, "
+            "then press + next to the same trigger to add the next one. They run from top to bottom; "
+            "put a Wait action between them if the application needs time.\n\n"
+            "<b>Laptop F keys</b> often send volume or brightness instead. If recording F12 gives "
+            "something else, hold Fn while pressing it, click F12 under “More keys” or type F12."
+        )
+        label = Gtk.Label(label=text, use_markup=True, wrap=True, xalign=0, max_width_chars=48)
+        for side in ("top", "bottom", "start", "end"):
+            getattr(label, f"set_margin_{side}")(12)
+        button = Gtk.MenuButton(icon_name="help-about-symbolic", popover=Gtk.Popover(child=label))
+        button.set_tooltip_text("How shortcuts work")
+        button.set_valign(Gtk.Align.CENTER)
+        button.add_css_class("flat")
+        return button
+
     def _show_step_dialog(self, segment, field, index, changed):
         steps = getattr(segment, field)
         original = steps[index] if index is not None and 0 <= index < len(steps) else None
@@ -1494,78 +1731,155 @@ class Application(Adw.Application):
         page.add(basics)
 
         # Keyboard shortcut ---------------------------------------------------------
-        key_state = {"keys": list(step.keys or [])}
-        shortcut_group = Adw.PreferencesGroup(title="Shortcut", description="Click the field and press the shortcut, or toggle keys below.")
+        key_state = {"keys": list(step.keys or []), "listening": False, "note": None}
+        shortcut_group = Adw.PreferencesGroup(
+            title="Shortcut",
+            description="Keys pressed together. Record them, click them below or type them, e.g. Ctrl+F12.",
+        )
+        shortcut_group.set_header_suffix(self._shortcut_help_button())
+        # One box keeps the order; a group puts its rows before other widgets.
+        shortcut_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        shortcut_group.add(shortcut_box)
         capture = Gtk.Button()
         capture.add_css_class("proart-key-capture")
-        capture.set_tooltip_text("Click here, then press the shortcut on your keyboard")
-        shortcut_group.add(capture)
-        key_names = Adw.EntryRow(title="Key names (advanced, e.g. KEY_LEFTCTRL KEY_F13)")
-        shortcut_group.add(key_names)
-        keyboard = Gtk.FlowBox()
-        keyboard.set_selection_mode(Gtk.SelectionMode.NONE)
-        keyboard.set_max_children_per_line(10)
-        keyboard.set_homogeneous(True)
-        keyboard.set_margin_top(8)
+        capture.set_tooltip_text("Click here, then press the whole shortcut, e.g. hold Ctrl and press F12")
+        shortcut_box.append(capture)
+        capture_hint = Gtk.Label(xalign=0, wrap=True)
+        capture_hint.add_css_class("caption")
+        capture_hint.add_css_class("dim-label")
+        capture_hint.set_margin_top(6)
+        capture_hint.set_margin_bottom(6)
+        shortcut_box.append(capture_hint)
+        key_names = Adw.EntryRow(title="Or type keys joined by +, e.g. F12, Ctrl+F12, Alt+Left")
+        shortcut_box.append(self._boxed_list(key_names))
         key_buttons = []
+        media_buttons = []
         syncing = {"active": False}
 
         def refresh_shortcut(update_entry=True):
             syncing["active"] = True
-            capture.set_label(format_keys(key_state["keys"]))
+            keys = key_state["keys"]
+            if key_state["listening"]:
+                capture.set_label("Press the keys now…")
+                capture.add_css_class("listening")
+            else:
+                capture.set_label(format_keys(keys) if keys else "Click to record a shortcut")
+                capture.remove_css_class("listening")
+            if key_state["note"]:
+                capture_hint.set_text(key_state["note"])
+            elif key_state["listening"]:
+                capture_hint.set_text("Recording: press the whole shortcut, e.g. hold Ctrl and press F12. "
+                                      "Click elsewhere to stop.")
+            else:
+                capture_hint.set_text("Click the field above to record a shortcut from your keyboard.")
             for code, button in key_buttons:
-                button.set_active(code in key_state["keys"])
+                button.set_active(code in keys)
+            for codes, button in media_buttons:
+                button.set_active(keys == codes)
+            media_group.set_description(f"Chosen: {format_keys(keys)}" if keys else "Choose one key.")
             if update_entry:
-                key_names.set_text(" ".join(key_state["keys"]))
+                key_names.set_text(keys_to_text(keys))
+                key_names.remove_css_class("error")
             syncing["active"] = False
+
+        def set_listening(listening):
+            key_state["listening"] = listening
+            if listening:
+                key_state["note"] = None
+            refresh_shortcut(update_entry=False)
 
         controller = Gtk.EventControllerKey.new()
 
-        def capture_key(_controller, keyval, _keycode, state):
-            captured = self._event_keys(keyval, state)
-            if captured:
+        def capture_key(_controller, keyval, keycode, state):
+            captured = self._event_keys(keyval, keycode, state)
+            if captured == []:
+                return True
+            if captured is None:
+                key_state["note"] = "This key can't be recorded. Type its name in the field below, e.g. F12."
+            else:
                 key_state["keys"] = captured
-                refresh_shortcut()
+                key_state["note"] = (
+                    "Recorded a special key. If you meant an F key, hold Fn while pressing it, "
+                    "or type it below, e.g. F12."
+                    if self._is_laptop_hotkey(captured[-1])
+                    else "Recorded. Press other keys to replace it, or click elsewhere."
+                )
+            key_state["listening"] = False
+            refresh_shortcut()
             return True
 
         controller.connect("key-pressed", capture_key)
         capture.add_controller(controller)
+        focus = Gtk.EventControllerFocus.new()
+        focus.connect("enter", lambda _controller: set_listening(True))
+        focus.connect("leave", lambda _controller: set_listening(False))
+        capture.add_controller(focus)
+        capture.connect("clicked", lambda _button: set_listening(True))
 
         def names_changed(entry):
             if syncing["active"]:
                 return
-            key_state["keys"] = [
-                name if name.startswith("KEY_") or name.isdigit() else f"KEY_{name.upper()}"
-                for name in entry.get_text().split()
-            ]
+            keys, unknown = parse_keys(entry.get_text())
+            key_state["keys"] = keys
+            if unknown:
+                entry.add_css_class("error")
+                key_state["note"] = (
+                    f"Unknown key: {', '.join(unknown)}. Use names such as Ctrl, Shift, Alt, Super, "
+                    "A–Z, 0–9, F1–F24, Left, Up, Home, End, PgUp, PgDn, Del, Esc, Enter, Space, Tab."
+                )
+            else:
+                entry.remove_css_class("error")
+                key_state["note"] = None
             refresh_shortcut(update_entry=False)
 
         key_names.connect("changed", names_changed)
 
-        for label, code in (
+        def key_board(choices):
+            board = Gtk.FlowBox()
+            board.set_selection_mode(Gtk.SelectionMode.NONE)
+            board.set_max_children_per_line(10)
+            board.set_homogeneous(True)
+            board.set_margin_top(8)
+            for label, code in choices:
+                button = Gtk.ToggleButton(label=label)
+                button.add_css_class("proart-key-choice")
+                button.set_tooltip_text(f"Part of the shortcut while highlighted ({keys_to_text([code])})")
+                key_buttons.append((code, button))
+
+                def toggle_key(widget, key=code):
+                    if syncing["active"]:
+                        return
+                    keys = [entry for entry in key_state["keys"] if entry != key]
+                    if widget.get_active():
+                        keys.append(key)
+                    key_state["keys"] = order_keys(keys)
+                    key_state["note"] = None
+                    refresh_shortcut()
+
+                button.connect("toggled", toggle_key)
+                board.append(button)
+            return board
+
+        shortcut_box.append(key_board((
             ("Ctrl", "KEY_LEFTCTRL"), ("Shift", "KEY_LEFTSHIFT"), ("Alt", "KEY_LEFTALT"),
             ("Super", "KEY_LEFTMETA"), ("[", "KEY_LEFTBRACE"), ("]", "KEY_RIGHTBRACE"),
             ("=", "KEY_EQUAL"), ("-", "KEY_MINUS"), ("Z", "KEY_Z"), ("Y", "KEY_Y"),
             ("←", "KEY_LEFT"), ("→", "KEY_RIGHT"), ("↑", "KEY_UP"), ("↓", "KEY_DOWN"),
             ("PgUp", "KEY_PAGEUP"), ("PgDn", "KEY_PAGEDOWN"), ("Space", "KEY_SPACE"),
             ("Enter", "KEY_ENTER"), ("Tab", "KEY_TAB"), ("Esc", "KEY_ESC"),
-        ):
-            button = Gtk.ToggleButton(label=label)
-            button.add_css_class("proart-key-choice")
-            key_buttons.append((code, button))
-
-            def toggle_key(widget, key=code):
-                if syncing["active"]:
-                    return
-                keys = [entry for entry in key_state["keys"] if entry != key]
-                if widget.get_active():
-                    keys.append(key)
-                key_state["keys"] = keys
-                refresh_shortcut()
-
-            button.connect("toggled", toggle_key)
-            keyboard.append(button)
-        shortcut_group.add(keyboard)
+        )))
+        more_choices = (
+            *((f"F{number}", f"KEY_F{number}") for number in range(1, 13)),
+            ("Home", "KEY_HOME"), ("End", "KEY_END"), ("Ins", "KEY_INSERT"), ("Del", "KEY_DELETE"),
+            ("Bksp", "KEY_BACKSPACE"), ("Print", "KEY_SYSRQ"), (",", "KEY_COMMA"), (".", "KEY_DOT"),
+            ("/", "KEY_SLASH"), (";", "KEY_SEMICOLON"), ("'", "KEY_APOSTROPHE"), ("\\", "KEY_BACKSLASH"),
+        )
+        more_keys = Adw.ExpanderRow(title="More keys", subtitle="F1–F12, Home, End, Delete, Backspace, Print…")
+        more_keys.add_row(key_board(more_choices))
+        more_keys.set_expanded(any(code in key_state["keys"] for _label, code in more_choices))
+        more_list = self._boxed_list(more_keys)
+        more_list.set_margin_top(8)
+        shortcut_box.append(more_list)
         page.add(shortcut_group)
 
         media_group = Adw.PreferencesGroup(title="Media keys")
@@ -1582,18 +1896,25 @@ class Application(Adw.Application):
             ("Kbd light +", ["KEY_KBDILLUMUP"]),
             ("Kbd light −", ["KEY_KBDILLUMDOWN"]),
         ):
-            button = Gtk.Button(label=label)
-            button.connect(
-                "clicked",
-                lambda _button, shortcut=keys: (key_state.update(keys=list(shortcut)), refresh_shortcut()),
-            )
+            button = Gtk.ToggleButton(label=label)
+            button.add_css_class("proart-key-choice")
+            media_buttons.append((keys, button))
+
+            def choose_media(widget, shortcut=keys):
+                if syncing["active"]:
+                    return
+                key_state["keys"] = list(shortcut) if widget.get_active() else []
+                refresh_shortcut()
+
+            button.connect("toggled", choose_media)
             media_box.append(button)
         media_group.add(media_box)
         page.add(media_group)
 
         # Direction / amount ----------------------------------------------------------
         amount_group = Adw.PreferencesGroup(title="Direction")
-        direction_row = Adw.ComboRow(title="Direction", model=Gtk.StringList.new(["Up / right", "Down / left"]))
+        direction_names = Gtk.StringList.new(["Up", "Down"])
+        direction_row = Adw.ComboRow(title="Direction", model=direction_names)
         default_down = field == "macro_ccw"
         if step.direction is not None:
             default_down = step.direction in ("down", "counterclockwise", "left")
@@ -1612,6 +1933,7 @@ class Application(Adw.Application):
         held_box.set_valign(Gtk.Align.CENTER)
         for label, code in (("Ctrl", "KEY_LEFTCTRL"), ("Shift", "KEY_LEFTSHIFT"), ("Alt", "KEY_LEFTALT")):
             button = Gtk.ToggleButton(label=label)
+            button.add_css_class("proart-key-choice")
             button.set_active(code in (step.modifiers or []))
             held_buttons[code] = button
             held_box.append(button)
@@ -1623,7 +1945,7 @@ class Application(Adw.Application):
             title="Command",
             description="Runs through the shell. Prefer a shortcut when one exists.",
         )
-        command_row = Adw.EntryRow(title="Command")
+        command_row = Adw.EntryRow(title="Command, e.g. gnome-calculator or ~/bin/my-script.sh")
         command_row.set_text(step.script or " ".join([step.program or "", *(step.args or [])]).strip())
         command_group.add(command_row)
         page.add(command_group)
@@ -1641,10 +1963,19 @@ class Application(Adw.Application):
 
         def refresh_fields(*_args):
             action = current_type()
-            shortcut_group.set_visible(action in (StepType.KEYSTROKE, StepType.MEDIA))
+            shortcut_group.set_visible(action is StepType.KEYSTROKE)
             media_group.set_visible(action is StepType.MEDIA)
             amount_group.set_visible(action in (StepType.VOLUME, StepType.BRIGHTNESS, StepType.SCROLL))
             amount_row.set_title("Scroll units (120 = one notch)" if action is StepType.SCROLL else "Repeat")
+            amount_row.set_subtitle("" if action is StepType.SCROLL else "Times per rotation step")
+            horizontal = axis_row.get_selected() == 1
+            names = {
+                StepType.VOLUME: ["Louder", "Quieter"],
+                StepType.BRIGHTNESS: ["Brighter", "Dimmer"],
+            }.get(action, ["Right", "Left"] if horizontal else ["Up", "Down"])
+            selected = direction_row.get_selected()
+            direction_names.splice(0, direction_names.get_n_items(), names)
+            direction_row.set_selected(selected)
             axis_row.set_visible(action is StepType.SCROLL)
             held_row.set_visible(action is StepType.SCROLL)
             command_group.set_visible(action in (StepType.SHELL, StepType.COMMAND))
@@ -1653,6 +1984,7 @@ class Application(Adw.Application):
                 amount_row.set_value(120)
 
         type_row.connect("notify::selected", refresh_fields)
+        axis_row.connect("notify::selected", refresh_fields)
         refresh_shortcut()
         refresh_fields()
 
@@ -1706,15 +2038,27 @@ class Application(Adw.Application):
             self.config.activation.activation_time, 0.1, 5.0, 0.1, 1,
             lambda value: self._set_config("activation", "activation_time", round(value, 2)),
         ))
-        coactivator = Adw.EntryRow(title="Co-activator keys (comma separated, e.g. Shift)")
-        coactivator.set_text(", ".join(self.config.activation.coactivator_keys))
-        coactivator.connect(
-            "changed",
-            lambda entry: self._set_config(
-                "activation", "coactivator_keys",
-                [key.strip() for key in entry.get_text().split(",") if key.strip()],
-            ),
+        coactivator = Adw.ActionRow(
+            title="Co-activator keys",
+            subtitle="Hold these too while pressing the icon, so it cannot switch on by accident; none = icon alone",
         )
+        coactivator_box = Gtk.Box(spacing=4, valign=Gtk.Align.CENTER)
+
+        def coactivator_toggled(button, name):
+            keys = [key for key in self.config.activation.coactivator_keys if key not in (name, "Ctrl")]
+            if button.get_active():
+                keys.append(name)
+            self._set_config("activation", "coactivator_keys", keys)
+
+        held_keys = self.config.activation.coactivator_keys
+        # The driver takes modifier names (Control, not Ctrl) and tracks only these three.
+        for label, name in (("Ctrl", "Control"), ("Shift", "Shift"), ("Alt", "Alt")):
+            button = Gtk.ToggleButton(label=label)
+            button.add_css_class("proart-key-choice")
+            button.set_active(name in held_keys or (name == "Control" and "Ctrl" in held_keys))
+            button.connect("toggled", coactivator_toggled, name)
+            coactivator_box.append(button)
+        coactivator.add_suffix(coactivator_box)
         activation.add(coactivator)
         activation.add(_spin_row(
             "Switch off after inactivity", "Minutes without touch; 0 keeps the DialPad on",
@@ -1749,7 +2093,12 @@ class Application(Adw.Application):
             lambda value: self._set_config("gesture", "slices_minimum_count", int(value)),
         ))
         content.append(gesture)
+        return self._scrolled_content(content)
 
+    # --- Skins and the on-screen dial --------------------------------------------------
+
+    def _build_look_page(self):
+        content = self._page_box()
         content.append(self._skin_group())
         content.append(self._style_group())
 

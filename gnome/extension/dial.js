@@ -82,6 +82,12 @@ export const FALLBACK_SKIN = {
 // Function names map to GNOME (Adwaita) symbolic icons, the same set the
 // settings app uses. First match wins, so specific words come first.
 const ICON_RULES = [
+    [['terminal', 'console'], 'utilities-terminal'],
+    [['calculator'], 'accessories-calculator'],
+    [['screenshot'], 'camera-photo'],
+    [['lock screen'], 'system-lock-screen'],
+    [['folder'], 'folder'],
+    [['browser'], 'web-browser'],
     [['record'], 'media-record'],
     [['stream'], 'network-transmit'],
     [['pause'], 'media-playback-pause'],
@@ -118,6 +124,32 @@ const ICON_RULES = [
     [['font', 'text'], 'font-x-generic'],
     [['notif'], 'preferences-system-notifications'],
 ];
+
+// Where the overlay goes on a monitor ({width, height} in logical pixels):
+// centred horizontally, at the chosen height, never past an edge.
+export function overlayPlacement(monitor, scale, position) {
+    const width = Math.round(DIAL_D * scale);
+    const height = Math.round((DIAL_D + HINT_H) * scale);
+    const centred = (monitor.height - width) / 2;
+    // A slightly lower placement mirrors the unobtrusive Windows ASUS
+    // Dial overlay without obscuring the focused application's toolbar.
+    const lower = centred + Math.min(84, monitor.height * 0.08);
+    // A large dial on a small screen: "top" and "bottom" never pass the
+    // centre or "lower", so the four choices keep their order.
+    const positions = {
+        center: centred,
+        lower,
+        bottom: Math.max(lower, monitor.height - height - Math.round(monitor.height * 0.06)),
+        top: Math.min(centred, Math.round(monitor.height * 0.08)),
+    };
+    const wanted = Math.round(positions[position] ?? positions.lower);
+    return {
+        x: Math.round((monitor.width - width) / 2),
+        y: Math.max(0, Math.min(monitor.height - height, wanted)),
+        width,
+        height,
+    };
+}
 
 export function iconNameFor(title) {
     const name = (title || '').toLowerCase();

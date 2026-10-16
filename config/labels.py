@@ -118,6 +118,74 @@ def format_keys(keys: list[str] | None) -> str:
     return " + ".join(rendered) if rendered else "Not set"
 
 
+MODIFIER_KEYS = (
+    "KEY_LEFTCTRL", "KEY_RIGHTCTRL", "KEY_LEFTSHIFT", "KEY_RIGHTSHIFT",
+    "KEY_LEFTALT", "KEY_RIGHTALT", "KEY_LEFTMETA", "KEY_RIGHTMETA",
+)
+
+# Short names for typing shortcuts ("Ctrl+F12"); any other key is typed as its
+# evdev name with or without "KEY_" (F12, Home, KEY_F13).
+KEY_ALIASES = {
+    "CTRL": "KEY_LEFTCTRL", "CONTROL": "KEY_LEFTCTRL",
+    "SHIFT": "KEY_LEFTSHIFT",
+    "ALT": "KEY_LEFTALT",
+    "ALTGR": "KEY_RIGHTALT",
+    "SUPER": "KEY_LEFTMETA", "WIN": "KEY_LEFTMETA", "META": "KEY_LEFTMETA",
+    "ESC": "KEY_ESC", "ESCAPE": "KEY_ESC",
+    "ENTER": "KEY_ENTER", "RETURN": "KEY_ENTER",
+    "DEL": "KEY_DELETE", "INS": "KEY_INSERT",
+    "PGUP": "KEY_PAGEUP", "PGDN": "KEY_PAGEDOWN", "PGDOWN": "KEY_PAGEDOWN",
+    "PRINT": "KEY_SYSRQ", "PRTSC": "KEY_SYSRQ", "PRINTSCREEN": "KEY_SYSRQ",
+    "PLUS": "KEY_EQUAL",
+    "[": "KEY_LEFTBRACE", "]": "KEY_RIGHTBRACE", "=": "KEY_EQUAL", "-": "KEY_MINUS",
+    ",": "KEY_COMMA", ".": "KEY_DOT", "/": "KEY_SLASH", ";": "KEY_SEMICOLON",
+    "'": "KEY_APOSTROPHE", "`": "KEY_GRAVE", "\\": "KEY_BACKSLASH",
+    "←": "KEY_LEFT", "→": "KEY_RIGHT", "↑": "KEY_UP", "↓": "KEY_DOWN",
+}
+
+KNOWN_KEYS = frozenset(EVDEV_CODE_NAMES.values()) - {"KEY_RESERVED"}
+
+
+def order_keys(keys: list[str]) -> list[str]:
+    """Modifiers first, each key once: the driver presses keys in list order."""
+    unique = list(dict.fromkeys(keys))
+    return [key for key in unique if key in MODIFIER_KEYS] + [key for key in unique if key not in MODIFIER_KEYS]
+
+
+def parse_keys(text: str) -> tuple[list[str], list[str]]:
+    """Read "Ctrl+Shift+Z", "ctrl f12" or "KEY_LEFTALT KEY_LEFT".
+
+    Returns the evdev names in press order and the words not understood.
+    """
+    keys, unknown = [], []
+    for word in text.replace("+", " ").split():
+        name = word.upper()
+        key = KEY_ALIASES.get(name)
+        if key is None:
+            key = name if name.startswith("KEY_") else f"KEY_{name}"
+        if key in KNOWN_KEYS:
+            keys.append(key)
+        else:
+            unknown.append(word)
+    return order_keys(keys), unknown
+
+
+def keys_to_text(keys: list[str] | None) -> str:
+    """Write keys the way parse_keys() reads them back, e.g. "Ctrl+F12"."""
+    names = {key: alias for alias, key in KEY_ALIASES.items() if alias in "[]=-,./;'`\\"}
+    names.update({
+        "KEY_LEFTCTRL": "Ctrl", "KEY_LEFTSHIFT": "Shift", "KEY_LEFTALT": "Alt", "KEY_RIGHTALT": "AltGr",
+        "KEY_LEFTMETA": "Super", "KEY_PAGEUP": "PgUp", "KEY_PAGEDOWN": "PgDn", "KEY_SYSRQ": "Print",
+    })
+    rendered = []
+    for key in keys or []:
+        key = str(key)
+        if key.isdigit():
+            key = EVDEV_CODE_NAMES.get(int(key), f"KEY_{key}")
+        rendered.append(names.get(key) or key.removeprefix("KEY_").title())
+    return "+".join(rendered)
+
+
 def describe_step(step: MacroStep) -> str:
     if step.title:
         return step.title
@@ -157,6 +225,12 @@ def describe_macro(steps: list[MacroStep]) -> str:
 # Function names map to GNOME (Adwaita) symbolic icons; kept in sync with
 # ICON_RULES in gnome/extension/extension.js. First match wins.
 ICON_RULES = (
+    (("terminal", "console"), "utilities-terminal"),
+    (("calculator",), "accessories-calculator"),
+    (("screenshot",), "camera-photo"),
+    (("lock screen",), "system-lock-screen"),
+    (("folder",), "folder"),
+    (("browser",), "web-browser"),
     (("record",), "media-record"),
     (("stream",), "network-transmit"),
     (("pause",), "media-playback-pause"),
@@ -193,6 +267,26 @@ ICON_RULES = (
     (("font", "text"), "font-x-generic"),
     (("notif",), "preferences-system-notifications"),
 )
+
+
+# Offered by the icon picker of the settings app; all exist in Adwaita.
+ICON_CHOICES = (
+    "audio-volume-high", "audio-volume-muted", "audio-input-microphone", "display-brightness",
+    "keyboard-brightness", "media-playback-start", "media-playback-pause", "media-skip-forward",
+    "media-seek-forward", "media-record", "system-search", "zoom-fit-best", "edit-undo", "edit-redo",
+    "edit-cut", "edit-copy", "edit-paste", "document-save", "document-edit", "view-list", "view-grid",
+    "view-paged", "go-next", "go-previous", "object-rotate-right", "object-flip-horizontal",
+    "image-x-generic", "camera-photo", "color-select", "font-x-generic", "starred",
+    "utilities-terminal", "accessories-calculator", "folder", "system-lock-screen",
+    "application-x-executable", "web-browser", "mail-unread", "input-keyboard", "input-gaming",
+    "preferences-system", "network-wireless", "bluetooth-active", "night-light", "weather-clear",
+    "face-smile", "input-dialpad",
+)
+
+
+def segment_icon(segment) -> str:
+    """The icon a function shows: its own, else one matching its name."""
+    return segment.icon_url or icon_for_title(segment.title)
 
 
 def icon_for_title(title: str) -> str:
