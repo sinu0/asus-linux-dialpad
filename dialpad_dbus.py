@@ -19,10 +19,12 @@ import gi
 gi.require_version("GLib", "2.0")
 from gi.repository import GLib
 
+from config.identity import DBUS_INTERFACE, DBUS_NAME, DBUS_PATH
 
-BUS_NAME = "io.github.asuslinuxdrivers.DialPad"
-OBJECT_PATH = "/io/github/asuslinuxdrivers/DialPad"
-INTERFACE_NAME = BUS_NAME
+
+BUS_NAME = DBUS_NAME
+OBJECT_PATH = DBUS_PATH
+INTERFACE_NAME = DBUS_INTERFACE
 _STARTUP_TIMEOUT_SECONDS = 2.0
 _INT32_MIN = -(2**31)
 _INT32_MAX = 2**31 - 1

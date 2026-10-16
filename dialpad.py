@@ -30,6 +30,7 @@ import socket
 import json
 import queue
 
+from desktop.active_window import ActiveWindow, Context as ActiveWindowContext
 from dial_gesture import (
     CalibrationSession,
     DEFAULT_HYSTERESIS,
@@ -985,66 +986,11 @@ def initialize_virtual_device():
         log.error(f"Error initializing virtual device: {e}")
         sys.exit(1)
 
-def get_active_window_gnome_wayland_title():
-    global gnome_failure_count, gnome_max_failure_count
-
-    if gnome_failure_count >= gnome_max_failure_count:
-        return None
-
-    try:
-        session_bus = dbus.SessionBus()
-        shell = session_bus.get_object('org.gnome.Shell', '/org/gnome/Shell')
-        active_window = shell.Get('org.gnome.Shell', 'focusWindow')
-        return active_window.get('title', None)
-    except Exception as e:
-        gnome_failure_count += 1
-        log.debug("GNOME window title fetch failed (%d/%d): %s", gnome_failure_count, gnome_max_failure_count, e)
-        return None
-
-def binary_from_pid(pid):
-    try:
-        return os.readlink(f"/proc/{pid}/exe")
-    except Exception:
-        return None
-    
-def get_active_window_info_x11():
-    try:
-        root = display.screen().root
-        window_id = root.get_full_property(
-            display.intern_atom('_NET_ACTIVE_WINDOW'),
-            Xlib.X.AnyPropertyType
-        ).value[0]
-
-        window = display.create_resource_object('window', window_id)
-
-        # title
-        window_name = window.get_full_property(
-            display.intern_atom('_NET_WM_NAME'),
-            Xlib.X.AnyPropertyType
-        )
-        title = window_name.value.decode() if window_name else None
-
-        # pid -> elf
-        pid_prop = window.get_full_property(
-            display.intern_atom('_NET_WM_PID'),
-            Xlib.X.AnyPropertyType
-        )
-        binary = binary_from_pid(pid_prop.value[0]) if pid_prop else None
-
-        return binary, title
-
-    except Exception as e:
-        log.debug("Error retrieving active window info (X11): %s", e)
-        return None, None
-
 gsettings_failure_count = 0
 gsettings_max_failure_count = 1
 
 qdbus_failure_count = 0
 qdbus_max_failure_count = 1
-
-gnome_failure_count = 0
-gnome_max_failure_count = 1
 
 xinput_failure_count = 0
 xinput_max_failure_count = 1
@@ -1052,162 +998,15 @@ xinput_max_failure_count = 1
 synclient_status_failure_count = 0
 synclient_status_max_failure_count = 1
 
-niri_failure_count = 0
-niri_max_failure_count = 1
-
-sway_failure_count = 0
-sway_max_failure_count = 1
-
-hyprland_failure_count = 0
-hyprland_max_failure_count = 1
-
-def get_active_window_info_kde_wayland():
-    global qdbus_failure_count, qdbus_max_failure_count
-
-    if qdbus_failure_count >= qdbus_max_failure_count:
-        return None, None
-
-    try:
-        win_id = subprocess.check_output([
-            QDBUS, 'org.kde.KWin', '/KWin', 'org.kde.KWin.activeWindow'
-        ]).decode().strip()
-
-        title = subprocess.check_output([
-            QDBUS, 'org.kde.KWin',
-            f'/org/kde/KWin/Window/{win_id}',
-            'org.kde.KWin.Window.caption'
-        ]).decode().strip()
-
-        pid = subprocess.check_output([
-            QDBUS, 'org.kde.KWin',
-            f'/org/kde/KWin/Window/{win_id}',
-            'org.kde.KWin.Window.pid'
-        ]).decode().strip()
-
-        binary = binary_from_pid(pid)
-
-        return binary, title
-
-    except Exception as e:
-        qdbus_failure_count += 1
-        log.debug(
-            "KDE Wayland window fetch failed (%d/%d): %s",
-            qdbus_failure_count,
-            qdbus_max_failure_count,
-            e
-        )
-        return None, None
-
-def get_active_window_info_gnome_wayland():
-    title = get_active_window_gnome_wayland_title()
-    return None, title
-
-def get_active_window_info_niri():
-    global niri_failure_count, niri_max_failure_count
-
-    if niri_failure_count >= niri_max_failure_count:
-        return None, None
-
-    try:
-        out = subprocess.check_output(
-            ['niri', 'msg', '--json', 'focused-window'],
-            stderr=subprocess.DEVNULL
-        ).decode().strip()
-        win = json.loads(out)
-        title = win.get('title')
-        pid = win.get('pid')
-        binary = binary_from_pid(pid) if pid else None
-        return binary, title
-    except Exception as e:
-        niri_failure_count += 1
-        log.debug("niri window fetch failed (%d/%d): %s", niri_failure_count, niri_max_failure_count, e)
-        return None, None
-
-def get_active_window_info_sway():
-    global sway_failure_count, sway_max_failure_count
-
-    if sway_failure_count >= sway_max_failure_count:
-        return None, None
-
-    try:
-        out = subprocess.check_output(
-            ['swaymsg', '-t', 'get_tree'],
-            stderr=subprocess.DEVNULL
-        ).decode().strip()
-        tree = json.loads(out)
-
-        def find_focused(node):
-            if node.get('focused'):
-                return node
-            for child in node.get('nodes', []) + node.get('floating_nodes', []):
-                result = find_focused(child)
-                if result:
-                    return result
-            return None
-
-        focused = find_focused(tree)
-        if focused:
-            title = focused.get('name')
-            pid = focused.get('pid')
-            binary = binary_from_pid(pid) if pid else None
-            return binary, title
-        return None, None
-    except Exception as e:
-        sway_failure_count += 1
-        log.debug("sway window fetch failed (%d/%d): %s", sway_failure_count, sway_max_failure_count, e)
-        return None, None
-
-def get_active_window_info_hyprland():
-    global hyprland_failure_count, hyprland_max_failure_count
-
-    if hyprland_failure_count >= hyprland_max_failure_count:
-        return None, None
-
-    try:
-        out = subprocess.check_output(
-            ['hyprctl', 'activewindow', '-j'],
-            stderr=subprocess.DEVNULL
-        ).decode().strip()
-        win = json.loads(out)
-        title = win.get('title')
-        pid = win.get('pid')
-        binary = binary_from_pid(pid) if pid else None
-        return binary, title
-    except Exception as e:
-        hyprland_failure_count += 1
-        log.debug("Hyprland window fetch failed (%d/%d): %s", hyprland_failure_count, hyprland_max_failure_count, e)
-        return None, None
+# Desktop-specific lookups of the focused window live in desktop/active_window.py.
+active_window = ActiveWindow(ActiveWindowContext(
+    session_type=xdg_session_type,
+    x11_display=lambda: display,
+    qdbus=QDBUS,
+))
 
 def get_active_window_title():
-
-    if xdg_session_type == "x11" and display:
-        binary, title = get_active_window_info_x11()
-        if binary or title:
-            return binary, title
-    else:
-        binary, title = get_active_window_info_kde_wayland()
-        if binary or title:
-            return binary, title
-
-        binary, title = get_active_window_info_gnome_wayland()
-        if title:
-            return binary, title
-
-        binary, title = get_active_window_info_niri()
-        if binary or title:
-            return binary, title
-
-        binary, title = get_active_window_info_sway()
-        if binary or title:
-            return binary, title
-
-        binary, title = get_active_window_info_hyprland()
-        if binary or title:
-            return binary, title
-
-    log.debug("Unsupported session type or display not connected.")
-
-    return None, None
+    return active_window.query()
 
 GENERIC_DESKTOP_ID_WORDS = {"studio", "desktop", "app", "editor", "client", "player", "viewer"}
 

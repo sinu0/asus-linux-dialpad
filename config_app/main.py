@@ -43,12 +43,27 @@ from config.schema import (
     load_config,
     save_config,
 )
+from config.identity import APP_ID, APP_NAME, DBUS_INTERFACE, DBUS_NAME, DBUS_PATH
 from config.migrate import migrate_old_format
+from config.skins import (
+    MENU_STYLES,
+    PALETTE_KEYS,
+    SKINS_DIR,
+    ai_prompt,
+    color_to_hex,
+    delete_user_skin,
+    is_builtin,
+    load_skins,
+    new_skin_id,
+    resolve_skin,
+    save_user_skin,
+    skin_name,
+)
+from desktop.color_scheme import ColorScheme
+from overlay.gtk_icons import draw_icon
+from overlay.painter import DialView, hit_function, paint_dial
 
 
-DBUS_NAME = "io.github.asuslinuxdrivers.DialPad"
-DBUS_PATH = "/io/github/asuslinuxdrivers/DialPad"
-DBUS_INTERFACE = DBUS_NAME
 STYLE_FILE = Path(__file__).with_name("style.css")
 DEFAULT_ACCENT = "#e7b98d"
 # The PX13 touchpad range; replaced by the driver's report when available.
@@ -73,6 +88,11 @@ ACTION_TYPES = (
     ("Command", StepType.SHELL),
     ("Wait", StepType.DELAY),
 )
+
+# The default menu, used to preview skins.
+SAMPLE_TITLES = ("Volume", "Brightness", "Scroll", "Zoom", "Undo / Redo", "Media")
+SAMPLE_COLORS = ("#6cb6ff", "#f4c95d", "#9ad17b", "#e7b98d", "#c99bff", "#ff8f8f")
+MENU_STYLE_LABELS = {"bubbles": "Icon bubbles", "segments": "Ring of sectors"}
 
 POSITION_LABELS = {
     "center": "Centre of the screen",
@@ -173,91 +193,9 @@ def _colour_swatch(colour, size=14):
     return area
 
 
-def draw_dial(cr, width, height, segments, active_title=None, title_text=None, mode="multi"):
-    """Paint a miniature of the overlay dial, coloured like the real one."""
-    size = max(1, min(width, height))
-    scale = size / 190
-    cx, cy = width / 2, height / 2
-    outer, inner, centre = 82 * scale, 49 * scale, 42 * scale
-
-    cr.save()
-    cr.arc(cx + 2 * scale, cy + 4 * scale, outer, 0, 2 * math.pi)
-    cr.set_source_rgba(0, 0, 0, 0.4)
-    cr.fill()
-    cr.arc(cx, cy, outer, 0, 2 * math.pi)
-    cr.set_source_rgba(0.13, 0.135, 0.16, 1)
-    cr.fill()
-
-    if mode == "single" and segments:
-        segment = segments[0]
-        colour = segment_color(segment)
-        cr.set_line_width((outer - inner) - 12 * scale)
-        cr.set_source_rgba(0.21, 0.215, 0.25, 1)
-        cr.arc(cx, cy, (outer + inner) / 2 - 2 * scale, 0, 2 * math.pi)
-        cr.stroke()
-        cr.set_source_rgb(*_hex_to_rgb(colour))
-        cr.arc(cx, cy, (outer + inner) / 2 - 2 * scale, -math.pi / 2, math.pi * 0.9)
-        cr.stroke()
-        title_text = title_text or segment.title
-    else:
-        count = max(4, len(segments))
-        angle = 2 * math.pi / count
-        for index in range(count):
-            segment = segments[index] if index < len(segments) else None
-            start = index * angle - math.pi / 2 + 0.018
-            end = (index + 1) * angle - math.pi / 2 - 0.018
-            active = segment is not None and segment.title == active_title
-            cr.move_to(cx + math.cos(start) * inner, cy + math.sin(start) * inner)
-            cr.arc(cx, cy, outer - 5 * scale, start, end)
-            cr.arc_negative(cx, cy, inner, end, start)
-            cr.close_path()
-            if segment is None:
-                cr.set_source_rgba(0.18, 0.185, 0.215, 1)
-            elif active:
-                red, green, blue = _hex_to_rgb(segment_color(segment, index))
-                cr.set_source_rgba(red * 0.62 + 0.1, green * 0.62 + 0.1, blue * 0.62 + 0.11, 1)
-            else:
-                cr.set_source_rgba(0.25, 0.26, 0.30, 1)
-            cr.fill()
-
-            if segment is not None:
-                cr.set_line_width((4 if active else 2.4) * scale)
-                cr.set_source_rgb(*_hex_to_rgb(segment_color(segment, index)))
-                cr.arc(cx, cy, inner + 2.5 * scale, start + 0.05, end - 0.05)
-                cr.stroke()
-                mid = (start + end) / 2
-                x = cx + math.cos(mid) * 66 * scale
-                y = cy + math.sin(mid) * 66 * scale
-                cr.set_font_size(7.5 * scale)
-                cr.select_font_face("Sans", 0, 1)
-                label = segment.title if len(segment.title) <= 9 else segment.title[:8] + "…"
-                extents = cr.text_extents(label)
-                cr.move_to(x - extents.width / 2 - extents.x_bearing, y + extents.height / 2)
-                cr.set_source_rgba(0.97, 0.86, 0.75, 1 if active else 0.72)
-                cr.show_text(label)
-
-    cr.arc(cx, cy, centre, 0, 2 * math.pi)
-    cr.set_source_rgba(0.18, 0.185, 0.215, 1)
-    cr.fill()
-    cr.arc(cx, cy, centre, 0, 2 * math.pi)
-    cr.set_line_width(1.2 * scale)
-    cr.set_source_rgba(0.82, 0.66, 0.51, 0.8)
-    cr.stroke()
-    text = title_text or "DialPad"
-    if len(text) > 12:
-        text = text[:11] + "…"
-    cr.set_font_size(10 * scale)
-    cr.select_font_face("Sans", 0, 1)
-    extents = cr.text_extents(text)
-    cr.move_to(cx - extents.width / 2 - extents.x_bearing, cy + extents.height / 2)
-    cr.set_source_rgba(0.97, 0.86, 0.75, 1)
-    cr.show_text(text)
-    cr.restore()
-
-
 class Application(Adw.Application):
     def __init__(self):
-        super().__init__(application_id="io.github.asuslinuxdrivers.DialPadControl")
+        super().__init__(application_id=APP_ID)
         self.config: DialPadConfig | None = None
         self._save_source = 0
         self._window = None
@@ -272,6 +210,10 @@ class Application(Adw.Application):
         self._selected_profile: Profile | None = None
         self._preview_title = None
         self._dial_preview = None
+        self._skins = {}
+        self._skin_gallery = None
+        self._style_rows = {}
+        self._color_scheme = None
         self._diagnostics_rows = {}
         self._session_bus = None
         self._calibration_preview = None
@@ -296,10 +238,12 @@ class Application(Adw.Application):
             else load_config()
         )
         self._selected_profile = self._default_profile()
+        self._skins = load_skins()
+        self._watch_system_style()
 
         _load_proart_style()
         self._window = Adw.ApplicationWindow(application=self)
-        self._window.set_title("ProArt DialPad")
+        self._window.set_title(APP_NAME)
         self._window.set_default_size(1080, 760)
         self._window.add_css_class("proart-window")
 
@@ -310,7 +254,7 @@ class Application(Adw.Application):
         emblem = Gtk.Image.new_from_icon_name("input-dialpad-symbolic")
         emblem.set_pixel_size(20)
         brand.append(emblem)
-        title = Gtk.Label(label="ProArt DialPad", xalign=0)
+        title = Gtk.Label(label=APP_NAME, xalign=0)
         title.add_css_class("title-4")
         brand.append(title)
         header.set_title_widget(brand)
@@ -834,11 +778,11 @@ class Application(Adw.Application):
         hero.append(copy_box)
 
         self._dial_preview = Gtk.DrawingArea()
-        self._dial_preview.set_content_width(200)
-        self._dial_preview.set_content_height(200)
+        self._dial_preview.set_content_width(210)
+        self._dial_preview.set_content_height(210)
         self._dial_preview.set_draw_func(self._draw_dial_preview)
         self._dial_preview.set_valign(Gtk.Align.CENTER)
-        self._dial_preview.set_tooltip_text("Click a segment to edit that function")
+        self._dial_preview.set_tooltip_text("Click a function to edit it")
         click = Gtk.GestureClick.new()
         click.connect("pressed", self._on_preview_clicked)
         self._dial_preview.add_controller(click)
@@ -1067,36 +1011,63 @@ class Application(Adw.Application):
             return [segment] if segment else []
         return profile.active_segments()
 
-    def _draw_dial_preview(self, _area, cr, width, height):
-        profile = self._current_profile()
+    def _watch_system_style(self):
+        self._color_scheme = ColorScheme()
+        self._color_scheme.on_changed(self._on_skins_changed)
+
+    def _system_is_light(self):
+        return self._color_scheme is not None and not self._color_scheme.prefers_dark()
+
+    def _skin_attribute(self):
+        """The overlay setting the dial uses right now: skin or skin_light."""
+        overlay = self.config.overlay
+        return "skin_light" if overlay.follow_system_style and self._system_is_light() else "skin"
+
+    def _skin(self, skin_id=None):
+        return resolve_skin(self._skins, skin_id or getattr(self.config.overlay, self._skin_attribute()))
+
+    def _preview_view(self, profile):
         segments = self._preview_segments(profile)
-        draw_dial(
-            cr, width, height, segments,
-            active_title=self._preview_title,
-            title_text=self._preview_title or (profile.name if profile else None),
-            mode=profile.mode if profile else "multi",
+        if profile is None:
+            return None
+        titles = [segment.title for segment in segments]
+        colors = [segment_color(segment, index) for index, segment in enumerate(segments)]
+        icons = [segment.icon_url or "" for segment in segments]
+        accent = self.config.overlay.accent or DEFAULT_ACCENT
+        if profile.mode == "single" and segments:
+            segment = segments[0]
+            return DialView(
+                self._skin(), titles, colors, accent, icons, title=segment.title, selected=True,
+                value=50 if segment.unit == "%" else None, unit=segment.unit or "", profile=profile.name,
+            )
+        return DialView(
+            self._skin(), titles, colors, accent, icons,
+            title=self._preview_title or "", profile=profile.name,
         )
+
+    @staticmethod
+    def _preview_square(width, height):
+        size = min(width, height)
+        return (width - size) / 2, (height - size) / 2, size
+
+    def _draw_dial_preview(self, _area, cr, width, height):
+        view = self._preview_view(self._current_profile())
+        if view is not None:
+            paint_dial(cr, view, *self._preview_square(width, height), draw_icon=draw_icon)
 
     def _on_preview_clicked(self, _gesture, _count, x, y):
         profile = self._current_profile()
         segments = self._preview_segments(profile)
-        if profile is None or not segments:
+        view = self._preview_view(profile)
+        if view is None or not segments:
             return
-        width = self._dial_preview.get_width()
-        height = self._dial_preview.get_height()
-        dx, dy = x - width / 2, y - height / 2
-        scale = min(width, height) / 190
-        distance = math.hypot(dx, dy)
+        left, top, size = self._preview_square(self._dial_preview.get_width(), self._dial_preview.get_height())
         if profile.mode == "single":
-            if distance <= 82 * scale:
+            if math.hypot(x - left - size / 2, y - top - size / 2) <= size / 2:
                 self._show_function_editor(profile, segments[0])
             return
-        if not 49 * scale <= distance <= 82 * scale:
-            return
-        angle = (math.degrees(math.atan2(dy, dx)) + 90) % 360
-        count = max(4, len(segments))
-        index = min(int(angle // (360 / count)), count - 1)
-        if index < len(segments):
+        index = hit_function(view, x - left, y - top, size)
+        if index is not None:
             self._preview_title = segments[index].title
             self._dial_preview.queue_draw()
             self._show_function_editor(profile, segments[index])
@@ -1725,6 +1696,9 @@ class Application(Adw.Application):
         ))
         content.append(gesture)
 
+        content.append(self._skin_group())
+        content.append(self._style_group())
+
         overlay = Adw.PreferencesGroup(
             title="On-screen dial",
             description="Applied by the GNOME Shell extension immediately.",
@@ -1767,11 +1741,383 @@ class Application(Adw.Application):
         rgba = Gdk.RGBA()
         rgba.parse(self.config.overlay.accent or DEFAULT_ACCENT)
         accent.set_rgba(rgba)
-        accent.connect("notify::rgba", lambda button, _param: self._set_config("overlay", "accent", _rgba_to_hex(button.get_rgba())))
+        accent.connect("notify::rgba", lambda button, _param: self._set_accent(_rgba_to_hex(button.get_rgba())))
         accent_row.add_suffix(accent)
         overlay.add(accent_row)
         content.append(overlay)
         return self._scrolled_content(content)
+
+    def _set_accent(self, value):
+        self._set_config("overlay", "accent", value)
+        self._on_skins_changed()
+
+    # --- skins ------------------------------------------------------------------
+
+    def _skin_group(self):
+        group = Adw.PreferencesGroup(
+            title="Skin",
+            description="How the on-screen dial looks. Customise a skin to make your own; "
+            "skins are small JSON files that you or an AI assistant can also write by hand.",
+        )
+        new = Gtk.Button.new_from_icon_name("list-add-symbolic")
+        new.set_tooltip_text("New skin based on the selected one")
+        new.add_css_class("flat")
+        new.connect("clicked", lambda _button: self._show_skin_editor(None, self._new_skin_draft(self.config.overlay.skin)))
+        group.set_header_suffix(new)
+        self._skin_gallery = Gtk.FlowBox(
+            selection_mode=Gtk.SelectionMode.NONE, homogeneous=True,
+            column_spacing=12, row_spacing=12, min_children_per_line=2, max_children_per_line=5,
+        )
+        self._skin_gallery.add_css_class("proart-skin-gallery")
+        group.add(self._skin_gallery)
+        self._refresh_skin_gallery()
+        return group
+
+    def _style_group(self):
+        group = Adw.PreferencesGroup()
+        follow = _switch_row(
+            "Match system style", "Use one skin while GNOME is light and another while it is dark",
+            self.config.overlay.follow_system_style,
+            lambda active: (self._set_config("overlay", "follow_system_style", active), self._on_skins_changed()),
+        )
+        group.add(follow)
+        for attribute, title in (("skin", "Dark style"), ("skin_light", "Light style")):
+            row = Adw.ComboRow(title=title)
+            handler = row.connect(
+                "notify::selected",
+                lambda row, _param, attribute=attribute: self._choose_style_skin(attribute, row.get_selected()),
+            )
+            self._style_rows[attribute] = (row, handler)
+            group.add(row)
+        self._sync_style_rows()
+        return group
+
+    def _sync_style_rows(self):
+        ids = list(self._skins)
+        for attribute, (row, handler) in self._style_rows.items():
+            row.handler_block(handler)
+            row.set_model(Gtk.StringList.new([skin_name(self._skins, key) for key in ids]))
+            current = getattr(self.config.overlay, attribute)
+            row.set_selected(ids.index(current) if current in ids else 0)
+            row.set_visible(self.config.overlay.follow_system_style)
+            row.handler_unblock(handler)
+
+    def _choose_style_skin(self, attribute, index):
+        ids = list(self._skins)
+        if 0 <= index < len(ids):
+            self._set_config("overlay", attribute, ids[index])
+            self._on_skins_changed()
+
+    def _on_skins_changed(self):
+        self._refresh_skin_gallery()
+        self._sync_style_rows()
+        if self._dial_preview is not None:
+            self._dial_preview.queue_draw()
+
+    def _sample_view(self, skin, selected=False):
+        accent = self.config.overlay.accent or DEFAULT_ACCENT
+        if selected:
+            return DialView(
+                skin, SAMPLE_TITLES, SAMPLE_COLORS, accent, title="Volume",
+                selected=True, value=64, unit="%", pointer=118,
+            )
+        return DialView(skin, SAMPLE_TITLES, SAMPLE_COLORS, accent, title="Zoom", profile="Default", pointer=228)
+
+    def _skin_preview_area(self, view_for, size):
+        area = Gtk.DrawingArea()
+        area.set_content_width(size)
+        area.set_content_height(size)
+        area.set_draw_func(lambda _area, cr, width, height: paint_dial(cr, view_for(), *self._preview_square(width, height), draw_icon=draw_icon))
+        return area
+
+    def _refresh_skin_gallery(self):
+        if self._skin_gallery is None:
+            return
+        _clear_children(self._skin_gallery)
+        overlay = self.config.overlay
+        current = getattr(overlay, self._skin_attribute())
+        current = current if current in self._skins else "glass"
+        for skin_id in self._skins:
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            card.add_css_class("proart-skin-card")
+            if skin_id == current:
+                card.add_css_class("selected")
+            resolved = self._skin(skin_id)
+            preview = self._skin_preview_area(lambda resolved=resolved: self._sample_view(resolved), 116)
+            card.append(preview)
+
+            footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            label = Gtk.Label(label=skin_name(self._skins, skin_id), xalign=0, hexpand=True)
+            label.set_ellipsize(3)
+            if not is_builtin(skin_id):
+                label.set_tooltip_text(f"Your skin · {SKINS_DIR / (skin_id + '.json')}")
+            footer.append(label)
+            if overlay.follow_system_style:
+                for attribute, badge_text in (("skin_light", "Light"), ("skin", "Dark")):
+                    if getattr(overlay, attribute) == skin_id:
+                        badge = Gtk.Label(label=badge_text)
+                        badge.add_css_class("proart-badge")
+                        badge.set_valign(Gtk.Align.CENTER)
+                        footer.append(badge)
+            edit = Gtk.Button.new_from_icon_name("document-edit-symbolic")
+            edit.add_css_class("flat")
+            edit.add_css_class("circular")
+            if is_builtin(skin_id):
+                edit.set_tooltip_text("Customise a copy")
+                edit.connect("clicked", lambda _b, skin_id=skin_id: self._show_skin_editor(None, self._new_skin_draft(skin_id)))
+            else:
+                edit.set_tooltip_text("Edit")
+                edit.connect("clicked", lambda _b, skin_id=skin_id: self._show_skin_editor(skin_id, copy.deepcopy(self._skins[skin_id])))
+            footer.append(edit)
+            card.append(footer)
+
+            click = Gtk.GestureClick.new()
+            click.connect("released", lambda *_args, skin_id=skin_id: self._select_skin(skin_id))
+            preview.add_controller(click)
+            preview.set_cursor_from_name("pointer")
+            preview.set_tooltip_text(self._skins[skin_id].get("description") or "Use this skin")
+            self._skin_gallery.append(card)
+
+    def _select_skin(self, skin_id):
+        """Use a skin for the style the system is in now."""
+        attribute = self._skin_attribute()
+        if getattr(self.config.overlay, attribute) == skin_id:
+            return
+        self._set_config("overlay", attribute, skin_id)
+        self._on_skins_changed()
+
+    def _new_skin_draft(self, base_id):
+        base_id = base_id if base_id in self._skins else "glass"
+        return {"name": f"My {skin_name(self._skins, base_id)}", "base": base_id, "palette": {}}
+
+    def _show_skin_editor(self, skin_id, draft):
+        """Edit a user skin (skin_id) or create one (skin_id None) from a draft.
+
+        The draft keeps only what differs from its base skin, so saved files
+        stay short and readable.
+        """
+        draft.setdefault("palette", {})
+        if not isinstance(draft["palette"], dict):
+            draft["palette"] = {}
+        dialog = Adw.Dialog(
+            title="Edit skin" if skin_id else "New skin", content_width=640, content_height=820,
+        )
+        view = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        save = Gtk.Button(label="Save")
+        save.add_css_class("suggested-action")
+        header.pack_end(save)
+        view.add_top_bar(header)
+        dialog.set_child(view)
+
+        def bases():
+            return [key for key in self._skins if key != skin_id]
+
+        def resolved(without_override=None):
+            palette = dict(draft["palette"])
+            if without_override:
+                palette.pop(without_override, None)
+            skins = dict(self._skins)
+            skins["\0draft"] = {**draft, "palette": palette}
+            return resolve_skin(skins, "\0draft")
+
+        previews = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, halign=Gtk.Align.CENTER)
+        previews.set_margin_top(6)
+        previews.set_margin_bottom(6)
+        menu_preview = self._skin_preview_area(lambda: self._sample_view(resolved()), 230)
+        gauge_preview = self._skin_preview_area(lambda: self._sample_view(resolved(), selected=True), 230)
+        previews.append(menu_preview)
+        previews.append(gauge_preview)
+        view.add_top_bar(previews)
+
+        def redraw():
+            menu_preview.queue_draw()
+            gauge_preview.queue_draw()
+
+        page = Adw.PreferencesPage()
+        view.set_content(page)
+
+        general = Adw.PreferencesGroup(title="Skin")
+        name = Adw.EntryRow(title="Name")
+        name.set_text(str(draft.get("name") or ""))
+        name.connect("changed", lambda entry: draft.__setitem__("name", entry.get_text().strip()))
+        general.add(name)
+        base_ids = bases()
+        base_row = _combo_row(
+            "Based on", "Colours you do not change come from this skin",
+            [skin_name(self._skins, key) for key in base_ids],
+            base_ids.index(draft.get("base")) if draft.get("base") in base_ids else 0,
+            lambda index: (draft.__setitem__("base", base_ids[index]), sync_rows(), redraw()),
+        )
+        if draft.get("base") not in base_ids and base_ids:
+            draft["base"] = base_ids[0]
+        general.add(base_row)
+        menu_options = ["inherit", *MENU_STYLES]
+        general.add(_combo_row(
+            "Menu style", None,
+            ["Same as the base skin", *(MENU_STYLE_LABELS[style] for style in MENU_STYLES)],
+            menu_options.index(draft.get("menu")) if draft.get("menu") in MENU_STYLES else 0,
+            lambda index: (
+                draft.__setitem__("menu", menu_options[index]) if index else draft.pop("menu", None),
+                redraw(),
+            ),
+        ))
+        page.add(general)
+
+        colours = Adw.PreferencesGroup(
+            title="Colours",
+            description="Changed colours are marked with a reset button. Opacity is set in the colour picker.",
+        )
+        rows = {}
+        updating = {"active": False}
+
+        def set_value(key, value):
+            if updating["active"]:
+                return
+            draft["palette"][key] = value
+            rows[key][1].set_visible(True)
+            redraw()
+
+        def reset(key):
+            draft["palette"].pop(key, None)
+            sync_rows()
+            redraw()
+
+        def sync_rows():
+            updating["active"] = True
+            effective = resolved()["palette"]
+            for key, (widget, reset_button) in rows.items():
+                if key == "shadow":
+                    widget.set_value(effective["shadow"])
+                else:
+                    rgba = Gdk.RGBA()
+                    rgba.red, rgba.green, rgba.blue, rgba.alpha = effective[key]
+                    widget.set_rgba(rgba)
+                reset_button.set_visible(key in draft["palette"])
+            updating["active"] = False
+
+        for key, label, help_text in PALETTE_KEYS:
+            reset_button = Gtk.Button.new_from_icon_name("edit-undo-symbolic")
+            reset_button.set_tooltip_text("Use the base skin's value")
+            reset_button.set_valign(Gtk.Align.CENTER)
+            reset_button.add_css_class("flat")
+            reset_button.connect("clicked", lambda _button, key=key: reset(key))
+            if key == "shadow":
+                row = _spin_row(label, help_text, 0.45, 0, 1, 0.05, 2,
+                                lambda value: set_value("shadow", round(value, 2)))
+                row.add_suffix(reset_button)
+                rows[key] = (row, reset_button)
+            else:
+                row = Adw.ActionRow(title=label, subtitle=help_text)
+                button = Gtk.ColorDialogButton.new(Gtk.ColorDialog(with_alpha=True))
+                button.set_valign(Gtk.Align.CENTER)
+                button.connect(
+                    "notify::rgba",
+                    lambda button, _param, key=key: set_value(key, color_to_hex((
+                        button.get_rgba().red, button.get_rgba().green,
+                        button.get_rgba().blue, button.get_rgba().alpha,
+                    ))),
+                )
+                row.add_suffix(reset_button)
+                row.add_suffix(button)
+                rows[key] = (button, reset_button)
+            colours.add(row)
+        page.add(colours)
+        sync_rows()
+
+        sharing = Adw.PreferencesGroup(
+            title="Share and AI",
+            description="Ask an assistant for a skin: copy the prompt, describe your idea, "
+            "copy its JSON answer and paste it here.",
+        )
+
+        def clipboard():
+            return self._window.get_display().get_clipboard()
+
+        def snapshot():
+            data = {key: value for key, value in draft.items() if value not in (None, "")}
+            return data
+
+        def action_row(title, subtitle, icon, callback):
+            row = Adw.ActionRow(title=title, subtitle=subtitle, activatable=True)
+            row.add_suffix(Gtk.Image.new_from_icon_name(icon))
+            row.connect("activated", lambda _row: callback())
+            return row
+
+        def copy_prompt():
+            clipboard().set(ai_prompt(snapshot()))
+            self._toast("Prompt copied — paste it into your AI assistant")
+
+        def copy_json():
+            clipboard().set(json.dumps(snapshot(), indent=4))
+            self._toast("Skin copied as JSON")
+
+        def paste_json():
+            def done(source, result):
+                try:
+                    text = source.read_text_finish(result) or ""
+                except GLib.Error:
+                    text = ""
+                start, end = text.find("{"), text.rfind("}")
+                try:
+                    pasted = json.loads(text[start:end + 1]) if start >= 0 else None
+                except ValueError:
+                    pasted = None
+                if not isinstance(pasted, dict):
+                    self._toast("The clipboard holds no skin JSON")
+                    return
+                dialog.close()
+                self._show_skin_editor(skin_id, pasted)
+                self._toast("Skin pasted — check it and save")
+
+            clipboard().read_text_async(None, done)
+
+        sharing.add(action_row("Copy prompt for AI", "Format description and this skin, ready for any assistant",
+                               "edit-copy-symbolic", copy_prompt))
+        sharing.add(action_row("Copy JSON", "Share the skin or edit it elsewhere", "edit-copy-symbolic", copy_json))
+        sharing.add(action_row("Paste JSON", "Replace this draft with a skin from the clipboard",
+                               "edit-paste-symbolic", paste_json))
+        sharing.add(action_row(
+            "Open skins folder", str(SKINS_DIR), "folder-open-symbolic",
+            lambda: (SKINS_DIR.mkdir(parents=True, exist_ok=True),
+                     Gtk.FileLauncher.new(Gio.File.new_for_path(str(SKINS_DIR))).launch(self._window, None, None)),
+        ))
+        page.add(sharing)
+
+        if skin_id:
+            danger = Adw.PreferencesGroup()
+            delete = Gtk.Button(label="Delete skin", halign=Gtk.Align.START)
+            delete.add_css_class("destructive-action")
+
+            def remove(_button):
+                delete_user_skin(skin_id)
+                fallback = draft.get("base") if is_builtin(draft.get("base") or "") else None
+                for attribute, default in (("skin", "glass"), ("skin_light", "frost")):
+                    if getattr(self.config.overlay, attribute) == skin_id:
+                        self._set_config("overlay", attribute, fallback or default)
+                self._reload_skins()
+                dialog.close()
+                self._toast("Skin deleted")
+
+            delete.connect("clicked", remove)
+            danger.add(delete)
+            page.add(danger)
+
+        def store(_button):
+            draft["name"] = draft.get("name") or "My skin"
+            target = skin_id or new_skin_id(draft["name"], self._skins)
+            save_user_skin(target, snapshot())
+            self._reload_skins()
+            self._select_skin(target)
+            dialog.close()
+            self._toast(f"Saved “{draft['name']}”")
+
+        save.connect("clicked", store)
+        dialog.present(self._window)
+
+    def _reload_skins(self):
+        self._skins = load_skins()
+        self._on_skins_changed()
 
     def _set_config(self, section, attribute, value):
         target = getattr(self.config, section)

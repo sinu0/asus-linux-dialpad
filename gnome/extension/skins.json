@@ -1,0 +1,117 @@
+{
+    "glass": {
+        "name": "Dark glass",
+        "description": "Dark glass disc with icon bubbles",
+        "menu": "bubbles",
+        "palette": {
+            "surfaceTop": [0.17, 0.175, 0.205, 0.97],
+            "surfaceBottom": [0.085, 0.09, 0.105, 0.97],
+            "rim": [1, 1, 1, 0.09],
+            "bubble": [1, 1, 1, 0.07],
+            "segment": [1, 1, 1, 0.06],
+            "track": [1, 1, 1, 0.08],
+            "detent": [1, 1, 1, 0.16],
+            "freeSlot": [1, 1, 1, 0.14],
+            "centerTop": [0.205, 0.21, 0.245, 1],
+            "centerBottom": [0.125, 0.13, 0.15, 1],
+            "text": [0.96, 0.95, 0.93, 1],
+            "muted": [0.70, 0.69, 0.67, 1],
+            "icon": [0.86, 0.85, 0.83, 0.85],
+            "iconOnColor": [0.08, 0.08, 0.09, 1],
+            "pointer": [1, 1, 1, 0.95],
+            "shadow": 0.45
+        }
+    },
+    "midnight": {
+        "name": "Midnight",
+        "description": "Pure black for OLED screens, thin outlines",
+        "menu": "bubbles",
+        "palette": {
+            "surfaceTop": [0.02, 0.02, 0.025, 0.98],
+            "surfaceBottom": [0, 0, 0, 0.98],
+            "rim": [1, 1, 1, 0.16],
+            "bubble": [1, 1, 1, 0.045],
+            "segment": [1, 1, 1, 0.04],
+            "track": [1, 1, 1, 0.10],
+            "detent": [1, 1, 1, 0.22],
+            "freeSlot": [1, 1, 1, 0.18],
+            "centerTop": [0.05, 0.05, 0.06, 1],
+            "centerBottom": [0.02, 0.02, 0.025, 1],
+            "text": [1, 1, 1, 1],
+            "muted": [0.62, 0.62, 0.64, 1],
+            "icon": [0.92, 0.92, 0.94, 0.9],
+            "iconOnColor": [0, 0, 0, 1],
+            "pointer": [1, 1, 1, 1],
+            "shadow": 0.55
+        }
+    },
+    "frost": {
+        "name": "Frost",
+        "description": "Light frosted disc that suits light themes",
+        "menu": "bubbles",
+        "palette": {
+            "surfaceTop": [0.98, 0.98, 0.985, 0.96],
+            "surfaceBottom": [0.87, 0.875, 0.89, 0.96],
+            "rim": [0, 0, 0, 0.10],
+            "bubble": [0, 0, 0, 0.06],
+            "segment": [0, 0, 0, 0.05],
+            "track": [0, 0, 0, 0.09],
+            "detent": [0, 0, 0, 0.20],
+            "freeSlot": [0, 0, 0, 0.18],
+            "centerTop": [1, 1, 1, 1],
+            "centerBottom": [0.93, 0.93, 0.945, 1],
+            "text": [0.11, 0.11, 0.13, 1],
+            "muted": [0.40, 0.40, 0.44, 1],
+            "icon": [0.20, 0.20, 0.23, 0.85],
+            "iconOnColor": [0.08, 0.08, 0.09, 1],
+            "pointer": [0.16, 0.16, 0.19, 0.95],
+            "shadow": 0.28
+        }
+    },
+    "proart": {
+        "name": "ProArt bronze",
+        "description": "Warm dark bronze with a champagne rim",
+        "menu": "bubbles",
+        "palette": {
+            "surfaceTop": [0.20, 0.17, 0.145, 0.97],
+            "surfaceBottom": [0.085, 0.075, 0.065, 0.97],
+            "rim": [0.96, 0.82, 0.67, 0.32],
+            "bubble": [0.96, 0.82, 0.67, 0.08],
+            "segment": [0.96, 0.82, 0.67, 0.06],
+            "track": [0.96, 0.82, 0.67, 0.10],
+            "detent": [0.96, 0.82, 0.67, 0.24],
+            "freeSlot": [0.96, 0.82, 0.67, 0.20],
+            "centerTop": [0.235, 0.20, 0.17, 1],
+            "centerBottom": [0.13, 0.11, 0.095, 1],
+            "text": [0.98, 0.90, 0.80, 1],
+            "muted": [0.76, 0.68, 0.58, 1],
+            "icon": [0.96, 0.86, 0.74, 0.88],
+            "iconOnColor": [0.10, 0.08, 0.06, 1],
+            "pointer": [1, 0.96, 0.90, 0.95],
+            "shadow": 0.5
+        }
+    },
+    "classic": {
+        "name": "Classic segments",
+        "description": "Ring of coloured sectors like the original ASUS Dial",
+        "menu": "segments",
+        "palette": {
+            "surfaceTop": [0.15, 0.155, 0.18, 0.97],
+            "surfaceBottom": [0.10, 0.105, 0.125, 0.97],
+            "rim": [1, 1, 1, 0.08],
+            "bubble": [1, 1, 1, 0.07],
+            "segment": [0.25, 0.26, 0.30, 0.92],
+            "track": [1, 1, 1, 0.08],
+            "detent": [1, 1, 1, 0.16],
+            "freeSlot": [0.18, 0.185, 0.215, 0.92],
+            "centerTop": [0.20, 0.205, 0.24, 1],
+            "centerBottom": [0.14, 0.145, 0.17, 1],
+            "text": [0.97, 0.93, 0.88, 1],
+            "muted": [0.72, 0.70, 0.67, 1],
+            "icon": [0.92, 0.90, 0.87, 0.9],
+            "iconOnColor": [0.08, 0.08, 0.09, 1],
+            "pointer": [1, 1, 1, 0.95],
+            "shadow": 0.45
+        }
+    }
+}

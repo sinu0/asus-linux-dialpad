@@ -2,6 +2,7 @@
 
 ## Workflow / architecture
 
+- **Name:** the project is shown as **Turnpad** (`config/identity.py`). Technical identifiers (D-Bus `io.github.asuslinuxdrivers.DialPad`, `/usr/share/asus-dialpad-driver`, `~/.config/asus-dialpad`, extension UUID) are unchanged for compatibility; "DialPad" in docs names the ASUS hardware feature.
 - **Root:** Single-repo, single-app. No monorepo, no build steps, no CI; unit tests in `tests/`.
 - **Entrypoints:**
   - `dialpad.py` – main driver daemon, ~3000 lines, monolithic. Runs from systemd `asus_dialpad_driver@.service` via a Python venv at `/usr/share/asus-dialpad-driver/.env`.
@@ -16,18 +17,27 @@
   - `config/presets.py` – ASUS Dial-style function library and pre-programmed app packs (browser, GIMP, Krita, Inkscape, Blender, Kdenlive, Resolve, LibreOffice, code editors, Spotify, video players); `suggested_color()` colours functions without one.
   - `config/labels.py` – key/macro labels shared by the GUI and the overlay hints (includes the evdev code table for old numeric keys).
   - `config_app/` – GTK4/Libadwaita settings GUI (`io.github.asuslinuxdrivers.DialPadControl`).
-  - `gnome/extension/` – GNOME Shell 50 extension (`dialpad@asus-linux-drivers`), renders radial dial natively.
+  - `gnome/extension/` – GNOME Shell 50 extension (`dialpad@asus-linux-drivers`), renders radial dial natively. `dial.js` holds all painting and imports only `cairo` (shared with `tools/`); `extension.js` owns actors, D-Bus and config watching.
+  - `gnome/extension/skins.json` – built-in skins (`glass`, `midnight`, `frost`, `proart`, `classic`); user skins are `~/.config/asus-dialpad/skins/<id>.json`. Format and AI workflow in `SKINS.md`.
+  - `config/skins.py` – loads/resolves skins in Python (mirrors `resolveSkin()` in `dial.js`, keep both in sync); `PALETTE_KEYS` drives the editor, `SKINS.md` and the AI prompt.
+  - `overlay/painter.py` – toolkit-free Cairo port of `dial.js` (settings app previews now, overlays on other desktops later); icons come through a callback, `overlay/gtk_icons.py` for GTK. Keep geometry in sync with `dial.js`.
+  - `desktop/` – everything that differs per desktop on the Python side: `active_window.py` (focused-window backends registered with `@backend`, tried in order) and `color_scheme.py` (light/dark via the XDG portal, gsettings fallback).
+  - `config/identity.py` – display name (`Turnpad`) and all technical identifiers; `tests/test_identity.py` checks their twins in JS, JSON, `.desktop` and shell files.
+  - `install_overlay.sh` – picks the on-screen dial frontend per desktop (GNOME → `install_gnome_extension.sh`).
+  - `ARCHITECTURE.md` – component map and how to add a desktop environment.
+  - `tools/` – `render_overlay_preview.js` (gjs, paints `preview/overlay-*.png` with `dial.js`) and `screenshot_settings.py` (opens the app on a demo config, saves `preview/settings-*.png`; never writes the user's config).
   - `install_gnome_extension.sh` – sourced by `install.sh`.
 
 ## Developer commands
 
 - **Unit tests:** `python3 -m unittest discover -s tests -v`
 - **Syntax check driver:** `python3 -c "import ast; ast.parse(open('dialpad.py').read())"`
-- **Check all Python:** `python3 -m compileall -q config config_app dialpad_dbus.py`
+- **Check all Python:** `python3 -m compileall -q config config_app desktop overlay tools dialpad_dbus.py`
 - **Verify bash scripts:** `bash -n install.sh install_gnome_extension.sh`
 - **Smoke test config:** `python3 -m config.runtime && python3 -m config.legacy_adapter`
 - **Validate GNOME extension (outside Shell):** `gjs -m gnome/extension/extension.js` – will fail with resource import errors because `resource:///org/gnome/shell/ui/main.js` only exists inside the shell process; that is expected and confirms ESM syntax is valid.
 - **Desktop file validate:** `desktop-file-validate config_app/io.github.asuslinuxdrivers.DialPadControl.desktop`
+- **Regenerate README pictures:** `gjs -m tools/render_overlay_preview.js && python3 tools/screenshot_settings.py` (the second one briefly opens a window).
 - **Test D-Bus service standalone:** `python3 dialpad_dbus.py` – starts, emits one invisible state, exits.
 
 ## Key environment facts
@@ -70,7 +80,7 @@
 - The legacy adapter puts profile settings under the reserved `_meta` key; `is_multifunction()` skips keys starting with `_`. Single mode uses the flat `clockwise/counterclockwise/center` layout with `_meta.single` holding title/treshold/value/unit/color/hints.
 - In a selected function: tap centre = the function's `macro_center` if any, otherwise back to menu; holding the centre for `gesture.center_hold_time` returns to the menu (fires while still touching).
 - `last_function_by_app` restores the last function on activation and focus change; returning to the menu forgets it. A focus change to another app never keeps the previous app's function.
-- `overlay` section of config.json (scale, position, hide_delay_ms, show_hints, show_pointer, accent) is read directly by the Shell extension through a directory monitor; the driver does not use it except `show_pointer`.
+- `overlay` section of config.json (scale, position, hide_delay_ms, show_hints, show_pointer, accent, skin, skin_light, follow_system_style) is read directly by the Shell extension through a directory monitor (also on the skins directory); the driver does not use it except `show_pointer`. With `follow_system_style` the extension uses `skin_light` unless `org.gnome.desktop.interface color-scheme` is `prefer-dark`.
 - `tests/test_driver_state.py` extracts the state functions from `dialpad.py` via AST; keep their names in `STATE_FUNCTIONS` in sync when renaming.
 
 ## Guided calibration and other models

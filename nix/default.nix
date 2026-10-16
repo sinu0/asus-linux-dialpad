@@ -53,8 +53,13 @@ python3Packages.buildPythonPackage {
   installPhase = ''
     mkdir -p $out/share/asus-dialpad-driver
 
-    # Copy the driver script
+    # Copy the driver script and the modules it imports
     install -Dm755 dialpad.py $out/share/asus-dialpad-driver/dialpad.py
+    install -Dm644 -t $out/share/asus-dialpad-driver dial_gesture.py dialpad_dbus.py
+    for dir in config desktop; do
+      mkdir -p $out/share/asus-dialpad-driver/$dir
+      install -Dm644 -t $out/share/asus-dialpad-driver/$dir $dir/*.py
+    done
 
     # Copy layouts directory if it exists, and remove __pycache__ if present
     if [ -d layouts ]; then

@@ -10,6 +10,7 @@
 - Tap the centre for the function's own action, hold it to return to the menu
 - Horizontal scrolling and scrolling with held modifiers (Ctrl + wheel zoom)
 - Guided calibration that fits the ring and centre button from finger traces
+- Skins for the on-screen dial (Dark glass, Midnight, Frost, ProArt bronze, Classic segments) and a skin editor with live preview, JSON import/export and an AI prompt; own skins live in `~/.config/asus-dialpad/skins/`
 
 - Unattended installer (`bash install.sh`; `--interactive` for the original questions)
 

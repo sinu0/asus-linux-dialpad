@@ -5,7 +5,9 @@ from dataclasses import dataclass, field, fields
 from enum import Enum
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".config" / "asus-dialpad"
+from config.identity import CONFIG_DIR_NAME
+
+CONFIG_DIR = Path.home() / ".config" / CONFIG_DIR_NAME
 
 CONFIG_FILE = CONFIG_DIR / "config.json"
 DARKTABLE_APP_ID = "org.darktable.darktable.desktop"
@@ -64,6 +66,13 @@ class OverlayConfig:
     show_hints: bool = True
     show_pointer: bool = True
     accent: str = "#e7b98d"
+    # Built-in skin id (gnome/extension/skins.json) or the name of a file
+    # in ~/.config/asus-dialpad/skins/ without ".json".
+    skin: str = "glass"
+    # With follow_system_style the dial uses skin_light while GNOME is in
+    # light style and skin in dark style.
+    skin_light: str = "frost"
+    follow_system_style: bool = False
     # Functions whose rotation step is at least this many degrees show a
     # progress arc while turning instead of waiting silently.
     progress_above_degrees: int = 120
@@ -281,6 +290,11 @@ def _decoder(d: dict, cls: type):
         overlay.scale = _clamp(overlay.scale, 0.6, 1.6, 1.0)
         if overlay.position not in OVERLAY_POSITIONS:
             overlay.position = "lower"
+        if not isinstance(overlay.skin, str) or not overlay.skin.strip():
+            overlay.skin = "glass"
+        if not isinstance(overlay.skin_light, str) or not overlay.skin_light.strip():
+            overlay.skin_light = "frost"
+        overlay.follow_system_style = bool(overlay.follow_system_style)
         return overlay
     if cls is Profile:
         mode = d.get("mode", "multi")

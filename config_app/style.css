@@ -133,3 +133,20 @@
 .proart-window preferencesgroup > box > box.header .title {
   color: #e7b98d;
 }
+
+.proart-skin-gallery {
+  margin-top: 4px;
+}
+
+.proart-skin-card {
+  padding: 10px 8px 6px 12px;
+  border-radius: 14px;
+  border: 1px solid #3a3a40;
+  background: #202126;
+}
+
+.proart-skin-card.selected {
+  border-color: #e5b789;
+  background: alpha(#e5b789, 0.08);
+  box-shadow: inset 0 0 0 1px #e5b789;
+}

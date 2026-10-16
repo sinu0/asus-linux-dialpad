@@ -1,6 +1,8 @@
 [Desktop Entry]
-Name=ProArt DialPad Control
-Comment=Configure ASUS DialPad functions and application profiles
+Name=Turnpad
+GenericName=Touchpad dial settings
+Comment=Configure the touchpad dial of ASUS laptops: functions, application profiles and skins
+Keywords=DialPad;dial;touchpad;ASUS;
 Exec=python3 @INSTALL_DIR@/config_app/main.py
 Icon=io.github.asuslinuxdrivers.DialPadControl
 Terminal=false

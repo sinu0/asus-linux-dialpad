@@ -197,15 +197,17 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
     fi
     CONFIG_FILE_PATH="$CONFIG_FILE_DIR_PATH/$CONFIG_FILE_NAME"
 
-    sudo mkdir -p "$INSTALL_DIR_PATH/layouts" "$INSTALL_DIR_PATH/config" "$INSTALL_DIR_PATH/config_app" "$INSTALL_DIR_PATH/gnome/extension"
+    sudo mkdir -p "$INSTALL_DIR_PATH/layouts" "$INSTALL_DIR_PATH/config" "$INSTALL_DIR_PATH/config_app" "$INSTALL_DIR_PATH/desktop" "$INSTALL_DIR_PATH/overlay" "$INSTALL_DIR_PATH/gnome/extension"
     sudo install dialpad.py "$INSTALL_DIR_PATH"
     sudo install dialpad_dbus.py "$INSTALL_DIR_PATH"
     sudo install dial_gesture.py "$INSTALL_DIR_PATH"
     sudo install -t "$INSTALL_DIR_PATH/layouts" layouts/*.py
     sudo install -m 644 -t "$INSTALL_DIR_PATH/config" config/*.py
+    sudo install -m 644 -t "$INSTALL_DIR_PATH/desktop" desktop/*.py
+    sudo install -m 644 -t "$INSTALL_DIR_PATH/overlay" overlay/*.py
     sudo install -m 755 config_app/main.py "$INSTALL_DIR_PATH/config_app/main.py"
     sudo install -m 644 config_app/__init__.py config_app/icon.svg config_app/style.css config_app/io.github.asuslinuxdrivers.DialPadControl.desktop "$INSTALL_DIR_PATH/config_app/"
-    sudo install -m 644 gnome/extension/extension.js gnome/extension/metadata.json gnome/extension/stylesheet.css "$INSTALL_DIR_PATH/gnome/extension/"
+    sudo install -m 644 gnome/extension/extension.js gnome/extension/dial.js gnome/extension/skins.json gnome/extension/metadata.json gnome/extension/stylesheet.css "$INSTALL_DIR_PATH/gnome/extension/"
     sudo chown -R $USER "$INSTALL_DIR_PATH"
 
     mkdir -p "$HOME/.local/share/applications"
@@ -281,7 +283,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
       if [ -z "$LAYOUT_NAME" ] && [ "$INTERACTIVE" != "1" ]; then
         LAYOUT_NAME="proartp16"
         echo "No known layout for this laptop; using $LAYOUT_NAME."
-        echo "Run Calibration -> Guided calibration in the ProArt DialPad Control app after installing."
+        echo "Run Calibration -> Guided calibration in the Turnpad app after installing."
       fi
 
       if [ -z "$LAYOUT_NAME" ]; then
@@ -304,7 +306,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
 
     echo
 
-    source install_gnome_extension.sh
+    source install_overlay.sh
 
     echo
 
@@ -313,7 +315,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
     echo "Next steps:"
     echo "  1. Log out and back in (new user groups and the GNOME extension load at login)."
     echo "  2. Hold the illuminated corner icon of the touchpad to switch the DialPad on."
-    echo "  3. Open \"ProArt DialPad Control\" from the applications menu to set up functions;"
+    echo "  3. Open \"Turnpad\" from the applications menu to set up functions;"
     echo "     on a laptop that is not listed, run Calibration -> Guided calibration."
 
     echo

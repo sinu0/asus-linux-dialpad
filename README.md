@@ -1,11 +1,13 @@
-# Asus touchpad DialPad driver — ASUS Dial-style fork
+# Turnpad — touchpad dial for ASUS laptops
+
+Turnpad turns the DialPad printed on the touchpad of ASUS laptops into an ASUS Dial-style controller on Linux: a radial menu of functions, per-application profiles, an on-screen dial with skins and a settings app.
 
 > **This is a personal fork** of [asus-linux-drivers/asus-dialpad-driver](https://github.com/asus-linux-drivers/asus-dialpad-driver)
 > by Lukáš Drahník (GPL-2.0). It adds features modelled on the Windows
 > [ASUS Dial & Control Panel](https://www.asus.com/proart/software-solutions/asus-dial-and-control-panel/).
 > It was written with substantial help from an AI assistant and has been tested
 > only on a ProArt PX13 (HN7306WV) with GNOME 51 on Wayland. Expect rough edges.
-> Not affiliated with ASUS; "ASUS", "ASUS Dial" and "ProArt" are trademarks of ASUSTeK.
+> Not affiliated with ASUS or Dialpad, Inc.; "ASUS", "ASUS Dial" and "ProArt" are trademarks of ASUSTeK and "Dialpad" of Dialpad, Inc. They are used here only to say which hardware Turnpad works with.
 
 What the fork adds:
 
@@ -22,7 +24,7 @@ cd asus-linux-dialpad
 bash install.sh
 ```
 
-The installer needs `sudo`, asks no questions (use `bash install.sh --interactive` to choose layout, co-activator key and services yourself), keeps your existing configuration, and collects no data. Afterwards log out and back in, hold the illuminated corner icon to switch the DialPad on, and open **ProArt DialPad Control** from the applications menu. To update, `git pull` and run `bash install.sh` again; to remove, run `bash uninstall.sh`.
+The installer needs `sudo`, asks no questions (use `bash install.sh --interactive` to choose layout, co-activator key and services yourself), keeps your existing configuration, and collects no data. Afterwards log out and back in, hold the illuminated corner icon to switch the DialPad on, and open **Turnpad** from the applications menu. To update, `git pull` and run `bash install.sh` again; to remove, run `bash uninstall.sh`.
 
 Configuration lives in `~/.config/asus-dialpad/config.json`; the original `dialpad_dev` + `layouts/*.py` setup keeps working as a fallback.
 
@@ -36,13 +38,22 @@ Configuration lives in `~/.config/asus-dialpad/config.json`; the original `dialp
 
 ![On-screen dial](./preview/overlay-states.png)
 
-**Settings app** — functions of a profile, application profiles, the function library and the per-function editor:
+**Skins** — five built-in looks, plus your own made in the skin editor or written as JSON by hand or by an AI assistant ([SKINS.md](SKINS.md)):
+
+![Built-in skins](./preview/overlay-skins.png)
+
+**Settings app** — functions of a profile, application profiles, the function library, the per-function editor, calibration, behaviour and skins:
 
 | | |
 |---|---|
 | ![Dial controls](./preview/settings-dial-controls.png) | ![Profiles](./preview/settings-profiles.png) |
 | ![Function library](./preview/settings-library.png) | ![Function editor](./preview/settings-function-editor.png) |
 | ![Guided calibration](./preview/settings-calibration.png) | ![Behaviour](./preview/settings-behaviour.png) |
+| ![Skin gallery](./preview/settings-skins.png) | ![Skin editor](./preview/settings-skin-editor.png) |
+
+How the parts fit together and how to support another desktop: [ARCHITECTURE.md](ARCHITECTURE.md).
+
+The pictures are generated from the code: `gjs -m tools/render_overlay_preview.js` paints the dial with the extension's own drawing code, and `python3 tools/screenshot_settings.py` opens the settings app on a demo configuration and saves each page.
 
 The sections below come from the original project and describe the base driver.
 
@@ -56,7 +67,7 @@ The sections below come from the original project and describe the base driver.
 
 ## Features
 
-Everything is set up in the **ProArt DialPad Control** app (applications menu); changes apply immediately, no restart or file editing needed.
+Everything is set up in the **Turnpad** app (applications menu); changes apply immediately, no restart or file editing needed.
 
 **Profiles**
 
@@ -81,6 +92,7 @@ Everything is set up in the **ProArt DialPad Control** app (applications menu); 
 **On-screen dial**
 
 - GNOME Shell 45–51: native overlay with colours, level gauge, rotation hints and finger position; size, position and accent colour are configurable
+- Skins: Dark glass, Midnight (OLED black), Frost (light), ProArt bronze and Classic segments, optionally following the system light/dark style; the skin editor creates your own with a live preview, and its "Copy prompt for AI" / "Paste JSON" pair lets any AI assistant design one ([SKINS.md](SKINS.md))
 - Other desktops: the original PySide overlay (own `.svg` icons; double-click to unlock its position and move it)
 
 **Base driver** (from the original project)
@@ -360,7 +372,7 @@ sed -i "s/^enabled = 1/enabled = 0/" /usr/share/asus-dialpad-driver/dialpad_dev
 
 ## Configuration
 
-Use the **ProArt DialPad Control** app for every setting:
+Use the **Turnpad** app for every setting:
 
 | App page | What it configures |
 | --- | --- |
