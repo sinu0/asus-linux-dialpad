@@ -1772,7 +1772,7 @@ class Application(Adw.Application):
                 capture_hint.set_text(key_state["note"])
             elif key_state["listening"]:
                 capture_hint.set_text("Recording: press the whole shortcut, e.g. hold Ctrl and press F12. "
-                                      "Click elsewhere to stop.")
+                                      "Desktop shortcuts are paused meanwhile; click elsewhere to stop.")
             else:
                 capture_hint.set_text("Click the field above to record a shortcut from your keyboard.")
             for code, button in key_buttons:
@@ -1789,6 +1789,15 @@ class Application(Adw.Application):
             key_state["listening"] = listening
             if listening:
                 key_state["note"] = None
+            # Desktop shortcuts (a drop-down terminal on F12, screenshots)
+            # would take the keys first; GNOME asks once for permission.
+            native = capture.get_native()
+            surface = native.get_surface() if native else None
+            if isinstance(surface, Gdk.Toplevel):
+                if listening:
+                    surface.inhibit_system_shortcuts(None)
+                else:
+                    surface.restore_system_shortcuts()
             refresh_shortcut(update_entry=False)
 
         controller = Gtk.EventControllerKey.new()
@@ -1818,6 +1827,7 @@ class Application(Adw.Application):
         focus.connect("leave", lambda _controller: set_listening(False))
         capture.add_controller(focus)
         capture.connect("clicked", lambda _button: set_listening(True))
+        capture.connect("unmap", lambda _button: set_listening(False))
 
         def names_changed(entry):
             if syncing["active"]:
@@ -2314,6 +2324,13 @@ class Application(Adw.Application):
                 edit.set_tooltip_text("Edit")
                 edit.connect("clicked", lambda _b, skin_id=skin_id: self._show_skin_editor(skin_id, copy.deepcopy(self._skins[skin_id])))
             footer.append(edit)
+            if not is_builtin(skin_id):
+                delete = Gtk.Button.new_from_icon_name("user-trash-symbolic")
+                delete.add_css_class("flat")
+                delete.add_css_class("circular")
+                delete.set_tooltip_text("Delete")
+                delete.connect("clicked", lambda _b, skin_id=skin_id: self._confirm_delete_skin(skin_id))
+                footer.append(delete)
             card.append(footer)
 
             click = Gtk.GestureClick.new()
@@ -2322,6 +2339,38 @@ class Application(Adw.Application):
             preview.set_cursor_from_name("pointer")
             preview.set_tooltip_text(self._skins[skin_id].get("description") or "Use this skin")
             self._skin_gallery.append(card)
+
+    def _confirm_delete_skin(self, skin_id, deleted=None):
+        """Ask, then delete a user skin and its picture; deleted() runs afterwards."""
+        skin = self._skins.get(skin_id) or {}
+        background = skin.get("background")
+        picture = background.get("image") if isinstance(background, dict) else None
+        dialog = Adw.AlertDialog(
+            heading=f"Delete “{skin_name(self._skins, skin_id)}”?",
+            body="The skin file and its background picture are removed from the skins folder."
+            if picture else "The skin file is removed from the skins folder.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("delete", "Delete")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_close_response("cancel")
+
+        def respond(_dialog, response):
+            if response != "delete":
+                return
+            delete_user_skin(skin_id)
+            self._delete_unused_picture(picture)
+            fallback = skin.get("base") if is_builtin(skin.get("base") or "") else None
+            for attribute, default in (("skin", "glass"), ("skin_light", "frost")):
+                if getattr(self.config.overlay, attribute) == skin_id:
+                    self._set_config("overlay", attribute, fallback or default)
+            self._reload_skins()
+            if deleted:
+                deleted()
+            self._toast("Skin deleted")
+
+        dialog.connect("response", respond)
+        dialog.present(self._window)
 
     def _select_skin(self, skin_id):
         """Use a skin for the style the system is in now."""
@@ -2703,19 +2752,7 @@ class Application(Adw.Application):
             delete = Gtk.Button(label="Delete skin", halign=Gtk.Align.START)
             delete.add_css_class("destructive-action")
 
-            def remove(_button):
-                picture = (draft.get("background") or {}).get("image") if isinstance(draft.get("background"), dict) else None
-                delete_user_skin(skin_id)
-                self._delete_unused_picture(picture)
-                fallback = draft.get("base") if is_builtin(draft.get("base") or "") else None
-                for attribute, default in (("skin", "glass"), ("skin_light", "frost")):
-                    if getattr(self.config.overlay, attribute) == skin_id:
-                        self._set_config("overlay", attribute, fallback or default)
-                self._reload_skins()
-                dialog.close()
-                self._toast("Skin deleted")
-
-            delete.connect("clicked", remove)
+            delete.connect("clicked", lambda _b: self._confirm_delete_skin(skin_id, dialog.close))
             danger.add(delete)
             page.add(danger)
 
