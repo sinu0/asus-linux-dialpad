@@ -26,7 +26,7 @@ app_main = importlib.import_module("config_app.main")
 from gi.repository import Adw, Gio, GLib, Graphene, Gtk  # noqa: E402
 
 from config.presets import pack_for_app, profile_for_pack  # noqa: E402
-from config.schema import Profile, _default_config  # noqa: E402
+from config.schema import _default_config  # noqa: E402
 from config.skins import builtin_skins  # noqa: E402
 
 OUTPUT = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "preview"
