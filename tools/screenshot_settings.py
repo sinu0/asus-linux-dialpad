@@ -140,7 +140,31 @@ def steps(app):
     capture(window, "settings-skin-editor")
 
     close_dialogs(app)
+    app._show_skin_editor(None, {
+        "name": "Square bronze", "base": "proart", "shape": "custom", "tile": "square",
+        "outline": {"points": [1.0, 1.41] * 4, "smooth": False},
+    })
+    yield
+    dialog = window.get_visible_dialog()
+    outline = next(
+        group for group in _descendants(dialog, Adw.PreferencesGroup)
+        if group.get_title() == "Custom outline"
+    )
+    scroll_to(outline)
+    yield
+    capture(window, "settings-skin-shape")
+
+    close_dialogs(app)
     app.quit()
+
+
+def _descendants(widget, kind):
+    child = widget.get_first_child()
+    while child is not None:
+        if isinstance(child, kind):
+            yield child
+        yield from _descendants(child, kind)
+        child = child.get_next_sibling()
 
 
 def main():

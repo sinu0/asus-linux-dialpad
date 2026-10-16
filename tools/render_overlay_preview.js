@@ -190,3 +190,19 @@ renderRow(
     GLib.build_filenamev([OUTPUT, 'overlay-skins.png']),
     ids.map(id => scenes(resolveSkin(skins, id))[0]),
     ids.map(id => skins[id].name || id));
+
+// Shapes a skin can take, on top of built-in looks.
+const shapes = {
+    'Square': { base: 'glass', shape: 'square', tile: 'square' },
+    'Octagon': { base: 'midnight', shape: 'octagon', tile: 'hexagon' },
+    'Knurled': { base: 'proart', shape: 'knurled', tile: 'diamond' },
+    'Drawn: star': { base: 'glass', shape: 'custom', tileSize: 0.85, outline: { points: [1, 0.72, 1, 0.72, 1, 0.72, 1, 0.72, 1, 0.72], smooth: false } },
+    'Drawn: flower': { base: 'frost', shape: 'custom', outline: { points: [1, 0.86, 1, 0.86, 1, 0.86, 1, 0.86, 1, 0.86, 1, 0.86], smooth: true } },
+};
+const withShapes = { ...skins };
+for (const [name, skin] of Object.entries(shapes))
+    withShapes[name] = skin;
+renderRow(
+    GLib.build_filenamev([OUTPUT, 'overlay-shapes.png']),
+    Object.keys(shapes).map(name => scenes(resolveSkin(withShapes, name))[0]),
+    Object.keys(shapes));

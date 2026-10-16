@@ -28,10 +28,37 @@ const FONT = 'Adwaita Sans';
 
 export const DEFAULT_SKIN = 'glass';
 
+// Outline of the disc. 'custom' is drawn in the settings app: points
+// spread evenly around the centre, each at its own distance (a fraction of
+// the full radius), joined straight or smoothly. Every outline stays inside
+// the dial's square, so icons and the touch ring keep their places.
+export const DIAL_SHAPES = ['circle', 'square', 'octagon', 'knurled', 'scalloped', 'custom'];
+export const OUTLINE_POINTS_MIN = 3;
+export const OUTLINE_POINTS_MAX = 24;
+export const OUTLINE_RADIUS_MIN = 0.5;
+// Points may reach the corners of the dial's square (half its width is
+// OUTLINE_BOX times the radius), so a full-size square fits.
+export const OUTLINE_BOX = 1.08;
+
+// Farthest a point at this position may go, as a fraction of the radius.
+export function outlineLimit(index, count) {
+    const angle = index / count * 2 * Math.PI - Math.PI / 2;
+    return Math.min(1.5, OUTLINE_BOX / Math.max(Math.abs(Math.cos(angle)), Math.abs(Math.sin(angle))));
+}
+// Outline of a function in the bubble menu.
+export const TILE_SHAPES = ['circle', 'square', 'diamond', 'hexagon'];
+export const TILE_SIZE_MIN = 0.75;
+export const TILE_SIZE_MAX = 1.25;
+// A background picture is a PNG next to the skin file, named plainly.
+const IMAGE_NAME = /^[\w.-]+\.png$/i;
+
 // Used when skins.json cannot be read: the dark glass look.
 export const FALLBACK_SKIN = {
     name: 'Dark glass',
     menu: 'bubbles',
+    shape: 'circle',
+    tile: 'circle',
+    tileSize: 1,
     palette: {
         surfaceTop: [0.17, 0.175, 0.205, 0.97],
         surfaceBottom: [0.085, 0.09, 0.105, 0.97],
@@ -125,7 +152,9 @@ function skinColor(value, fallback) {
 
 // Picks a skin by id from { id: skin }. A skin may name a "base" skin and
 // override only some colours; missing colours come from the base, then from
-// the fallback, so a partial or broken skin never breaks painting.
+// the fallback, so a partial or broken skin never breaks painting. The
+// loader stores the directory of each skin file in "__dir"; a background
+// picture is looked up there.
 export function resolveSkin(skins, id) {
     const chain = [];
     let current = skins?.[id] ?? skins?.[DEFAULT_SKIN];
@@ -133,11 +162,30 @@ export function resolveSkin(skins, id) {
         chain.unshift(current);
         current = skins?.[current.base];
     }
-    let menu = FALLBACK_SKIN.menu;
+    let { menu, shape, tile, tileSize } = FALLBACK_SKIN;
+    let background = null;
+    let outline = null;
     const palette = { ...FALLBACK_SKIN.palette };
     for (const skin of chain) {
         if (skin.menu === 'segments' || skin.menu === 'bubbles')
             menu = skin.menu;
+        if (DIAL_SHAPES.includes(skin.shape))
+            shape = skin.shape;
+        if (TILE_SHAPES.includes(skin.tile))
+            tile = skin.tile;
+        if (typeof skin.tileSize === 'number' && Number.isFinite(skin.tileSize))
+            tileSize = Math.max(TILE_SIZE_MIN, Math.min(TILE_SIZE_MAX, Number(skin.tileSize)));
+        if (skin.outline && typeof skin.outline === 'object')
+            outline = resolveOutline(skin.outline) ?? outline;
+        if (skin.background === null) {
+            background = null;
+        } else if (skin.background && IMAGE_NAME.test(String(skin.background.image ?? '')) && skin.__dir) {
+            const opacity = Number(skin.background.opacity ?? 1);
+            background = {
+                path: `${skin.__dir}/${skin.background.image}`,
+                opacity: Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 1,
+            };
+        }
         for (const [key, fallback] of Object.entries(FALLBACK_SKIN.palette)) {
             const value = skin.palette?.[key];
             if (value === undefined)
@@ -150,7 +198,21 @@ export function resolveSkin(skins, id) {
             }
         }
     }
-    return { menu, palette };
+    if (shape === 'custom' && !outline)
+        shape = 'circle';
+    return { menu, shape, tile, tileSize, outline, background, palette };
+}
+
+// { points: [radius fractions, clockwise from the top], smooth } or null.
+function resolveOutline(outline) {
+    const points = Array.isArray(outline.points) ? outline.points.map(Number) : [];
+    if (points.length < OUTLINE_POINTS_MIN || points.length > OUTLINE_POINTS_MAX || !points.every(Number.isFinite))
+        return null;
+    return {
+        points: points.map((point, index) =>
+            Math.max(OUTLINE_RADIUS_MIN, Math.min(outlineLimit(index, points.length), point))),
+        smooth: outline.smooth !== false,
+    };
 }
 
 function truncate(text, length) {
@@ -310,26 +372,152 @@ export function paintPointer(cr, view, color) {
     cr.restore();
 }
 
+// --- shapes ---------------------------------------------------------------
+
+// Background pictures, loaded once per path; the extension clears the cache
+// when skins reload, so a replaced picture shows up.
+const images = new Map();
+
+export function clearImageCache() {
+    images.clear();
+}
+
+function loadImage(path) {
+    if (!images.has(path)) {
+        let image = null;
+        try {
+            image = Cairo.ImageSurface.createFromPNG(path);
+        } catch (_) {
+            // A missing or broken picture leaves the plain disc.
+        }
+        images.set(path, image);
+    }
+    return images.get(path);
+}
+
+// Points of a custom outline, clockwise from the top, in dial units.
+export function outlinePoints(outline, cx, cy, radius) {
+    const count = outline.points.length;
+    return outline.points.map((fraction, index) => {
+        const angle = index / count * 2 * Math.PI - Math.PI / 2;
+        return [cx + Math.cos(angle) * radius * fraction, cy + Math.sin(angle) * radius * fraction];
+    });
+}
+
+// Closed Catmull-Rom spline through the points, as Bézier curves.
+function smoothPath(cr, points) {
+    const count = points.length;
+    cr.moveTo(...points[0]);
+    for (let index = 0; index < count; index++) {
+        const [p0, p1, p2, p3] = [-1, 0, 1, 2].map(offset => points[(index + offset + count) % count]);
+        cr.curveTo(
+            p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6,
+            p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6,
+            p2[0], p2[1]);
+    }
+    cr.closePath();
+}
+
+// Path of the skin's disc outline around (cx, cy); radius is half the width.
+function shapePath(cr, cx, cy, radius, skin) {
+    cr.newPath();
+    const shape = skin.shape;
+    if (shape === 'square') {
+        roundedRect(cr, cx - radius, cy - radius, 2 * radius, 2 * radius, radius * 0.22);
+    } else if (shape === 'octagon') {
+        polygon(cr, cx, cy, radius / Math.cos(Math.PI / 8), 8, Math.PI / 8);
+    } else if (shape === 'knurled' || shape === 'scalloped') {
+        // Knurled: 60 fine teeth like a knob's grip; scalloped: 16 soft waves.
+        const steps = shape === 'knurled' ? 120 : 192;
+        for (let index = 0; index < steps; index++) {
+            const angle = index / steps * 2 * Math.PI;
+            const r = shape === 'knurled'
+                ? radius - (index % 2 ? 4 : 0)
+                : radius - 3 + 3 * Math.cos(16 * angle);
+            cr.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+        }
+        cr.closePath();
+    } else if (shape === 'custom' && skin.outline) {
+        const points = outlinePoints(skin.outline, cx, cy, radius);
+        if (skin.outline.smooth) {
+            smoothPath(cr, points);
+        } else {
+            points.forEach(point => cr.lineTo(...point));
+            cr.closePath();
+        }
+    } else {
+        cr.arc(cx, cy, radius, 0, 2 * Math.PI);
+    }
+}
+
+function polygon(cr, cx, cy, radius, sides, rotation) {
+    for (let index = 0; index < sides; index++) {
+        const angle = rotation + index / sides * 2 * Math.PI;
+        cr.lineTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+    }
+    cr.closePath();
+}
+
+// Path of a function tile of radius r at (x, y).
+function tilePath(cr, x, y, r, tile) {
+    cr.newPath();
+    if (tile === 'square')
+        roundedRect(cr, x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8, r * 0.38);
+    else if (tile === 'diamond')
+        polygon(cr, x, y, r * 1.12, 4, -Math.PI / 2);
+    else if (tile === 'hexagon')
+        polygon(cr, x, y, r * 1.04, 6, -Math.PI / 2);
+    else
+        cr.arc(x, y, r, 0, 2 * Math.PI);
+}
+
 function drawSurface(cr, view, cx, cy) {
-    const palette = view.skin.palette;
+    const skin = view.skin;
+    const { palette, background } = skin;
+    const image = background ? loadImage(background.path) : null;
     cr.save();
-    // Soft shadow centred under the disc, slightly lower like a light
-    // from above; concentric so the dial never looks off-centre.
-    const shadow = new Cairo.RadialGradient(cx, cy + 4, OUTER_R - 6, cx, cy + 4, OUTER_R + 16);
-    shadow.addColorStopRGBA(0, 0, 0, 0, palette.shadow);
-    shadow.addColorStopRGBA(1, 0, 0, 0, 0);
-    cr.arc(cx, cy + 4, OUTER_R + 16, 0, 2 * Math.PI);
-    cr.setSource(shadow);
-    cr.fill();
+
+    // Soft shadow, slightly lower like a light from above.
+    if (skin.shape === 'circle') {
+        const shadow = new Cairo.RadialGradient(cx, cy + 4, OUTER_R - 6, cx, cy + 4, OUTER_R + 16);
+        shadow.addColorStopRGBA(0, 0, 0, 0, palette.shadow);
+        shadow.addColorStopRGBA(1, 0, 0, 0, 0);
+        cr.arc(cx, cy + 4, OUTER_R + 16, 0, 2 * Math.PI);
+        cr.setSource(shadow);
+        cr.fill();
+    } else {
+        // Other outlines: the same outline, grown in steps, as a soft edge.
+        for (let step = 5; step >= 0; step--) {
+            shapePath(cr, cx, cy + 4, OUTER_R + step * 2.4 - 4, skin);
+            cr.setSourceRGBA(0, 0, 0, palette.shadow * 0.12);
+            cr.fill();
+        }
+    }
 
     const surface = new Cairo.LinearGradient(cx, cy - OUTER_R, cx, cy + OUTER_R);
     surface.addColorStopRGBA(0, ...palette.surfaceTop);
     surface.addColorStopRGBA(1, ...palette.surfaceBottom);
-    cr.arc(cx, cy, OUTER_R, 0, 2 * Math.PI);
+    shapePath(cr, cx, cy, OUTER_R, skin);
     cr.setSource(surface);
     cr.fill();
 
-    cr.arc(cx, cy, OUTER_R - 0.5, 0, 2 * Math.PI);
+    if (image) {
+        // The picture covers the disc and is cut to its outline.
+        const width = image.getWidth();
+        const height = image.getHeight();
+        const scale = Math.max(2 * OUTER_R / width, 2 * OUTER_R / height);
+        cr.save();
+        shapePath(cr, cx, cy, OUTER_R, skin);
+        cr.clip();
+        cr.translate(cx - width * scale / 2, cy - height * scale / 2);
+        cr.scale(scale, scale);
+        cr.setSourceSurface(image, 0, 0);
+        cr.getSource().setFilter(Cairo.Filter.GOOD);
+        cr.paintWithAlpha(background.opacity);
+        cr.restore();
+    }
+
+    shapePath(cr, cx, cy, OUTER_R - 0.5, skin);
     cr.setLineWidth(1);
     cr.setSourceRGBA(...palette.rim);
     cr.stroke();
@@ -391,18 +579,22 @@ function drawBubbleMenu(cr, view, cx, cy) {
             cr.stroke();
         }
 
-        cr.newPath();
-        cr.arc(x, y, BUBBLE_R, 0, 2 * Math.PI);
+        const radius = BUBBLE_R * view.skin.tileSize;
+        tilePath(cr, x, y, radius, view.skin.tile);
         if (active) {
             cr.setSourceRGBA(...color);
             cr.fill();
         } else {
             cr.setSourceRGBA(...palette.bubble);
             cr.fill();
-            // A small colour key keeps functions recognisable.
-            cr.arc(x, y, BUBBLE_R - 0.75, mid + Math.PI - 0.55, mid + Math.PI + 0.55);
+            // A small colour key keeps functions recognisable: an arc
+            // towards the centre on round tiles, the outline on others.
+            if (view.skin.tile === 'circle')
+                cr.arc(x, y, radius - 0.75, mid + Math.PI - 0.55, mid + Math.PI + 0.55);
+            else
+                tilePath(cr, x, y, radius - 0.75, view.skin.tile);
             cr.setLineWidth(1.5);
-            cr.setSourceRGBA(color[0], color[1], color[2], 0.75);
+            cr.setSourceRGBA(color[0], color[1], color[2], view.skin.tile === 'circle' ? 0.75 : 0.5);
             cr.stroke();
         }
     }

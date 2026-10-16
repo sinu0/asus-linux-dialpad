@@ -18,11 +18,15 @@ Pick one in **Turnpad → Behaviour → Skin**. With **Match system style** on, 
 
 ### In the skin editor
 
-Click the pencil on a built-in skin (or **+**) to start a copy. The editor shows the menu and a level gauge live while you change:
+Click **Customise the selected skin…** (or **New skin…**, or the pencil on a card). The editor shows the menu and a level gauge live while you change:
 
-- **Based on**: the skin your copy starts from. Colours you do not change keep following it.
-- **Menu style**: icon bubbles or a ring of sectors.
-- **Colours**: every part of the dial, with opacity. A reset button appears next to a changed colour.
+- **Based on**: the skin your copy starts from. Everything you do not change keeps following it.
+- **Shape**: the outline of the disc (circle, square, octagon, knurled or wavy edge, or your own), the menu style (icon bubbles or a ring of sectors), and the shape and size of the function tiles.
+- **Custom outline**: draw the disc yourself. Points sit around the centre at equal angles; drag each one towards or away from the centre. They snap to the rings and stay inside the dashed square, so the dial always works. Start from a preset (circle, square, hexagon, star, flower), change the number of points, join them smoothly or with straight lines, and mirror the left half to the right one.
+- **Background picture**: any picture; it covers the disc, is cut to its shape and blends in with the opacity you choose. It is stored as a PNG next to your skin.
+- **Colours**: every part of the dial. Many parts are see-through on purpose, so each colour has its own opacity slider. A reset button appears next to a changed colour.
+
+![Drawing a square outline](./preview/settings-skin-shape.png)
 
 **Save** writes the skin to `~/.config/asus-turnpad/skins/<id>.json` and selects it.
 
@@ -59,6 +63,11 @@ A skin is one JSON object:
 - `description`: optional, one line.
 - `base`: optional id of another skin; colours left out are taken from it (and from Dark glass in the end).
 - `menu`: `"bubbles"` (round icon buttons) or `"segments"` (a ring of sectors).
+- `shape`: outline of the disc: `"circle"`, `"square"`, `"octagon"`, `"knurled"`, `"scalloped"` or `"custom"`.
+- `outline`: the custom outline, `{"points": [...], "smooth": true}`: 3 to 24 distances from the centre (fractions of the radius) at equal angles, clockwise from the top. 0.5 to 1.08, and up to 1.5 towards the corners: `[1, 1.41, 1, 1.41, 1, 1.41, 1, 1.41]` with `"smooth": false` is a square.
+- `tile`: shape of each function in the bubble menu: `"circle"`, `"square"`, `"diamond"` or `"hexagon"`.
+- `tileSize`: 0.75 to 1.25; 1 is the standard size.
+- `background`: `{"image": "name.png", "opacity": 0.6}`, a PNG next to the skin file; `null` removes the base skin's picture.
 - `palette`: colours as `"#rrggbb"`, `"#rrggbbaa"` (`aa` = opacity, `00`–`ff`) or `[r, g, b, a]` with channels from 0 to 1.
 
 | Key | Paints |
@@ -80,6 +89,6 @@ A skin is one JSON object:
 | `pointer` | Dot that follows the finger around the ring |
 | `shadow` | Opacity of the shadow under the disc, a number from 0 to 1 |
 
-Function colours (Volume blue, Zoom champagne…) and the accent colour are set per function and in Behaviour, not by the skin. A broken or partial skin never breaks the dial: unknown values fall back to the base skin.
+Function colours (Volume blue, Zoom champagne…) and the accent colour are set per function and in Behaviour, not by the skin. A broken or partial skin never breaks the dial: unknown values fall back to the base skin, a custom shape without a usable outline is a circle, and a missing picture leaves the plain disc. Shapes and pictures are painted by the same Cairo code in the GNOME extension (`dial.js`) and in the settings app (`overlay/painter.py`), so they look the same wherever the dial is drawn.
 
 The built-in skins are in [`gnome/extension/skins.json`](gnome/extension/skins.json). The painting code is shared by the extension and the README pictures (`gjs -m tools/render_overlay_preview.js`). The legacy PySide overlay used on other desktops does not support skins.

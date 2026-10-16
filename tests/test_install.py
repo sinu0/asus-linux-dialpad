@@ -31,6 +31,12 @@ class InstallTest(unittest.TestCase):
                 with self.subTest(package=name):
                     self.assertIn(f"{name}/*.py", text)
 
+    def test_installer_copies_every_settings_app_module(self):
+        text = (ROOT / "install.sh").read_text()
+        for path in sorted((ROOT / "config_app").glob("*.py")):
+            with self.subTest(module=path.name):
+                self.assertIn(f"config_app/{path.name}", text)
+
 
 if __name__ == "__main__":
     unittest.main()

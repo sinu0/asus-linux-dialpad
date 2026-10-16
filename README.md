@@ -46,6 +46,10 @@ Turnpad currently supports **GNOME** (Shell 45–51). The driver itself also run
 
 ![Built-in skins](./preview/overlay-skins.png)
 
+A skin also sets the dial's shape and its tiles, or an outline you draw in the editor, and can add a background picture:
+
+![Dial shapes](./preview/overlay-shapes.png)
+
 **Settings app** — functions of a profile, application profiles, the function library, the per-function editor, calibration, behaviour and skins:
 
 | | |
@@ -54,6 +58,7 @@ Turnpad currently supports **GNOME** (Shell 45–51). The driver itself also run
 | ![Function library](./preview/settings-library.png) | ![Function editor](./preview/settings-function-editor.png) |
 | ![Guided calibration](./preview/settings-calibration.png) | ![Behaviour](./preview/settings-behaviour.png) |
 | ![Skin gallery](./preview/settings-skins.png) | ![Skin editor](./preview/settings-skin-editor.png) |
+| ![Drawing an outline](./preview/settings-skin-shape.png) | |
 
 How the parts fit together and how to support another desktop: [ARCHITECTURE.md](ARCHITECTURE.md).
 

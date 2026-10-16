@@ -10,6 +10,7 @@ import {
     DEFAULT_SKIN,
     DIAL_D,
     HINT_H,
+    clearImageCache,
     iconLayout,
     iconNameFor,
     parseColor,
@@ -131,6 +132,7 @@ export default class DialPadExtension extends Extension {
         const appearance = this._appearance;
         const light = appearance.follow_system_style && !this._systemPrefersDark();
         const id = light ? appearance.skin_light : appearance.skin;
+        clearImageCache();
         this._skin = resolveSkin(this._loadSkins(), String(id || DEFAULT_SKIN));
     }
 
@@ -174,7 +176,11 @@ export default class DialPadExtension extends Extension {
     // Built-in skins ship as skins.json next to this file; every
     // skins/<id>.json in the config directory adds or replaces one.
     _loadSkins() {
-        const skins = { ...this._readJson(GLib.build_filenamev([this.path, SKINS_NAME])) || {} };
+        // "__dir" tells resolveSkin() where a skin's background picture is.
+        const builtin = this._readJson(GLib.build_filenamev([this.path, SKINS_NAME])) || {};
+        const skins = {};
+        for (const [id, skin] of Object.entries(builtin))
+            skins[id] = { ...skin, __dir: this.path };
         const directory = Gio.File.new_for_path(SKINS_DIR);
         let enumerator = null;
         try {
@@ -188,7 +194,7 @@ export default class DialPadExtension extends Extension {
                 continue;
             const skin = this._readJson(GLib.build_filenamev([SKINS_DIR, name]));
             if (skin && typeof skin === 'object')
-                skins[name.slice(0, -5)] = skin;
+                skins[name.slice(0, -5)] = { ...skin, __dir: SKINS_DIR };
         }
         enumerator.close(null);
         return skins;
@@ -199,7 +205,7 @@ export default class DialPadExtension extends Extension {
         // later is picked up when it appears.
         this._configMonitors = [];
         this._watchDirectory(CONFIG_DIR, name => name === CONFIG_NAME || name === 'skins');
-        this._watchDirectory(SKINS_DIR, name => name.endsWith('.json'));
+        this._watchDirectory(SKINS_DIR, name => name.endsWith('.json') || name.endsWith('.png'));
     }
 
     _watchDirectory(path, relevant) {

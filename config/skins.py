@@ -19,6 +19,27 @@ BUILTIN_SKINS_FILE = PROJECT_ROOT / "gnome" / "extension" / "skins.json"
 SKINS_DIR = CONFIG_DIR / "skins"
 DEFAULT_SKIN = "glass"
 MENU_STYLES = ("bubbles", "segments")
+# Twins of DIAL_SHAPES, TILE_SHAPES and the limits in dial.js.
+DIAL_SHAPES = ("circle", "square", "octagon", "knurled", "scalloped", "custom")
+TILE_SHAPES = ("circle", "square", "diamond", "hexagon")
+TILE_SIZE_MIN, TILE_SIZE_MAX = 0.75, 1.25
+OUTLINE_POINTS_MIN, OUTLINE_POINTS_MAX = 3, 24
+OUTLINE_RADIUS_MIN = 0.5
+# Points may reach the corners of the dial's square (half its width is
+# OUTLINE_BOX times the radius), so a full-size square fits.
+OUTLINE_BOX = 1.08
+
+
+def outline_limit(index: int, count: int) -> float:
+    """Farthest a point at this position may go, as a fraction of the radius."""
+    import math
+
+    angle = index / count * 2 * math.pi - math.pi / 2
+    return min(1.5, OUTLINE_BOX / max(abs(math.cos(angle)), abs(math.sin(angle))))
+# A background picture is a PNG next to the skin file, named plainly.
+IMAGE_NAME = re.compile(r"^[\w.-]+\.png$", re.IGNORECASE)
+# Loaders note each skin file's directory here; never saved.
+DIR_KEY = "__dir"
 
 # Every colour a skin can set, in the order the editor shows them, with a
 # label and what it paints. "shadow" is a number from 0 to 1, the rest are
@@ -46,6 +67,9 @@ COLOR_KEYS = tuple(key for key, _label, _help in PALETTE_KEYS if key != "shadow"
 FALLBACK_SKIN = {
     "name": "Dark glass",
     "menu": "bubbles",
+    "shape": "circle",
+    "tile": "circle",
+    "tileSize": 1,
     "palette": {
         "surfaceTop": [0.17, 0.175, 0.205, 0.97],
         "surfaceBottom": [0.085, 0.09, 0.105, 0.97],
@@ -104,7 +128,9 @@ def _read(path: Path):
 
 def builtin_skins() -> dict:
     skins = _read(BUILTIN_SKINS_FILE)
-    return skins if isinstance(skins, dict) else {DEFAULT_SKIN: FALLBACK_SKIN}
+    if not isinstance(skins, dict):
+        return {DEFAULT_SKIN: FALLBACK_SKIN}
+    return {key: {**skin, DIR_KEY: str(BUILTIN_SKINS_FILE.parent)} for key, skin in skins.items() if isinstance(skin, dict)}
 
 
 def user_skins(directory: Path | None = None) -> dict:
@@ -115,8 +141,13 @@ def user_skins(directory: Path | None = None) -> dict:
     for path in sorted(directory.glob("*.json")):
         skin = _read(path)
         if isinstance(skin, dict):
-            skins[path.stem] = skin
+            skins[path.stem] = {**skin, DIR_KEY: str(directory)}
     return skins
+
+
+def without_private_keys(skin: dict) -> dict:
+    """The skin as it is saved: no loader notes such as its directory."""
+    return {key: value for key, value in skin.items() if not str(key).startswith("__")}
 
 
 def load_skins(directory: Path | None = None) -> dict:
@@ -126,11 +157,51 @@ def load_skins(directory: Path | None = None) -> dict:
     return skins
 
 
+def resample_outline(points: list[float], count: int) -> list[float]:
+    """The same outline with another number of points (linear in angle)."""
+    count = max(OUTLINE_POINTS_MIN, min(OUTLINE_POINTS_MAX, count))
+    source = len(points)
+    result = []
+    for index in range(count):
+        position = index / count * source
+        left = int(position) % source
+        right = (left + 1) % source
+        weight = position - int(position)
+        result.append(round(points[left] * (1 - weight) + points[right] * weight, 2))
+    return result
+
+
+def mirror_index(index: int, count: int) -> int:
+    """The point mirrored across the vertical axis through the top point."""
+    return (count - index) % count
+
+
+def resolve_outline(outline) -> dict | None:
+    """{"points": [radius fractions clockwise from the top], "smooth": bool} or None."""
+    if not isinstance(outline, dict) or not isinstance(outline.get("points"), list):
+        return None
+    try:
+        points = [float(point) for point in outline["points"]]
+    except (TypeError, ValueError):
+        return None
+    if not OUTLINE_POINTS_MIN <= len(points) <= OUTLINE_POINTS_MAX or any(point != point for point in points):
+        return None
+    return {
+        "points": [
+            max(OUTLINE_RADIUS_MIN, min(outline_limit(index, len(points)), point))
+            for index, point in enumerate(points)
+        ],
+        "smooth": outline.get("smooth") is not False,
+    }
+
+
 def resolve_skin(skins: dict, skin_id: str) -> dict:
-    """{"menu": ..., "palette": {key: (r, g, b, a) | shadow float}}.
+    """{"menu", "shape", "tile", "tileSize", "outline", "background",
+    "palette": {key: (r, g, b, a) | shadow float}}.
 
     Follows "base" links, then fills anything missing from the fallback, so a
-    partial or broken skin still paints.
+    partial or broken skin still paints. "background" is {"path", "opacity"}
+    with the picture found next to the skin file, or None.
     """
     chain = []
     current = skins.get(skin_id) or skins.get(DEFAULT_SKIN)
@@ -139,6 +210,8 @@ def resolve_skin(skins: dict, skin_id: str) -> dict:
         current = skins.get(current.get("base"))
 
     menu = FALLBACK_SKIN["menu"]
+    shape, tile, tile_size = FALLBACK_SKIN["shape"], FALLBACK_SKIN["tile"], FALLBACK_SKIN["tileSize"]
+    outline = background = None
     palette = {
         key: (value if key == "shadow" else parse_color(value, (1, 1, 1, 1)))
         for key, value in FALLBACK_SKIN["palette"].items()
@@ -146,6 +219,23 @@ def resolve_skin(skins: dict, skin_id: str) -> dict:
     for skin in chain:
         if skin.get("menu") in MENU_STYLES:
             menu = skin["menu"]
+        if skin.get("shape") in DIAL_SHAPES:
+            shape = skin["shape"]
+        if skin.get("tile") in TILE_SHAPES:
+            tile = skin["tile"]
+        if isinstance(skin.get("tileSize"), (int, float)) and not isinstance(skin.get("tileSize"), bool):
+            tile_size = max(TILE_SIZE_MIN, min(TILE_SIZE_MAX, float(skin["tileSize"])))
+        outline = resolve_outline(skin.get("outline")) or outline
+        if "background" in skin and skin["background"] is None:
+            background = None
+        elif isinstance(skin.get("background"), dict) and skin.get(DIR_KEY):
+            image = str(skin["background"].get("image") or "")
+            if IMAGE_NAME.match(image):
+                try:
+                    opacity = max(0.0, min(1.0, float(skin["background"].get("opacity", 1))))
+                except (TypeError, ValueError):
+                    opacity = 1.0
+                background = {"path": str(Path(skin[DIR_KEY]) / image), "opacity": opacity}
         colours = skin.get("palette") if isinstance(skin.get("palette"), dict) else {}
         for key in palette:
             if key not in colours:
@@ -157,7 +247,12 @@ def resolve_skin(skins: dict, skin_id: str) -> dict:
                     pass
             else:
                 palette[key] = parse_color(colours[key], palette[key])
-    return {"menu": menu, "palette": palette}
+    if shape == "custom" and outline is None:
+        shape = "circle"
+    return {
+        "menu": menu, "shape": shape, "tile": tile, "tileSize": tile_size,
+        "outline": outline, "background": background, "palette": palette,
+    }
 
 
 def skin_name(skins: dict, skin_id: str) -> str:
@@ -208,6 +303,15 @@ def format_description() -> str:
         + ", ".join(builtin_skins())
         + "); colours left out are taken from it.",
         '- "menu": "bubbles" (round icon buttons) or "segments" (a ring of sectors).',
+        '- "shape": outline of the disc: ' + ", ".join(f'"{shape}"' for shape in DIAL_SHAPES) + ".",
+        '- "outline": for "shape": "custom": {"points": [...], "smooth": true|false}. 3 to 24 numbers, '
+        "the distance of each point from the centre as a fraction of the radius, at equal angles clockwise "
+        "from the top; 0.5 to 1.08 (up to 1.5 towards the corners, e.g. [1, 1.41, 1, 1.41, 1, 1.41, 1, 1.41] "
+        "with smooth false is a square).",
+        '- "tile": shape of each function in the bubble menu: ' + ", ".join(f'"{tile}"' for tile in TILE_SHAPES) + ".",
+        f'- "tileSize": {TILE_SIZE_MIN} to {TILE_SIZE_MAX}, 1 is the standard size.',
+        '- "background": {"image": "name.png", "opacity": 0 to 1}: a PNG in the skins folder that covers '
+        "the disc, cut to its shape; null removes the base skin's picture.",
         '- "palette": colours as "#rrggbb" or "#rrggbbaa" (aa = opacity, 00–ff), '
         "or [r, g, b, a] with channels from 0 to 1:",
     ]
@@ -222,8 +326,8 @@ def format_description() -> str:
 def ai_prompt(skin: dict) -> str:
     """Instructions an assistant needs to edit or invent a skin."""
     return (
-        "Design a skin for the on-screen dial of the ASUS DialPad driver "
-        "(a round radial menu drawn over the desktop, 360 px across).\n\n"
+        "Design a skin for the on-screen dial of Turnpad, the ASUS DialPad driver "
+        "(a radial menu drawn over the desktop, 360 px across).\n\n"
         + format_description()
         + "\n\nReply with only the JSON object. Start from this skin and change it as I describe:\n\n"
         + json.dumps(skin, indent=4)

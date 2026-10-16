@@ -227,7 +227,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
     sudo install -m 644 -t "$INSTALL_DIR_PATH/desktop" desktop/*.py
     sudo install -m 644 -t "$INSTALL_DIR_PATH/overlay" overlay/*.py
     sudo install -m 755 config_app/main.py "$INSTALL_DIR_PATH/config_app/main.py"
-    sudo install -m 644 config_app/__init__.py config_app/icon.svg config_app/style.css "config_app/$APP_ID.desktop" "$INSTALL_DIR_PATH/config_app/"
+    sudo install -m 644 config_app/__init__.py config_app/outline_editor.py config_app/icon.svg config_app/style.css "config_app/$APP_ID.desktop" "$INSTALL_DIR_PATH/config_app/"
     sudo install -m 644 gnome/extension/extension.js gnome/extension/dial.js gnome/extension/layers.js gnome/extension/skins.json gnome/extension/metadata.json gnome/extension/stylesheet.css "$INSTALL_DIR_PATH/gnome/extension/"
 
     mkdir -p "$(dirname "$LAUNCHER_PATH")" "$(dirname "$ICON_PATH")"

@@ -7,14 +7,24 @@ from pathlib import Path
 from config.schema import OverlayConfig, _decoder
 from config.skins import (
     BUILTIN_SKINS_FILE,
+    DIAL_SHAPES,
+    DIR_KEY,
     FALLBACK_SKIN,
+    OUTLINE_BOX,
+    OUTLINE_RADIUS_MIN,
     PALETTE_KEYS,
+    TILE_SHAPES,
+    TILE_SIZE_MAX,
     color_to_hex,
     load_skins,
+    mirror_index,
     new_skin_id,
+    outline_limit,
     parse_color,
+    resample_outline,
     resolve_skin,
     save_user_skin,
+    without_private_keys,
 )
 
 DIAL_JS = Path(__file__).resolve().parents[1] / "gnome" / "extension" / "dial.js"
@@ -38,7 +48,67 @@ class BuiltinSkinsTest(unittest.TestCase):
         source = DIAL_JS.read_text()
         block = source[source.index("export const FALLBACK_SKIN"):source.index("};", source.index("export const FALLBACK_SKIN"))]
         js_keys = set(re.findall(r"^\s+(\w+): ", block, re.MULTILINE)) - {"name", "menu", "palette"}
-        self.assertEqual(js_keys, set(FALLBACK_SKIN["palette"]))
+        self.assertEqual(js_keys, set(FALLBACK_SKIN["palette"]) | {"shape", "tile", "tileSize"})
+
+
+def js_list(name):
+    source = DIAL_JS.read_text()
+    match = re.search(rf"export const {name} = \[([^\]]*)\];", source)
+    return tuple(re.findall(r"'([^']+)'", match.group(1)))
+
+
+def js_number(name):
+    return float(re.search(rf"export const {name} = ([\d.]+);", DIAL_JS.read_text()).group(1))
+
+
+class ShapeTest(unittest.TestCase):
+    def skins(self, **skin):
+        skins = load_skins(Path(tempfile.mkdtemp()))
+        skins["test"] = {"base": "glass", DIR_KEY: "/skins", **skin}
+        return skins
+
+    def test_shapes_and_limits_match_dial_js(self):
+        self.assertEqual(js_list("DIAL_SHAPES"), DIAL_SHAPES)
+        self.assertEqual(js_list("TILE_SHAPES"), TILE_SHAPES)
+        self.assertEqual(js_number("OUTLINE_BOX"), OUTLINE_BOX)
+        self.assertEqual(js_number("OUTLINE_RADIUS_MIN"), OUTLINE_RADIUS_MIN)
+        self.assertEqual(js_number("TILE_SIZE_MAX"), TILE_SIZE_MAX)
+
+    def test_shape_and_tiles_resolve_and_clamp(self):
+        skin = resolve_skin(self.skins(shape="octagon", tile="hexagon", tileSize=9), "test")
+        self.assertEqual((skin["shape"], skin["tile"], skin["tileSize"]), ("octagon", "hexagon", TILE_SIZE_MAX))
+        skin = resolve_skin(self.skins(shape="blob", tile=3, tileSize="big"), "test")
+        self.assertEqual((skin["shape"], skin["tile"], skin["tileSize"]), ("circle", "circle", 1))
+
+    def test_custom_outline_stays_in_the_dial_square(self):
+        skin = resolve_skin(self.skins(shape="custom", outline={"points": [2, 2, 0.1, 2], "smooth": False}), "test")
+        self.assertEqual(skin["shape"], "custom")
+        self.assertFalse(skin["outline"]["smooth"])
+        self.assertEqual(skin["outline"]["points"], [OUTLINE_BOX, OUTLINE_BOX, OUTLINE_RADIUS_MIN, OUTLINE_BOX])
+        # A full-size square reaches into the corners.
+        self.assertAlmostEqual(outline_limit(1, 8), 1.5)
+        # Without a usable outline the dial stays round.
+        self.assertEqual(resolve_skin(self.skins(shape="custom", outline={"points": [1, 1]}), "test")["shape"], "circle")
+
+    def test_background_picture_is_a_plain_png_next_to_the_skin(self):
+        skin = resolve_skin(self.skins(background={"image": "photo.png", "opacity": 3}), "test")
+        self.assertEqual(skin["background"], {"path": "/skins/photo.png", "opacity": 1.0})
+        for image in ("../secret.png", "/etc/photo.png", "photo.jpg"):
+            with self.subTest(image=image):
+                self.assertIsNone(resolve_skin(self.skins(background={"image": image}), "test")["background"])
+
+    def test_null_background_removes_the_base_picture(self):
+        skins = self.skins(background=None)
+        skins["glass"] = {**skins["glass"], "background": {"image": "a.png"}}
+        self.assertIsNone(resolve_skin(skins, "test")["background"])
+
+    def test_outline_helpers(self):
+        self.assertEqual(resample_outline([1.0, 0.5], 4), [1.0, 0.75, 0.5, 0.75])
+        self.assertEqual(len(resample_outline([1.0] * 6, 99)), 24)
+        self.assertEqual([mirror_index(index, 8) for index in range(8)], [0, 7, 6, 5, 4, 3, 2, 1])
+
+    def test_loader_notes_are_not_saved(self):
+        self.assertEqual(without_private_keys({"name": "x", DIR_KEY: "/a"}), {"name": "x"})
 
 
 class ResolveSkinTest(unittest.TestCase):

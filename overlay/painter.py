@@ -7,6 +7,7 @@ are drawn by a callback, e.g. overlay.gtk_icons.draw_icon for GTK.
 """
 
 import math
+import os
 
 import cairo
 
@@ -139,13 +140,134 @@ def _linear(cr, top, bottom, first, second):
     return gradient
 
 
+# --- shapes (twins of the shape functions in dial.js) ----------------------
+
+_images = {}
+
+
+def _image(path):
+    """A background PNG, loaded again when the file changes."""
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        return None
+    cached = _images.get(path)
+    if cached is None or cached[0] != stamp:
+        try:
+            cached = (stamp, cairo.ImageSurface.create_from_png(path))
+        except (cairo.Error, OSError):
+            cached = (stamp, None)
+        _images[path] = cached
+    return cached[1]
+
+
+def outline_points(outline, cx, cy, radius):
+    """Points of a custom outline, clockwise from the top."""
+    count = len(outline["points"])
+    return [
+        (cx + math.cos(index / count * 2 * math.pi - math.pi / 2) * radius * fraction,
+         cy + math.sin(index / count * 2 * math.pi - math.pi / 2) * radius * fraction)
+        for index, fraction in enumerate(outline["points"])
+    ]
+
+
+def _smooth_path(cr, points):
+    """Closed Catmull-Rom spline through the points, as Bézier curves."""
+    count = len(points)
+    cr.move_to(*points[0])
+    for index in range(count):
+        p0, p1, p2, p3 = (points[(index + offset) % count] for offset in (-1, 0, 1, 2))
+        cr.curve_to(
+            p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6,
+            p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6,
+            p2[0], p2[1],
+        )
+    cr.close_path()
+
+
+def _polygon(cr, cx, cy, radius, sides, rotation):
+    for index in range(sides):
+        angle = rotation + index / sides * 2 * math.pi
+        cr.line_to(cx + math.cos(angle) * radius, cy + math.sin(angle) * radius)
+    cr.close_path()
+
+
+def _rounded_rect(cr, x, y, width, height, radius):
+    cr.new_sub_path()
+    cr.arc(x + width - radius, y + radius, radius, -math.pi / 2, 0)
+    cr.arc(x + width - radius, y + height - radius, radius, 0, math.pi / 2)
+    cr.arc(x + radius, y + height - radius, radius, math.pi / 2, math.pi)
+    cr.arc(x + radius, y + radius, radius, math.pi, 3 * math.pi / 2)
+    cr.close_path()
+
+
+def shape_path(cr, cx, cy, radius, skin):
+    """Path of the skin's disc outline; radius is half the width."""
+    cr.new_path()
+    shape = skin.get("shape", "circle")
+    if shape == "square":
+        _rounded_rect(cr, cx - radius, cy - radius, 2 * radius, 2 * radius, radius * 0.22)
+    elif shape == "octagon":
+        _polygon(cr, cx, cy, radius / math.cos(math.pi / 8), 8, math.pi / 8)
+    elif shape in ("knurled", "scalloped"):
+        steps = 120 if shape == "knurled" else 192
+        for index in range(steps):
+            angle = index / steps * 2 * math.pi
+            r = radius - (4 if index % 2 else 0) if shape == "knurled" else radius - 3 + 3 * math.cos(16 * angle)
+            cr.line_to(cx + math.cos(angle) * r, cy + math.sin(angle) * r)
+        cr.close_path()
+    elif shape == "custom" and skin.get("outline"):
+        points = outline_points(skin["outline"], cx, cy, radius)
+        if skin["outline"]["smooth"]:
+            _smooth_path(cr, points)
+        else:
+            for point in points:
+                cr.line_to(*point)
+            cr.close_path()
+    else:
+        cr.arc(cx, cy, radius, 0, 2 * math.pi)
+
+
+def _tile_path(cr, x, y, r, tile):
+    cr.new_path()
+    if tile == "square":
+        _rounded_rect(cr, x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8, r * 0.38)
+    elif tile == "diamond":
+        _polygon(cr, x, y, r * 1.12, 4, -math.pi / 2)
+    elif tile == "hexagon":
+        _polygon(cr, x, y, r * 1.04, 6, -math.pi / 2)
+    else:
+        cr.arc(x, y, r, 0, 2 * math.pi)
+
+
 def _surface(cr, view):
+    skin = view.skin
     palette = view.palette
-    _radial(cr, DIAL_R, DIAL_R + 4, OUTER_R - 6, OUTER_R + 16, palette["shadow"])
-    cr.arc(DIAL_R, DIAL_R, OUTER_R, 0, 2 * math.pi)
+    background = skin.get("background")
+    image = _image(background["path"]) if background else None
+    if skin.get("shape", "circle") == "circle":
+        _radial(cr, DIAL_R, DIAL_R + 4, OUTER_R - 6, OUTER_R + 16, palette["shadow"])
+    else:
+        for step in range(5, -1, -1):
+            shape_path(cr, DIAL_R, DIAL_R + 4, OUTER_R + step * 2.4 - 4, skin)
+            cr.set_source_rgba(0, 0, 0, palette["shadow"] * 0.12)
+            cr.fill()
+    shape_path(cr, DIAL_R, DIAL_R, OUTER_R, skin)
     cr.set_source(_linear(cr, DIAL_R - OUTER_R, DIAL_R + OUTER_R, palette["surfaceTop"], palette["surfaceBottom"]))
     cr.fill()
-    cr.arc(DIAL_R, DIAL_R, OUTER_R - 0.5, 0, 2 * math.pi)
+    if image is not None:
+        width, height = image.get_width(), image.get_height()
+        scale = max(2 * OUTER_R / width, 2 * OUTER_R / height)
+        cr.save()
+        shape_path(cr, DIAL_R, DIAL_R, OUTER_R, skin)
+        cr.clip()
+        cr.translate(DIAL_R - width * scale / 2, DIAL_R - height * scale / 2)
+        cr.scale(scale, scale)
+        cr.set_source_surface(image, 0, 0)
+        cr.get_source().set_filter(cairo.FILTER_GOOD)
+        cr.paint_with_alpha(background["opacity"])
+        cr.restore()
+    shape_path(cr, DIAL_R, DIAL_R, OUTER_R - 0.5, skin)
     cr.set_line_width(1)
     cr.set_source_rgba(*palette["rim"])
     cr.stroke()
@@ -173,17 +295,21 @@ def _bubbles(cr, view):
             cr.set_source_rgba(*color)
             cr.arc(DIAL_R, DIAL_R, HIGHLIGHT_R, start + 0.1, end - 0.1)
             cr.stroke()
-        cr.new_path()
-        cr.arc(x, y, BUBBLE_R, 0, 2 * math.pi)
+        tile = view.skin.get("tile", "circle")
+        radius = BUBBLE_R * view.skin.get("tileSize", 1)
+        _tile_path(cr, x, y, radius, tile)
         if active:
             cr.set_source_rgba(*color)
             cr.fill()
         else:
             cr.set_source_rgba(*palette["bubble"])
             cr.fill()
-            cr.arc(x, y, BUBBLE_R - 0.75, mid + math.pi - 0.55, mid + math.pi + 0.55)
+            if tile == "circle":
+                cr.arc(x, y, radius - 0.75, mid + math.pi - 0.55, mid + math.pi + 0.55)
+            else:
+                _tile_path(cr, x, y, radius - 0.75, tile)
             cr.set_line_width(1.5)
-            cr.set_source_rgba(color[0], color[1], color[2], 0.75)
+            cr.set_source_rgba(color[0], color[1], color[2], 0.75 if tile == "circle" else 0.5)
             cr.stroke()
     _pointer(cr, view, HIGHLIGHT_R, palette["pointer"])
 

@@ -16,8 +16,9 @@ gi.require_version("Gio", "2.0")
 gi.require_version("GLib", "2.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
+gi.require_version("GdkPixbuf", "2.0")
 
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, GdkPixbuf, Gio, GLib, Gtk
 
 from config.labels import describe_macro, describe_step, format_keys, icon_for_title
 from config.presets import (
@@ -46,19 +47,28 @@ from config.schema import (
 from config.identity import APP_ID, APP_NAME, DBUS_INTERFACE, DBUS_NAME, DBUS_PATH
 from config.migrate import migrate_old_format
 from config.skins import (
+    DIAL_SHAPES,
+    DIR_KEY,
     MENU_STYLES,
     PALETTE_KEYS,
     SKINS_DIR,
+    TILE_SHAPES,
+    TILE_SIZE_MAX,
+    TILE_SIZE_MIN,
     ai_prompt,
     color_to_hex,
     delete_user_skin,
     is_builtin,
     load_skins,
     new_skin_id,
+    resample_outline,
     resolve_skin,
     save_user_skin,
     skin_name,
+    user_skins,
+    without_private_keys,
 )
+from config_app.outline_editor import PRESETS, OutlineEditor
 from desktop.color_scheme import ColorScheme
 from overlay.gtk_icons import draw_icon
 from overlay.painter import DialView, hit_function, paint_dial
@@ -93,6 +103,13 @@ ACTION_TYPES = (
 SAMPLE_TITLES = ("Volume", "Brightness", "Scroll", "Zoom", "Undo / Redo", "Media")
 SAMPLE_COLORS = ("#6cb6ff", "#f4c95d", "#9ad17b", "#e7b98d", "#c99bff", "#ff8f8f")
 MENU_STYLE_LABELS = {"bubbles": "Icon bubbles", "segments": "Ring of sectors"}
+SHAPE_LABELS = {
+    "circle": "Circle", "square": "Square", "octagon": "Octagon",
+    "knurled": "Knurled edge", "scalloped": "Wavy edge", "custom": "Custom (draw it below)",
+}
+TILE_LABELS = {"circle": "Circle", "square": "Rounded square", "diamond": "Diamond", "hexagon": "Hexagon"}
+# Background pictures are stored as PNG no larger than this.
+BACKGROUND_SIZE = 720
 
 POSITION_LABELS = {
     "center": "Centre of the screen",
@@ -1785,19 +1802,33 @@ class Application(Adw.Application):
             description="How the on-screen dial looks. Customise a skin to make your own; "
             "skins are small JSON files that you or an AI assistant can also write by hand.",
         )
-        new = Gtk.Button.new_from_icon_name("list-add-symbolic")
-        new.set_tooltip_text("New skin based on the selected one")
-        new.add_css_class("flat")
-        new.connect("clicked", lambda _button: self._show_skin_editor(None, self._new_skin_draft(self.config.overlay.skin)))
-        group.set_header_suffix(new)
         self._skin_gallery = Gtk.FlowBox(
             selection_mode=Gtk.SelectionMode.NONE, homogeneous=True,
             column_spacing=12, row_spacing=12, min_children_per_line=2, max_children_per_line=5,
         )
         self._skin_gallery.add_css_class("proart-skin-gallery")
         group.add(self._skin_gallery)
+
+        # Clear entry points; the pencil on each card does the same.
+        customise = Adw.ButtonRow(title="Customise the selected skin…", start_icon_name="document-edit-symbolic")
+        customise.connect("activated", lambda _row: self._customise_current_skin())
+        group.add(customise)
+        new = Adw.ButtonRow(title="New skin…", start_icon_name="list-add-symbolic")
+        new.connect("activated", lambda _row: self._show_skin_editor(None, self._new_skin_draft(self._current_skin_id())))
+        group.add(new)
         self._refresh_skin_gallery()
         return group
+
+    def _current_skin_id(self):
+        current = getattr(self.config.overlay, self._skin_attribute())
+        return current if current in self._skins else "glass"
+
+    def _customise_current_skin(self):
+        skin_id = self._current_skin_id()
+        if is_builtin(skin_id):
+            self._show_skin_editor(None, self._new_skin_draft(skin_id))
+        else:
+            self._show_skin_editor(skin_id, copy.deepcopy(self._skins[skin_id]))
 
     def _style_group(self):
         group = Adw.PreferencesGroup()
@@ -1914,7 +1945,7 @@ class Application(Adw.Application):
 
     def _new_skin_draft(self, base_id):
         base_id = base_id if base_id in self._skins else "glass"
-        return {"name": f"My {skin_name(self._skins, base_id)}", "base": base_id, "palette": {}}
+        return {"name": f"My {skin_name(self._skins, base_id)}", "base": base_id, "palette": {}, DIR_KEY: str(SKINS_DIR)}
 
     def _show_skin_editor(self, skin_id, draft):
         """Edit a user skin (skin_id) or create one (skin_id None) from a draft.
@@ -1925,6 +1956,10 @@ class Application(Adw.Application):
         draft.setdefault("palette", {})
         if not isinstance(draft["palette"], dict):
             draft["palette"] = {}
+        draft.setdefault(DIR_KEY, str(SKINS_DIR))
+        # Pictures imported in this editor; the unused ones go when it closes.
+        created_images = []
+        saved = {"done": False}
         dialog = Adw.Dialog(
             title="Edit skin" if skin_id else "New skin", content_width=640, content_height=820,
         )
@@ -1970,29 +2005,172 @@ class Application(Adw.Application):
         general.add(name)
         base_ids = bases()
         base_row = _combo_row(
-            "Based on", "Colours you do not change come from this skin",
+            "Based on", "Everything you do not change comes from this skin",
             [skin_name(self._skins, key) for key in base_ids],
             base_ids.index(draft.get("base")) if draft.get("base") in base_ids else 0,
-            lambda index: (draft.__setitem__("base", base_ids[index]), sync_rows(), redraw()),
+            lambda index: (draft.__setitem__("base", base_ids[index]), sync_rows(), sync_shape(), redraw()),
         )
         if draft.get("base") not in base_ids and base_ids:
             draft["base"] = base_ids[0]
         general.add(base_row)
-        menu_options = ["inherit", *MENU_STYLES]
-        general.add(_combo_row(
-            "Menu style", None,
-            ["Same as the base skin", *(MENU_STYLE_LABELS[style] for style in MENU_STYLES)],
-            menu_options.index(draft.get("menu")) if draft.get("menu") in MENU_STYLES else 0,
-            lambda index: (
-                draft.__setitem__("menu", menu_options[index]) if index else draft.pop("menu", None),
-                redraw(),
-            ),
-        ))
         page.add(general)
 
+        # --- shape -------------------------------------------------------
+        shape_group = Adw.PreferencesGroup(title="Shape")
+
+        def choice_row(title, subtitle, key, values, labels):
+            """A combo whose first entry keeps the base skin's value."""
+            options = [None, *values]
+            row = _combo_row(
+                title, subtitle,
+                ["Same as the base skin", *(labels[value] for value in values)],
+                options.index(draft.get(key)) if draft.get(key) in values else 0,
+                lambda index: (
+                    draft.__setitem__(key, options[index]) if index else draft.pop(key, None),
+                    sync_shape(), redraw(),
+                ),
+            )
+            shape_group.add(row)
+            return row
+
+        choice_row("Dial shape", None, "shape", DIAL_SHAPES, SHAPE_LABELS)
+        choice_row("Menu style", None, "menu", MENU_STYLES, MENU_STYLE_LABELS)
+        tile_row = choice_row("Function tiles", "Shape of each function in the bubble menu", "tile", TILE_SHAPES, TILE_LABELS)
+        tile_size = _spin_row(
+            "Tile size", "1 is the standard size",
+            float(draft.get("tileSize", 1)), TILE_SIZE_MIN, TILE_SIZE_MAX, 0.05, 2,
+            lambda value: (draft.__setitem__("tileSize", round(value, 2)), redraw()),
+        )
+        shape_group.add(tile_size)
+        page.add(shape_group)
+
+        # --- custom outline -----------------------------------------------
+        outline_group = Adw.PreferencesGroup(
+            title="Custom outline",
+            description="Drag the blue points towards or away from the centre; they snap to the rings "
+            "and stay inside the dashed square. Start from a preset and change it.",
+        )
+        outline_options = Adw.PreferencesGroup()
+        outline = draft.get("outline") if isinstance(draft.get("outline"), dict) else None
+        outline = outline or {"points": list(PRESETS[1][1]), "smooth": PRESETS[1][2]}
+
+        def store_outline(points=None):
+            draft["outline"] = {"points": points if points is not None else editor.points, "smooth": smooth.get_active()}
+            redraw()
+
+        editor = OutlineEditor(lambda: self._sample_view(resolved()), outline, lambda points: store_outline(points),
+                               draw_icon=draw_icon)
+        editor_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        editor_box.append(editor)
+        presets = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, halign=Gtk.Align.CENTER)
+
+        def use_preset(points, is_smooth):
+            editor.set_points(points)
+            count.set_value(len(points))
+            smooth.set_active(is_smooth)
+            store_outline(list(points))
+
+        for label, points, is_smooth in PRESETS:
+            button = Gtk.Button(label=label)
+            button.add_css_class("pill")
+            button.connect("clicked", lambda _button, points=points, is_smooth=is_smooth: use_preset(list(points), is_smooth))
+            presets.append(button)
+        editor_box.append(presets)
+        outline_group.add(editor_box)
+
+        count = _spin_row(
+            "Points", "More points allow finer shapes",
+            len(outline["points"]), 3, 24, 1, 0,
+            lambda value: (editor.set_points(resample_outline(editor.points, int(value))), store_outline())
+            if int(value) != len(editor.points) else None,
+        )
+        outline_options.add(count)
+        smooth = _switch_row("Smooth", "Curves through the points instead of straight lines",
+                             outline["smooth"], lambda _active: store_outline())
+        outline_options.add(smooth)
+        outline_options.add(_switch_row("Mirror", "The left half follows the right one",
+                                        True, lambda active: setattr(editor, "mirror", active)))
+        page.add(outline_group)
+        page.add(outline_options)
+
+        def sync_shape():
+            effective = resolved()
+            custom = draft.get("shape") == "custom" or ("shape" not in draft and effective["shape"] == "custom")
+            outline_group.set_visible(custom)
+            outline_options.set_visible(custom)
+            tile_row.set_sensitive(effective["menu"] == "bubbles")
+            tile_size.set_sensitive(effective["menu"] == "bubbles")
+
+        # --- background picture -------------------------------------------
+        background_group = Adw.PreferencesGroup(
+            title="Background picture",
+            description="Any picture; it covers the disc and is cut to its shape.",
+        )
+        picture_row = Adw.ActionRow(title="Picture")
+        choose = Gtk.Button(label="Choose…", valign=Gtk.Align.CENTER)
+        remove_picture = Gtk.Button.new_from_icon_name("user-trash-symbolic")
+        remove_picture.set_valign(Gtk.Align.CENTER)
+        remove_picture.add_css_class("flat")
+        remove_picture.set_tooltip_text("Remove the picture")
+        picture_row.add_suffix(remove_picture)
+        picture_row.add_suffix(choose)
+        background_group.add(picture_row)
+        opacity = _spin_row(
+            "Picture opacity", None,
+            float((draft.get("background") or {}).get("opacity", 0.6)), 0.05, 1, 0.05, 2,
+            lambda value: set_background_opacity(round(value, 2)),
+        )
+        background_group.add(opacity)
+        page.add(background_group)
+
+        def sync_background():
+            background = draft.get("background") if isinstance(draft.get("background"), dict) else None
+            picture_row.set_subtitle(background["image"] if background else "None")
+            remove_picture.set_visible(bool(background))
+            opacity.set_sensitive(bool(background))
+
+        def set_background_opacity(value):
+            if isinstance(draft.get("background"), dict):
+                draft["background"]["opacity"] = value
+                redraw()
+
+        def picked(dialog_, result):
+            try:
+                chosen = dialog_.open_finish(result)
+            except GLib.Error:
+                return
+            try:
+                image_name = self._import_background(chosen.get_path())
+            except GLib.Error as error:
+                self._toast(f"Could not read the picture: {error.message}")
+                return
+            created_images.append(image_name)
+            draft["background"] = {"image": image_name, "opacity": round(opacity.get_value(), 2)}
+            sync_background()
+            redraw()
+
+        def choose_picture(_button):
+            images = Gtk.FileFilter()
+            images.set_name("Pictures")
+            images.add_pixbuf_formats()
+            filters = Gio.ListStore.new(Gtk.FileFilter)
+            filters.append(images)
+            Gtk.FileDialog(title="Background picture", filters=filters).open(self._window, None, picked)
+
+        def drop_picture(_button):
+            draft["background"] = None
+            sync_background()
+            redraw()
+
+        choose.connect("clicked", choose_picture)
+        remove_picture.connect("clicked", drop_picture)
+        sync_background()
+
+        # --- colours --------------------------------------------------------
         colours = Adw.PreferencesGroup(
             title="Colours",
-            description="Changed colours are marked with a reset button. Opacity is set in the colour picker.",
+            description="Many parts are see-through on purpose; raise the opacity to make a colour stand out. "
+            "Changed colours get a reset button.",
         )
         rows = {}
         updating = {"active": False}
@@ -2012,15 +2190,21 @@ class Application(Adw.Application):
         def sync_rows():
             updating["active"] = True
             effective = resolved()["palette"]
-            for key, (widget, reset_button) in rows.items():
+            for key, (widget, reset_button, alpha) in rows.items():
                 if key == "shadow":
                     widget.set_value(effective["shadow"])
                 else:
                     rgba = Gdk.RGBA()
                     rgba.red, rgba.green, rgba.blue, rgba.alpha = effective[key]
                     widget.set_rgba(rgba)
+                    alpha.set_value(round(effective[key][3] * 100))
                 reset_button.set_visible(key in draft["palette"])
             updating["active"] = False
+
+        def colour_from(button, alpha_percent=None):
+            rgba = button.get_rgba()
+            alpha = rgba.alpha if alpha_percent is None else alpha_percent / 100
+            return color_to_hex((rgba.red, rgba.green, rgba.blue, alpha))
 
         for key, label, help_text in PALETTE_KEYS:
             reset_button = Gtk.Button.new_from_icon_name("edit-undo-symbolic")
@@ -2032,24 +2216,37 @@ class Application(Adw.Application):
                 row = _spin_row(label, help_text, 0.45, 0, 1, 0.05, 2,
                                 lambda value: set_value("shadow", round(value, 2)))
                 row.add_suffix(reset_button)
-                rows[key] = (row, reset_button)
+                rows[key] = (row, reset_button, None)
             else:
                 row = Adw.ActionRow(title=label, subtitle=help_text)
                 button = Gtk.ColorDialogButton.new(Gtk.ColorDialog(with_alpha=True))
                 button.set_valign(Gtk.Align.CENTER)
+                alpha = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+                alpha.set_size_request(110, -1)
+                alpha.set_valign(Gtk.Align.CENTER)
+                alpha.set_draw_value(False)
+                alpha.set_tooltip_text("Opacity")
                 button.connect(
                     "notify::rgba",
-                    lambda button, _param, key=key: set_value(key, color_to_hex((
-                        button.get_rgba().red, button.get_rgba().green,
-                        button.get_rgba().blue, button.get_rgba().alpha,
-                    ))),
+                    lambda button, _param, key=key, alpha=alpha: (
+                        None if updating["active"] else (
+                            alpha.set_value(round(button.get_rgba().alpha * 100)),
+                            set_value(key, colour_from(button)),
+                        )
+                    ),
+                )
+                alpha.connect(
+                    "value-changed",
+                    lambda alpha, key=key, button=button: set_value(key, colour_from(button, alpha.get_value())),
                 )
                 row.add_suffix(reset_button)
+                row.add_suffix(alpha)
                 row.add_suffix(button)
-                rows[key] = (button, reset_button)
+                rows[key] = (button, reset_button, alpha)
             colours.add(row)
         page.add(colours)
         sync_rows()
+        sync_shape()
 
         sharing = Adw.PreferencesGroup(
             title="Share and AI",
@@ -2061,8 +2258,11 @@ class Application(Adw.Application):
             return self._window.get_display().get_clipboard()
 
         def snapshot():
-            data = {key: value for key, value in draft.items() if value not in (None, "")}
-            return data
+            # "background": null is kept: it removes the base skin's picture.
+            return {
+                key: value for key, value in without_private_keys(draft).items()
+                if value not in (None, "") or key == "background"
+            }
 
         def action_row(title, subtitle, icon, callback):
             row = Adw.ActionRow(title=title, subtitle=subtitle, activatable=True)
@@ -2116,7 +2316,9 @@ class Application(Adw.Application):
             delete.add_css_class("destructive-action")
 
             def remove(_button):
+                picture = (draft.get("background") or {}).get("image") if isinstance(draft.get("background"), dict) else None
                 delete_user_skin(skin_id)
+                self._delete_unused_picture(picture)
                 fallback = draft.get("base") if is_builtin(draft.get("base") or "") else None
                 for attribute, default in (("skin", "glass"), ("skin_light", "frost")):
                     if getattr(self.config.overlay, attribute) == skin_id:
@@ -2133,13 +2335,48 @@ class Application(Adw.Application):
             draft["name"] = draft.get("name") or "My skin"
             target = skin_id or new_skin_id(draft["name"], self._skins)
             save_user_skin(target, snapshot())
+            saved["done"] = True
             self._reload_skins()
             self._select_skin(target)
             dialog.close()
             self._toast(f"Saved “{draft['name']}”")
 
+        def closed(_dialog):
+            kept = (draft.get("background") or {}).get("image") if saved["done"] and isinstance(draft.get("background"), dict) else None
+            for picture in created_images:
+                if picture != kept:
+                    self._delete_unused_picture(picture)
+
         save.connect("clicked", store)
+        dialog.connect("closed", closed)
         dialog.present(self._window)
+
+    def _import_background(self, path):
+        """Store a picture of any format as a PNG in the skins folder; returns its name."""
+        pixbuf = GdkPixbuf.Pixbuf.new_from_file(path)
+        pixbuf = pixbuf.apply_embedded_orientation() or pixbuf
+        width, height = pixbuf.get_width(), pixbuf.get_height()
+        # Large photos are scaled so the shorter side covers the disc.
+        scale = min(1.0, BACKGROUND_SIZE / min(width, height))
+        if scale < 1:
+            pixbuf = pixbuf.scale_simple(max(1, round(width * scale)), max(1, round(height * scale)),
+                                         GdkPixbuf.InterpType.BILINEAR)
+        SKINS_DIR.mkdir(parents=True, exist_ok=True)
+        stem = new_skin_id(Path(path).stem, {item.stem for item in SKINS_DIR.glob("*.png")})
+        pixbuf.savev(str(SKINS_DIR / f"{stem}.png"), "png", [], [])
+        return f"{stem}.png"
+
+    def _delete_unused_picture(self, picture):
+        """Delete a picture in the skins folder unless a saved skin uses it."""
+        if not picture:
+            return
+        for skin in user_skins().values():
+            background = skin.get("background")
+            if isinstance(background, dict) and background.get("image") == picture:
+                return
+        path = SKINS_DIR / picture
+        if path.parent == SKINS_DIR and path.suffix.lower() == ".png" and path.exists():
+            path.unlink()
 
     def _reload_skins(self):
         self._skins = load_skins()
