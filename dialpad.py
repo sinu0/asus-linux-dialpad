@@ -6,12 +6,27 @@ import importlib
 import sys
 import threading
 from time import sleep, time
-import Xlib.display
-import Xlib.X
-import Xlib.XK
+
+# X11 libraries are only needed in X11 sessions (requirements.x11.txt).
+X11_LIBS_AVAILABLE = False
+try:
+    import Xlib.display
+    import Xlib.X
+    import Xlib.XK
+    import xcffib
+    import xcffib.xkb
+    X11_LIBS_AVAILABLE = True
+except Exception:
+    pass
+
 from xkbcommon import xkb
 from libevdev import EV_ABS, EV_KEY, EV_REL, EV_SYN, Device, InputEvent, device
-from pyinotify import WatchManager, IN_CLOSE_WRITE, IN_IGNORED, IN_MOVED_TO, AsyncNotifier
+from pyinotify import WatchManager, IN_CLOSE_WRITE, IN_IGNORED, IN_MOVED_TO
+# AsyncNotifier needs asyncore, which Python 3.12 removed.
+try:
+    from pyinotify import ThreadedNotifier as Notifier
+except Exception:
+    from pyinotify import AsyncNotifier as Notifier
 from periphery import I2C
 from typing import Optional
 import re
@@ -19,12 +34,10 @@ import math
 import subprocess
 import configparser
 import ast
-from xkbcommon import xkb
 import signal
 import mmap
+import fcntl
 import shutil
-import xcffib
-import xcffib.xkb
 import glob
 import socket
 import json
@@ -267,24 +280,24 @@ try:
     from pywayland.client import Display
     from pywayland.protocol.wayland import WlSeat
     PYWAYLAND_AVAILABLE = True
-except ImportError:
+except Exception:
     pass
 
 SYSTEMD_JOURNAL_AVAILABLE = False
 try:
     from systemd.journal import JournalHandler
     SYSTEMD_JOURNAL_AVAILABLE = True
-except ImportError:
+except Exception:
     pass
 
 PYATSPI_AVAILABLE = False
 try:
     import pyatspi
     PYATSPI_AVAILABLE = True
-except ImportError:
+except Exception:
     pass
 
-QDBUS = shutil.which("qdbus") or shutil.which("qdbus6")
+QDBUS = shutil.which("qdbus") or shutil.which("qdbus6") or shutil.which("qdbus-qt6")
 
 # Logging setup
 logging.basicConfig(
@@ -328,6 +341,10 @@ app_name = None
 coactivator_keys = None
 
 if xdg_session_type == "x11":
+    if not X11_LIBS_AVAILABLE:
+        log.error("X11 libraries are not available. Please install python-xlib and xcffib.")
+        sys.exit(1)
+
     try:
         display_var = os.environ.get('DISPLAY')
         display = Xlib.display.Display(display_var)
@@ -345,6 +362,10 @@ if xdg_session_type == "x11":
         log.error(f"Failed to connect to X11 display: {e}")
         sys.exit(1)
 else:
+    if not PYWAYLAND_AVAILABLE:
+        log.error("Wayland library is not available. Please install pywayland.")
+        sys.exit(1)
+
     try:
         display_wayland_var = os.environ.get('WAYLAND_DISPLAY')
         display_wayland = Display(display_wayland_var)
@@ -474,6 +495,7 @@ touchpad_name: Optional[str] = None
 device_id: Optional[str] = None
 keyboard_device_id: Optional[str] = None
 device_addr: Optional[int] = None
+hidraw_path: Optional[str] = None
 keyboard: Optional[str] = None
 
 # Constants
@@ -513,6 +535,9 @@ while try_times > 0:
                     # search device id
                     device_id = re.sub(r".*i2c-(\d+)/.*$", r'\1', line).replace("\n", "")
                     log.info('Set touchpad device id %s from %s', device_id, line.strip())
+                    hid_device = "/sys" + line.split("=", 1)[1].strip().split("/input/")[0]
+                    hidraw_nodes = sorted(glob.glob(f"{hid_device}/hidraw/hidraw*"))
+                    hidraw_path = f"/dev/{os.path.basename(hidraw_nodes[0])}" if hidraw_nodes else None
 
                 if "H: " in line:
                     touchpad = line.split("event")[1]
@@ -561,6 +586,16 @@ while try_times > 0:
 
     sleep(try_sleep)
 
+# Is the hidraw node of the touchpad usable? (preferred, I2C is a fallback)
+if hidraw_path:
+    try:
+        with open(hidraw_path, "rb+", buffering=0):
+            pass
+        log.info("DialPad backlight will be switched via %s", hidraw_path)
+    except Exception as e:
+        log.info("Can not open %s: %s, I2C will be used", hidraw_path, e)
+        hidraw_path = None
+
 # Open a handle to "/dev/i2c-x", representing the I2C bus
 path = f"/dev/i2c-{device_id}"
 try:
@@ -576,13 +611,16 @@ except Exception as e:
             pass
         log.debug("Successfully opened I2C bus via raw open() at %s", path)
     except Exception as e2:
-        log.error(
-            "Can not open the I2C bus connection (id: %s) at %s: %s",
-            device_id,
-            path,
-            e2,
-        )
-        sys.exit(1)
+        if hidraw_path:
+            log.debug("Can not open the I2C bus connection (id: %s): %s, only hidraw will be used", device_id, e2)
+        else:
+            log.error(
+                "Can not open the I2C bus connection (id: %s) at %s: %s",
+                device_id,
+                path,
+                e2,
+            )
+            sys.exit(1)
 
 # Config
 CONFIG_FILE_NAME = "dialpad_dev"
@@ -817,10 +855,41 @@ def load_all_config_values():
     if enabled is not dialpad:
         toggle_top_right_icon(dialpad)
 
+def send_value_to_touchpad_via_hidraw(value):
+    global hidraw_path
+
+    if not hidraw_path:
+        return False
+
+    # The command sent via I2C below without the I2C-HID SET_REPORT header
+    # (0x05 0x00 0x3d 0x03 0x06 0x00 0x07 0x00), which the kernel adds:
+    # feature report with id 0x0d.
+    data = bytearray([0x0d, 0x14, 0x03, int(value, 16), 0xad])
+
+    # HIDIOCSFEATURE(len) = _IOC(_IOC_READ | _IOC_WRITE, 'H', 0x06, len)
+    HIDIOCSFEATURE = 0xC0000000 | (len(data) << 16) | (ord('H') << 8) | 0x06
+
+    try:
+        with open(hidraw_path, "rb+", buffering=0) as f:
+            fcntl.ioctl(f, HIDIOCSFEATURE, data)
+        log.debug("Feature report sent via %s", hidraw_path)
+        return True
+    except Exception as e:
+        log.info("hidraw (%s) failed: %s; using I2C from now on", hidraw_path, e)
+        # Do not try again, missing permissions will not fix themselves.
+        hidraw_path = None
+
+    return False
+
+def send_value_to_touchpad(value):
+    if send_value_to_touchpad_via_hidraw(value):
+        return True
+
+    return send_value_to_touchpad_via_i2c(value)
+
 def send_value_to_touchpad_via_i2c(value):
     global device_id, device_addr
 
-    # Payload is the same as before, only the transport changes
     data = [
         0x05, 0x00, 0x3d, 0x03, 0x06, 0x00, 0x07, 0x00,
         0x0d, 0x14, 0x03, int(value, 16), 0xad,
@@ -828,17 +897,7 @@ def send_value_to_touchpad_via_i2c(value):
 
     path = f"/dev/i2c-{device_id}"
 
-    # 1) Try python-periphery first
-    try:
-        with I2C(path) as i2c:
-            msg = I2C.Message(data)
-            i2c.transfer(device_addr, [msg])
-            log.debug("Sent I2C data via python-periphery on %s", path)
-            return True
-    except Exception as e:
-        log.debug("periphery.I2C transfer failed on %s: %s; falling back to i2ctransfer", path, e)
-
-    # 2) Fallback: use i2ctransfer (from i2c-tools)
+    # 1) i2ctransfer (from i2c-tools)
     try:
         hex_data = [f"0x{b:02x}" for b in data]
         cmd = [
@@ -849,14 +908,24 @@ def send_value_to_touchpad_via_i2c(value):
         ] + hex_data
 
         log.debug("Trying I2C via i2ctransfer: %s", " ".join(cmd))
-        result = subprocess.run(cmd, check=True, capture_output=True)
+        subprocess.run(cmd, check=True, capture_output=True)
         log.debug("I2C transfer successful via i2ctransfer")
         return True
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode().strip() if e.stderr else str(e)
-        log.error("i2ctransfer failed: %s", stderr)
+        log.error("i2ctransfer failed: %s; falling back to python-periphery", stderr)
     except Exception as e:
-        log.error("Error during fallback I2C transfer: %s", e)
+        log.error("Error during i2ctransfer: %s; falling back to python-periphery", e)
+
+    # 2) Fallback: python-periphery
+    try:
+        with I2C(path) as i2c:
+            msg = I2C.Message(data)
+            i2c.transfer(device_addr, [msg])
+            log.debug("Sent I2C data via python-periphery on %s", path)
+            return True
+    except Exception as e:
+        log.error("periphery.I2C transfer failed on %s: %s", path, e)
 
     return False
 
@@ -991,6 +1060,9 @@ gsettings_max_failure_count = 1
 
 qdbus_failure_count = 0
 qdbus_max_failure_count = 1
+
+if QDBUS is None:
+    qdbus_failure_count = qdbus_max_failure_count
 
 xinput_failure_count = 0
 xinput_max_failure_count = 1
@@ -1321,9 +1393,9 @@ def activate_dialpad():
     reset_center()
 
     # unlock
-    send_value_to_touchpad_via_i2c("0x60")
+    send_value_to_touchpad("0x60")
     # activate
-    send_value_to_touchpad_via_i2c("0x01")
+    send_value_to_touchpad("0x01")
 
     config_set(CONFIG_ENABLED, True)
 
@@ -1343,9 +1415,9 @@ def deactivate_dialpad():
     reset_center()
 
     # lock
-    send_value_to_touchpad_via_i2c("0x61")
+    send_value_to_touchpad("0x61")
     # deactivate
-    send_value_to_touchpad_via_i2c("0x00")
+    send_value_to_touchpad("0x00")
 
     config_set(CONFIG_ENABLED, False)
 
@@ -1521,12 +1593,13 @@ def are_modifier_keys_pressed(modifier_names):
                 modifier_keysym_name = mod_name_to_specific_keysym_name(modifier_name)
                 modifier_evdev_key = load_evdev_key_for_wayland(modifier_keysym_name, keyboard_state)
                 if modifier_evdev_key not in active_modifiers:
+                    log.debug("Modifier %s not pressed (evdev)", modifier_name)
                     return False
         except:
             pass
 
     # x11
-    if xkb_conn:
+    if xkb_conn and X11_LIBS_AVAILABLE:
 
         X11_MODIFIER_INDEX = {
             "Shift": 0,
@@ -2323,30 +2396,32 @@ def mod_name_to_specific_keysym_name(mod_name):
         'Hyper': 'Hyper_L'
     }
 
-    mods_to_indexes_x11 = {
-        "Shift": Xlib.X.ShiftMapIndex,
-        "Lock": Xlib.X.LockMapIndex,
-        "Control": Xlib.X.ControlMapIndex,
-        "Mod1": Xlib.X.Mod1MapIndex,
-        "Mod2": Xlib.X.Mod2MapIndex,
-        "Mod3": Xlib.X.Mod3MapIndex,
-        "Mod4": Xlib.X.Mod4MapIndex,
-        "Mod5": Xlib.X.Mod5MapIndex
-    }
+    if display and X11_LIBS_AVAILABLE:
 
-    if display and mod_name in mods_to_indexes_x11:
+        mods_to_indexes_x11 = {
+            "Shift": Xlib.X.ShiftMapIndex,
+            "Lock": Xlib.X.LockMapIndex,
+            "Control": Xlib.X.ControlMapIndex,
+            "Alt": Xlib.X.Mod1MapIndex,
+            "Mod1": Xlib.X.Mod1MapIndex,
+            "Mod2": Xlib.X.Mod2MapIndex,
+            "Mod3": Xlib.X.Mod3MapIndex,
+            "Mod4": Xlib.X.Mod4MapIndex,
+            "Mod5": Xlib.X.Mod5MapIndex,
+            "AltGr": Xlib.X.Mod5MapIndex,
+        }
 
-      mods = display.get_modifier_mapping()
-      first_keycode = mods[mods_to_indexes_x11[mod_name]][0]
-      if first_keycode:
-        key = EV_KEY.codes[int(first_keycode) - 8]
-        keysym = display.keycode_to_keysym(first_keycode, 0)
-        for key in Xlib.XK.__dict__:
-          if key.startswith("XK") and Xlib.XK.__dict__[key] == keysym:
-            return key[3:]
-      else:
+        if mod_name in mods_to_indexes_x11:
+
+            mods = display.get_modifier_mapping()
+            first_keycode = mods[mods_to_indexes_x11[mod_name]][0]
+            if first_keycode:
+                keysym = display.keycode_to_keysym(first_keycode, 0)
+                for key in Xlib.XK.__dict__:
+                    if key.startswith("XK") and Xlib.XK.__dict__[key] == keysym:
+                        return key[3:]
         return mod_to_specific_keysym_name[mod_name]
-    elif display_wayland:
+    elif display_wayland and keyboard_state:
 
         keymap = keyboard_state.get_keymap()
         num_mods = keymap.num_mods()
@@ -2355,13 +2430,13 @@ def mod_name_to_specific_keysym_name(mod_name):
             keyboard_state_clean = keymap.state_new()
             key_state = keyboard_state_clean.update_key(keycode, xkb.KeyDirection.XKB_KEY_DOWN)
 
-            num_layouts = keymap.num_layouts_for_key(keycode)
-            for layout in range(0, num_layouts):
+            key_layouts_count = keymap.num_layouts_for_key(keycode)
+            for layout in range(key_layouts_count):
 
-                if gnome_current_layout_index is not None and gnome_current_layout_index == layout:
-                    layout_is_active = True
+                if gnome_current_layout_index is not None:
+                    layout_is_active = gnome_current_layout_index % key_layouts_count == layout
                 else:
-                    layout_is_active = keyboard_state_clean.layout_index_is_active(layout, xkb.StateComponent.XKB_STATE_LAYOUT_EFFECTIVE)
+                    layout_is_active = keyboard_state.layout_index_is_active(layout, xkb.StateComponent.XKB_STATE_LAYOUT_EFFECTIVE)
 
                 if layout_is_active:
                     for mod_index in range(0, num_mods):
@@ -2384,8 +2459,9 @@ def mod_name_to_specific_keysym_name(mod_name):
                                     #log.info(keysym_name)
                                     return keysym_name
 
+        return mod_to_specific_keysym_name[mod_name]
     else:
-      return mod_to_specific_keysym_name[mod_name]
+        return mod_to_specific_keysym_name[mod_name]
 
 def listen_keyboard_events():
     """
@@ -2409,7 +2485,7 @@ def listen_keyboard_events():
     while not stop_threads:
         try:
             for event in d_k.events():
-                if event.code in modifiers or event.code in coactivator_modifiers:
+                if event.type == EV_KEY and (event.code in modifiers or event.code in coactivator_modifiers):
 
                     if event.value == 1:  # Key Pressed
                         active_modifiers.add(event.code)
@@ -2477,8 +2553,8 @@ def load_evdev_key_for_wayland(char, keyboard_state):
 
     for keycode in keymap:
 
-        num_layouts = keymap.num_layouts_for_key(keycode)
-        for layout in range(0, num_layouts):
+        key_layouts_count = keymap.num_layouts_for_key(keycode)
+        for layout in range(key_layouts_count):
 
             num_levels = keymap.num_levels_for_key(keycode, layout)
 
@@ -2515,8 +2591,8 @@ def load_evdev_key_for_wayland(char, keyboard_state):
                         key = EV_KEY.codes[int(keycode - 8)]
 
 
-                    if gnome_current_layout_index is not None and gnome_current_layout_index == layout:
-                        layout_is_active = True
+                    if gnome_current_layout_index is not None:
+                        layout_is_active = gnome_current_layout_index % key_layouts_count == layout
                     else:
                         layout_is_active = keyboard_state.layout_index_is_active(layout, xkb.StateComponent.XKB_STATE_LAYOUT_EFFECTIVE)
 
@@ -2655,7 +2731,7 @@ def check_gnome_layout():
         except:
           sources_evaluated = []
 
-        if len(mru_sources_evaluated) > 0:
+        if len(mru_sources_evaluated) > 0 and mru_sources_evaluated[0] in sources_evaluated:
 
             mru_layout_index = sources_evaluated.index(mru_sources_evaluated[0])
             mru_layout = mru_sources_evaluated[0][1].split("+")[0]
@@ -2783,7 +2859,7 @@ watch_manager = None
 event_notifier = None
 
 def isEvent(event):
-    if hasattr(event, "name") and (hasattr(EV_KEY, event.name) or hasattr(EV_REL, event.name)):
+    if hasattr(event, "name") and (event in EV_KEY.codes or event in EV_REL.codes):
         return True
     else:
         return False
@@ -3005,13 +3081,13 @@ try:
     # init the device
     initialize_virtual_device()
 
-    if xdg_session_type == "wayland" and PYWAYLAND_AVAILABLE:
+    if xdg_session_type == "wayland" and display_wayland and PYWAYLAND_AVAILABLE:
         t = threading.Thread(target=load_keymap_listener_wayland)
         t.daemon = True
         threads.append(t)
         t.start()
 
-    if xdg_session_type == "x11" and display:
+    if xdg_session_type == "x11" and display and X11_LIBS_AVAILABLE:
 
         # when is the driver starting event is not received
         load_evdev_keys_for_x11()
@@ -3040,7 +3116,7 @@ try:
     mask = IN_CLOSE_WRITE | IN_IGNORED | IN_MOVED_TO
     watch_manager.add_watch(path, mask)
 
-    event_notifier = AsyncNotifier(watch_manager)
+    event_notifier = Notifier(watch_manager)
 
     t = threading.Thread(target=check_dialpad_automatical_disable_or_idle_due_inactivity)
     t.daemon = True
@@ -3094,7 +3170,7 @@ try:
     # The touchpad listener runs on the main thread
     listen_touchpad_events()
 except Exception:
-    logging.exception("Listening touchpad events unexpectedly failed")
+    log.exception("Listening touchpad events unexpectedly failed")
 finally:
     cleanup()
     log.info("Exiting")

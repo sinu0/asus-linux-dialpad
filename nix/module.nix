@@ -4,15 +4,16 @@ let
   cfg = config.hardware.asus-dialpad-driver;
 
   defaultConfigFile =
-    pkgs.writeText "asus-dialpad-driver-default-config.ini" /* ini */ ''
+    pkgs.writeText "dialpad_dev" ''
       ; vim: filetype=dosini
       ; Asus DialPad configuration
       ${lib.generators.toINI { } cfg.defaultConfig}
     '';
 
-  package =
-    cfg.package.override
-      (lib.optionalAttrs (lib.elem "wayland" cfg.sessionTypes) { waylandSupport = true; });
+  package = cfg.package.override {
+    waylandSupport = lib.elem "wayland" cfg.sessionTypes;
+    x11Support = lib.elem "x11" cfg.sessionTypes;
+  };
 in {
   imports = [
     (lib.mkRenamedOptionModule
@@ -84,6 +85,21 @@ in {
         It’s recommended to use a user-level configuration manager for this file or manually define with `lib.generators.toINI { } { /* your config */ }`.
       '';
     };
+
+    environment = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {
+        LOG = "INFO";
+        XDG_RUNTIME_DIR = "/run/user/1000";
+        DBUS_SESSION_BUS_ADDRESS = "unix:path=/run/user/1000/bus";
+        DISPLAY = ":0";
+        WAYLAND_DISPLAY = "wayland-0";
+        XDG_SESSION_TYPE = "wayland";
+      };
+      description = ''
+        Environment variables passed to the Asus DialPad Driver daemon.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -92,23 +108,13 @@ in {
     # Enable i2c
     hardware.i2c.enable = true;
 
-    # Add groups for dialpad
+    # Enable uinput
+    hardware.uinput.enable = true;
+
+    # Add rest of the groups for dialpad
     users.groups = {
-      uinput = { };
       input = { };
-      i2c = { };
     };
-
-    # Add the udev rule to set permissions for uinput and i2c-dev
-    services.udev.extraRules = /* udev */ ''
-      # Set uinput device permissions
-      KERNEL=="uinput", GROUP="uinput", MODE="0660"
-      # Set i2c-dev permissions
-      SUBSYSTEM=="i2c-dev", GROUP="i2c", MODE="0660"
-    '';
-
-    # Load specific kernel modules
-    boot.kernelModules = [ "uinput" "i2c-dev" ];
 
     systemd.user.services.asus-dialpad-driver = lib.mkIf cfg.daemon.enable {
       description = "Asus DialPad Driver";
@@ -117,18 +123,21 @@ in {
       serviceConfig = {
         Type = "simple";
         ConfigurationDirectory = "asus-dialpad-driver";
+        # Create a default config from the Nix config if missing
+        ExecStartPre = "${lib.getExe pkgs.bash} -c 'if [ ! -s %E/asus-dialpad-driver/dialpad_dev ]; then ${lib.getBin pkgs.coreutils}/bin/install -m 644 ${defaultConfigFile} %E/asus-dialpad-driver/dialpad_dev; fi'";
         ExecStart = "${package}/share/asus-dialpad-driver/dialpad.py ${cfg.layout} %E/asus-dialpad-driver/";
         # The script logs to the journal directly
-        StandardOutput = null;
-        StandardError = null;
+        StandardOutput = "null";
+        StandardError = "null";
         Restart = "on-failure";
         RestartSec = 1;
         TimeoutSec = 5;
         WorkingDirectory = "${package}/share/asus-dialpad-driver";
-        Environment = [
-          "LOG=INFO"
-        ];
+        Environment = lib.mapAttrsToList
+          (name: value: "${name}=${value}")
+          cfg.environment;
       };
+      path = [ pkgs.i2c-tools pkgs.qt6.qttools ];
     };
 
   };

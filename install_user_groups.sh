@@ -96,23 +96,37 @@ echo "  uinput: KERNEL=$UINPUT_KERNEL  SUBSYSTEM=$UINPUT_SUBSYSTEM"
 echo "  i2c:    SUBSYSTEM=$I2C_SUBSYSTEM"
 
 # create uinput udev rule
-echo 'SUBSYSTEM=="'"$UINPUT_SUBSYSTEM"'", KERNEL=="'"$UINPUT_KERNEL"'", GROUP="uinput", MODE="0660"' \
+echo 'SUBSYSTEM=="'"$UINPUT_SUBSYSTEM"'", KERNEL=="'"$UINPUT_KERNEL"'", OPTIONS+="static_node=uinput", GROUP="uinput", MODE="0660"' \
   | sudo tee "$INSTALL_UDEV_DIR_PATH"/rules.d/99-asus-dialpad-driver-uinput.rules >/dev/null
 echo 'uinput' | sudo tee /etc/modules-load.d/uinput-asus-dialpad-driver.conf >/dev/null
 
 # create i2c udev rule
-echo 'KERNEL=="i2c-[0-9]*", SUBSYSTEM=="'"$I2C_SUBSYSTEM"'", GROUP="i2c", MODE="0660"' \
+echo 'ACTION!="remove", KERNEL=="i2c-[0-9]*", SUBSYSTEM=="'"$I2C_SUBSYSTEM"'", TAG+="uaccess", GROUP="i2c", MODE="0660"' \
   | sudo tee "$INSTALL_UDEV_DIR_PATH"/rules.d/99-asus-dialpad-driver-i2c-dev.rules >/dev/null
 echo "i2c-dev" | sudo tee /etc/modules-load.d/i2c-dev-asus-dialpad-driver.conf >/dev/null
 
-if [[ $? != 0 ]]; then
-    echo "Something went wrong when adding uinput module to auto loaded modules"
-    exit 1
+# create hidraw udev rule (hidraw node of the touchpad is the preferred way how to control
+# the DialPad backlight, I2C above is used as a fallback)
+#
+# https://github.com/asus-linux-drivers/asus-numberpad-driver/issues/224
+# https://github.com/asus-linux-drivers/asus-numberpad-driver/issues/315
+#
+# the rule has to be processed before 73-seat-late.rules so that the tag uaccess has an effect
+TOUCHPAD_PHYS=$(grep -A5 -i touchpad /proc/bus/input/devices | grep -o 'Phys=i2c-[^[:space:]]*' | cut -d= -f2 | sort -u | head -n 1)
+
+if [ -n "$TOUCHPAD_PHYS" ]; then
+    echo 'ACTION!="remove", SUBSYSTEM=="hidraw", KERNELS=="'"$TOUCHPAD_PHYS"'", TAG+="uaccess", GROUP="i2c", MODE="0660"' \
+      | sudo tee "$INSTALL_UDEV_DIR_PATH"/rules.d/70-asus-dialpad-driver-hidraw.rules >/dev/null
 else
-    echo "uinput module added to auto loaded modules"
+    echo "Touchpad Phys not detected, skipping adding hidraw udev rule"
 fi
 
-sudo udevadm control --reload-rules && sudo udevadm trigger --sysname-match=uinput && sudo udevadm trigger --attr-match=subsystem=i2c-dev
+if [[ $? != 0 ]]; then
+    echo "Something went wrong during adding uinput, i2c-dev modules to auto loaded modules or during adding associated udev rules"
+    exit 1
+fi
+
+sudo udevadm control --reload-rules && sudo udevadm trigger --sysname-match=uinput && sudo udevadm trigger --attr-match=subsystem=i2c-dev && sudo udevadm trigger --subsystem-match=hidraw
 
 if [[ $? != 0 ]]; then
     echo "Something went wrong when reloading or triggering uinput udev rules"

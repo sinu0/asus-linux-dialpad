@@ -26,6 +26,23 @@
 - Socket overlay parsing of partial and nested messages
 - Configuration written atomically
 
+### Taken over from the original project (2.4.0–2.6.0)
+
+The fork stops following the original driver here; these fixes were reviewed and ported once.
+
+- DialPad backlight switched through the touchpad's `hidraw` node, I2C stays as a fallback (credits @lordyoyi, @ldrahnik); the node is now actually found from the touchpad's sysfs entry
+- I2C tries `i2ctransfer` before python-periphery
+- Separate user services for KDE Plasma Wayland that start with the Plasma session (fixes login crashes, credits @siddolo); `PATH` set in the services so `i2ctransfer` is found
+- X11 libraries (`python-xlib`, `xcffib`, `xinput`) only installed and imported in X11 sessions (credits @Robin-Everaars)
+- `pyinotify` without `asyncore`, which Python 3.12 removed
+- Fedora Qt 6 `qdbus-qt6` detection (credits @pesoiq); no `qdbus` calls when it is missing
+- `AltGr` and `Alt` modifiers on X11, active keyboard layout on Wayland (credits @bub4z0r), only key events count as modifier presses
+- Events with a valid code but no known name (credits @md2z34)
+- udev: `static_node` for uinput, `uaccess` for i2c-dev and hidraw (credits @Robin-Everaars)
+- `PyGObject<3.52` and `xkbcommon<1.1` only pinned on systems that need them; the virtualenv sees system site packages (pyatspi)
+- Settings of the legacy user interface written without `sudo`
+- NixOS: `x11Support`, environment option, default config, `qttools` and `i2c-tools` in the path
+
 ## 2.3.0 (22.6.2026)
 
 ### Fixed
