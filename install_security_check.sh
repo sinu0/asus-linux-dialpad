@@ -6,7 +6,13 @@ version_ge() {
     [ "$(printf '%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]
 }
 
-LIBINPUT_VERSION=$(libinput --version 2>/dev/null || true)
+# The libinput command comes in a separate tools package on some systems.
+LIBINPUT_VERSION=$(libinput --version 2>/dev/null || pkg-config --modversion libinput 2>/dev/null || true)
+
+if [ -z "$LIBINPUT_VERSION" ]; then
+    echo "WARNING: libinput version could not be detected; make sure it is at least 1.30.4 (CVE-2026-50292)."
+    return 0 2>/dev/null || exit 0
+fi
 
 if [[ $LIBINPUT_VERSION == 1.31.* ]]; then
     REQUIRED=1.31.3
