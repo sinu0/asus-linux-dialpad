@@ -76,3 +76,17 @@ python3 tools/screenshot_settings.py          # settings pages, dial from painte
 ```
 
 Skin resolution has the same pairing: `resolveSkin()` in `dial.js` and `resolve_skin()` in `config/skins.py`.
+
+## Rendering cost
+
+The dial has to stay smooth on battery without measurable CPU or GPU use. The arithmetic per driver signal (a sine and cosine for the finger dot, comparing the shown state) takes microseconds; what costs is rasterising with Cairo. A full `paintDial()` takes about 6 ms per frame at 2x pixel density (GNOME renders 150 % scaling at 2x), mostly the shadow and gradients that never change while the dial is shown.
+
+The GNOME extension therefore paints in three layers that the compositor puts together (`gnome/extension/layers.js`, described at the top of the file):
+
+| Layer | Painted when | Cost |
+|---|---|---|
+| Background: shadow, disc, rim | skin, scale or size changes | once |
+| Content: menu or gauge, centre, hints | `contentKey()` changes (value, function, menu) | about 0.6 ms; the centre disc is a cached image |
+| Finger dot | its colour changes | moving it paints nothing |
+
+The overlay actor is only as large as the dial, so its fade does not composite the whole screen. The driver sends the finger angle in `POINTER_STEP_DEGREES` steps (at most once per touch frame). `paintDial()` remains the one-call version for the README pictures and produces the same pixels.

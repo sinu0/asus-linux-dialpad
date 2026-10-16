@@ -14,6 +14,11 @@ const HIGHLIGHT_R = 152;
 const GAUGE_R = 136;
 const GAUGE_W = 11;
 const CENTER_R = 70;
+// Half the size of the square around the centre disc and its halo.
+const CENTER_EXTENT = CENTER_R + 12;
+const POINTER_GLOW_R = 15;
+// Side of the square the finger dot is painted in.
+export const POINTER_SIZE = 2 * POINTER_GLOW_R;
 const ICON_SIZE = 20;
 const CENTER_ICON_SIZE = 26;
 // Level gauges open at the bottom like a knob scale.
@@ -231,18 +236,77 @@ export function iconLayout(view) {
 
 // --- painting -----------------------------------------------------------
 
+// The dial in one go (previews). The Shell extension paints the three
+// layers separately so a moving finger repaints nothing: the background
+// only changes with the skin or scale, the content with the state, and the
+// finger dot is an actor that moves.
 export function paintDial(cr, view) {
+    paintBackground(cr, view);
+    paintContent(cr, view);
+    const pointer = pointerPlacement(view);
+    if (pointer) {
+        cr.save();
+        cr.scale(view.appearance.scale, view.appearance.scale);
+        drawPointer(cr, view, pointer.x, pointer.y, pointer.color);
+        cr.restore();
+    }
+}
+
+export function paintBackground(cr, view) {
     cr.save();
     cr.scale(view.appearance.scale, view.appearance.scale);
     drawSurface(cr, view, DIAL_R, DIAL_R);
+    cr.restore();
+}
+
+// cache: optional object the caller keeps between calls; it holds the
+// centre disc, the most expensive part, as a ready-made image.
+export function paintContent(cr, view, cache = null) {
+    cr.save();
+    cr.scale(view.appearance.scale, view.appearance.scale);
     if (isSelectedMode(view.state))
         drawGauge(cr, view, DIAL_R, DIAL_R);
     else if (view.skin.menu === 'segments')
         drawSegmentMenu(cr, view, DIAL_R, DIAL_R);
     else
         drawBubbleMenu(cr, view, DIAL_R, DIAL_R);
-    drawCenter(cr, view, DIAL_R, DIAL_R);
+    drawCenter(cr, view, DIAL_R, DIAL_R, cache);
     drawHints(cr, view, DIAL_R, DIAL_D + HINT_H / 2);
+    cr.restore();
+}
+
+// Everything paintContent() depends on besides the skin and the overlay
+// settings; equal keys paint equal content.
+export function contentKey(view) {
+    const { state, details } = view;
+    return JSON.stringify([
+        state.enabled, state.title, state.titles, state.menuTitles, state.value,
+        state.valueAngleStart, state.unit, state.centerPressed, state.valueShowOnlyProgress,
+        details.profile, details.mode, details.colors, details.color, details.hints,
+    ]);
+}
+
+// Centre of the finger dot in unscaled dial units and its glow colour, or
+// null when no dot is shown.
+export function pointerPlacement(view) {
+    const pointer = Number(view.details.pointer);
+    if (!view.appearance.show_pointer || !view.state.touching || !(pointer >= 0))
+        return null;
+    const selected = isSelectedMode(view.state);
+    const radius = selected ? GAUGE_R : HIGHLIGHT_R;
+    const angle = pointer * Math.PI / 180 - Math.PI / 2;
+    return {
+        x: DIAL_R + Math.cos(angle) * radius,
+        y: DIAL_R + Math.sin(angle) * radius,
+        color: selected ? functionColor(view) : view.skin.palette.pointer,
+    };
+}
+
+// The finger dot centred in a POINTER_SIZE square (scaled).
+export function paintPointer(cr, view, color) {
+    cr.save();
+    cr.scale(view.appearance.scale, view.appearance.scale);
+    drawPointer(cr, view, POINTER_GLOW_R, POINTER_GLOW_R, color);
     cr.restore();
 }
 
@@ -343,7 +407,6 @@ function drawBubbleMenu(cr, view, cx, cy) {
         }
     }
     cr.restore();
-    drawPointer(cr, view, cx, cy, HIGHLIGHT_R, palette.pointer);
 }
 
 function drawSegmentMenu(cr, view, cx, cy) {
@@ -374,7 +437,6 @@ function drawSegmentMenu(cr, view, cx, cy) {
         }
     }
     cr.restore();
-    drawPointer(cr, view, cx, cy, HIGHLIGHT_R, palette.pointer);
 }
 
 function drawGauge(cr, view, cx, cy) {
@@ -429,21 +491,14 @@ function drawGauge(cr, view, cx, cy) {
         }
     }
     cr.restore();
-    drawPointer(cr, view, cx, cy, GAUGE_R, color);
 }
 
-function drawPointer(cr, view, cx, cy, radius, color) {
-    const pointer = Number(view.details.pointer);
-    if (!view.appearance.show_pointer || !view.state.touching || !(pointer >= 0))
-        return;
-    const angle = pointer * Math.PI / 180 - Math.PI / 2;
-    const x = cx + Math.cos(angle) * radius;
-    const y = cy + Math.sin(angle) * radius;
+function drawPointer(cr, view, x, y, color) {
     cr.save();
-    const glow = new Cairo.RadialGradient(x, y, 2, x, y, 15);
+    const glow = new Cairo.RadialGradient(x, y, 2, x, y, POINTER_GLOW_R);
     glow.addColorStopRGBA(0, color[0], color[1], color[2], 0.55);
     glow.addColorStopRGBA(1, color[0], color[1], color[2], 0);
-    cr.arc(x, y, 15, 0, 2 * Math.PI);
+    cr.arc(x, y, POINTER_GLOW_R, 0, 2 * Math.PI);
     cr.setSource(glow);
     cr.fill();
     cr.arc(x, y, 5.5, 0, 2 * Math.PI);
@@ -452,12 +507,7 @@ function drawPointer(cr, view, cx, cy, radius, color) {
     cr.restore();
 }
 
-function drawCenter(cr, view, cx, cy) {
-    const { state, details } = view;
-    const palette = view.skin.palette;
-    const selectedMode = isSelectedMode(state);
-    const accent = selectedMode ? functionColor(view) : view.accent;
-    cr.save();
+function drawCenterDisc(cr, palette, cx, cy) {
     const halo = new Cairo.RadialGradient(cx, cy + 2, CENTER_R - 4, cx, cy + 2, CENTER_R + 10);
     halo.addColorStopRGBA(0, 0, 0, 0, palette.shadow * 0.75);
     halo.addColorStopRGBA(1, 0, 0, 0, 0);
@@ -471,6 +521,40 @@ function drawCenter(cr, view, cx, cy) {
     cr.arc(cx, cy, CENTER_R, 0, 2 * Math.PI);
     cr.setSource(surface);
     cr.fill();
+}
+
+// The disc is copied from an image made once per skin and pixel density.
+function drawCachedCenterDisc(cr, palette, cx, cy, cache) {
+    const pixelScale = cr.userToDeviceDistance(1, 0)[0] * cr.getTarget().getDeviceScale()[0];
+    const key = JSON.stringify([pixelScale, palette.shadow, palette.centerTop, palette.centerBottom]);
+    if (cache.centerKey !== key) {
+        const pixels = Math.ceil(2 * CENTER_EXTENT * pixelScale);
+        const image = new Cairo.ImageSurface(Cairo.Format.ARGB32, pixels, pixels);
+        image.setDeviceScale(pixelScale, pixelScale);
+        const imageCr = new Cairo.Context(image);
+        drawCenterDisc(imageCr, palette, CENTER_EXTENT, CENTER_EXTENT);
+        imageCr.$dispose();
+        cache.centerImage?.finish();
+        cache.centerImage = image;
+        cache.centerKey = key;
+    }
+    cr.save();
+    cr.setSourceSurface(cache.centerImage, cx - CENTER_EXTENT, cy - CENTER_EXTENT);
+    cr.rectangle(cx - CENTER_EXTENT, cy - CENTER_EXTENT, 2 * CENTER_EXTENT, 2 * CENTER_EXTENT);
+    cr.fill();
+    cr.restore();
+}
+
+function drawCenter(cr, view, cx, cy, cache) {
+    const { state, details } = view;
+    const palette = view.skin.palette;
+    const selectedMode = isSelectedMode(state);
+    const accent = selectedMode ? functionColor(view) : view.accent;
+    cr.save();
+    if (cache)
+        drawCachedCenterDisc(cr, palette, cx, cy, cache);
+    else
+        drawCenterDisc(cr, palette, cx, cy);
 
     cr.arc(cx, cy, CENTER_R - 0.5, 0, 2 * Math.PI);
     cr.setLineWidth(state.centerPressed ? 2.5 : 1);

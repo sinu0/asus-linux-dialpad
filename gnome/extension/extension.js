@@ -3,7 +3,6 @@ import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
-import Cairo from 'cairo';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
@@ -13,10 +12,10 @@ import {
     HINT_H,
     iconLayout,
     iconNameFor,
-    paintDial,
     parseColor,
     resolveSkin,
 } from './dial.js';
+import { DialLayers } from './layers.js';
 
 const BUS_NAME = 'io.github.asuslinuxdrivers.DialPad';
 const BUS_PATH = '/io/github/asuslinuxdrivers/DialPad';
@@ -51,7 +50,7 @@ export default class DialPadExtension extends Extension {
         this._interfaceSettings = null;
         this._styleChangedId = 0;
         this._overlay = null;
-        this._drawingArea = null;
+        this._layers = null;
         this._iconLayer = null;
         this._iconKey = '';
         this._hideTimeoutId = 0;
@@ -152,7 +151,7 @@ export default class DialPadExtension extends Extension {
                 return;
             this._applySkin();
             this._updateIcons();
-            this._drawingArea?.queue_repaint();
+            this._layers?.invalidate();
         });
     }
 
@@ -227,7 +226,6 @@ export default class DialPadExtension extends Extension {
             this._applyGeometry();
             this._iconKey = '';
             this._updateIcons();
-            this._drawingArea?.queue_repaint();
             return GLib.SOURCE_REMOVE;
         });
     }
@@ -251,9 +249,8 @@ export default class DialPadExtension extends Extension {
             return;
 
         this._overlay = new St.Widget({ visible: false, reactive: false, opacity: 0 });
-        this._drawingArea = new St.DrawingArea();
-        this._drawingArea.connect('repaint', this._onRepaint.bind(this));
-        this._overlay.add_child(this._drawingArea);
+        // Painting is split into layers that repaint only on change (layers.js).
+        this._layers = new DialLayers(this._overlay, () => this._view());
         this._iconLayer = new St.Widget({ reactive: false });
         this._overlay.add_child(this._iconLayer);
         this._centerIcon = new St.Icon({ style_class: 'dialpad-center-icon', visible: false });
@@ -278,7 +275,8 @@ export default class DialPadExtension extends Extension {
         this._overlay.remove_all_transitions();
         this._overlay.destroy();
         this._overlay = null;
-        this._drawingArea = null;
+        this._layers?.destroy();
+        this._layers = null;
         this._iconLayer = null;
         this._centerIcon = null;
         this._iconKey = '';
@@ -286,7 +284,7 @@ export default class DialPadExtension extends Extension {
     }
 
     _applyGeometry() {
-        if (!this._overlay || !this._drawingArea)
+        if (!this._overlay || !this._layers)
             return;
         const monitor = Main.layoutManager.primaryMonitor;
         if (!monitor)
@@ -294,9 +292,10 @@ export default class DialPadExtension extends Extension {
         const scale = this._appearance.scale;
         const width = Math.round(DIAL_D * scale);
         const height = Math.round((DIAL_D + HINT_H) * scale);
-        this._overlay.set_position(monitor.x, monitor.y);
-        this._overlay.set_size(monitor.width, monitor.height);
-        this._drawingArea.set_size(width, height);
+        // The overlay is only as large as the dial, so fading it composites
+        // the dial and not the whole screen.
+        this._overlay.set_size(width, height);
+        this._layers.setSize(width, height, scale);
         this._iconLayer.set_size(width, width);
 
         const x = Math.round((monitor.width - width) / 2);
@@ -310,11 +309,9 @@ export default class DialPadExtension extends Extension {
             top: Math.round(monitor.height * 0.08),
         };
         const y = Math.round(positions[this._appearance.position] ?? positions.lower);
-        this._drawingArea.set_position(x, y);
-        this._iconLayer.set_position(x, y);
-        this._dialOrigin = [x, y];
+        this._overlay.set_position(monitor.x + x, monitor.y + y);
+        this._dialOrigin = [0, 0];
         this._updateIcons();
-        this._drawingArea.queue_repaint();
     }
 
     // --- D-Bus ----------------------------------------------------------
@@ -375,7 +372,7 @@ export default class DialPadExtension extends Extension {
     _onOverlayDetails(_conn, _sender, _path, _iface, _signal, params) {
         const [json] = params.deepUnpack();
         this._mergeDetails(json);
-        this._drawingArea?.queue_repaint();
+        this._layers?.update();
     }
 
     _onOverlayState(_conn, _sender, _path, _iface, _signal, params) {
@@ -400,7 +397,7 @@ export default class DialPadExtension extends Extension {
 
         this._updateIcons();
         this._updateVisibility(wasEnabled);
-        this._drawingArea?.queue_repaint();
+        this._layers?.update();
     }
 
     _onFocusWindow() {
@@ -551,19 +548,5 @@ export default class DialPadExtension extends Extension {
         icon.icon_size = center.size;
         icon.set_style(this._cssColor(center.color));
         icon.set_position(x + center.x, y + center.y);
-    }
-
-    // --- painting -------------------------------------------------------
-
-    _onRepaint(area) {
-        const cr = area.get_context();
-        cr.save();
-        cr.setOperator(Cairo.Operator.CLEAR);
-        cr.paint();
-        cr.restore();
-        if (this._state.enabled)
-            paintDial(cr, this._view());
-        // GJS does not free Cairo contexts promptly without this.
-        cr.$dispose();
     }
 }

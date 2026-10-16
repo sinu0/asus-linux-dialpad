@@ -1943,6 +1943,9 @@ def listen_touchpad_events():
 
     DEBOUNCE_MS = 30
     SETTLE_FRAMES = 3
+    # The overlay moves its finger dot without repainting, so small steps
+    # cost almost nothing; at most one update per touch frame is sent.
+    POINTER_STEP_DEGREES = 1
 
     log.info("Listening to touchpad events...")
 
@@ -2118,7 +2121,7 @@ def listen_touchpad_events():
 
                                 if show_pointer_enabled() and (
                                     last_pointer_angle is None
-                                    or abs((angle - last_pointer_angle + 180) % 360 - 180) >= 4
+                                    or abs((angle - last_pointer_angle + 180) % 360 - 180) >= POINTER_STEP_DEGREES
                                 ):
                                     last_pointer_angle = angle
                                     send_details(pointer=round(angle, 1))
