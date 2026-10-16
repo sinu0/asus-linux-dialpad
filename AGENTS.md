@@ -14,6 +14,8 @@
 - **Fork additions:**
   - `dialpad_dbus.py` – session D-Bus service (`io.github.sinu0.AsusTurnpad.Driver`), signal `OverlayState(bsasasidsbbb)`.
   - `dial_gesture.py` – pure gesture maths (angle, slices, `RotationTracker`), no hardware imports; unit tested.
+  - **Security:** services keep `NoNewPrivileges=yes` (dial commands must never reach root, the user may have passwordless sudo); the driver needs no privileges (I2C via group, hidraw via uaccess). `config.schema.shell_commands()` lists commands of imported profiles and the app asks before importing them. Skins must stay data only.
+  - `launch.py` – runs Command/Shell steps: in their own `systemd-run --user --scope` (they survive driver restarts), waiting at most 2 s so a program with a window never blocks the action thread. Functions with no turning actions are launchers: `select_multifunction_segment()` runs their tap action straight from the menu (library category "Launch").
   - `backlight.py` – DialPad light brightness: `commands_for_level()` (0 = light off while the dial works, 1–8 = values `0x41`–`0x48` after `0x01`) and `KeyboardBacklight` (UPower `KbdBacklight` on the system bus, keyboard off = light off; change signals arrive in the D-Bus service's GLib loop). Config section `backlight` (`follow_keyboard`, `level`); the driver applies it through `apply_backlight()` on the action thread, never on the touch thread.
   - `tests/` – `unittest` suite for gesture maths, legacy adapter and D-Bus overlay state.
   - `config/` – JSON config model, macro runtime, legacy adapter, migration from old `dialpad_dev` INI + `layouts/*.py`.

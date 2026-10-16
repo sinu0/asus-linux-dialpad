@@ -462,6 +462,51 @@ def obs_profile_segments() -> list[Segment]:
     ]
 
 
+# --- launch ---------------------------------------------------------------
+#
+# A function with nothing to turn is a launcher: choosing it in the radial
+# menu runs its tap action at once and the dial stays in the menu, like the
+# radial menus of 3D mice. Commands run through launch.py, so a program
+# keeps running without blocking the dial. The shell picks the first tool
+# that exists, so one preset fits several desktops.
+
+def _launcher(title: str, icon: str, step: MacroStep) -> Segment:
+    segment = _segment(title, [], [], [step])
+    segment.icon_url = icon
+    return segment
+
+
+def _shell(script: str, title: str) -> MacroStep:
+    return MacroStep(type=StepType.SHELL, script=script, title=title)
+
+
+def calculator() -> Segment:
+    return _launcher("Calculator", "accessories-calculator-symbolic", _shell(
+        "gnome-calculator || kcalc || qalculate-gtk || galculator", "Open the calculator"))
+
+
+def terminal() -> Segment:
+    return _launcher("Terminal", "utilities-terminal-symbolic", _shell(
+        "xdg-terminal-exec || kgx || gnome-terminal || konsole || x-terminal-emulator", "Open a terminal"))
+
+
+def files() -> Segment:
+    return _launcher("Files", "folder-symbolic", _shell('xdg-open "$HOME"', "Open the home folder"))
+
+
+def screenshot() -> Segment:
+    return _launcher("Screenshot", "camera-photo-symbolic", keys("KEY_SYSRQ", title="Take a screenshot"))
+
+
+def lock_screen() -> Segment:
+    return _launcher("Lock screen", "system-lock-screen-symbolic", _shell("loginctl lock-session", "Lock the screen"))
+
+
+def run_script() -> Segment:
+    return _launcher("My script", "application-x-executable-symbolic", _shell(
+        "$HOME/.local/bin/turnpad-action", "Run ~/.local/bin/turnpad-action (change it to your script)"))
+
+
 @dataclass(frozen=True)
 class FunctionPreset:
     title: str
@@ -491,9 +536,15 @@ FUNCTION_LIBRARY: tuple[FunctionPreset, ...] = (
     FunctionPreset("Frame", "Creative", "media-skip-forward-symbolic", "Frame stepping in video editors", frame_step),
     FunctionPreset("Timeline zoom", "Creative", "zoom-fit-best-symbolic", "Ctrl+= / Ctrl+- timeline zoom", resolve_timeline_zoom),
     FunctionPreset("Shuttle", "Creative", "media-seek-forward-symbolic", "J / K / L in video editors", shuttle),
+    FunctionPreset("Calculator", "Launch", "accessories-calculator-symbolic", "Choose it in the menu to open a calculator", calculator),
+    FunctionPreset("Terminal", "Launch", "utilities-terminal-symbolic", "Choose it in the menu to open a terminal", terminal),
+    FunctionPreset("Files", "Launch", "folder-symbolic", "Open the home folder", files),
+    FunctionPreset("Screenshot", "Launch", "camera-photo-symbolic", "The Print key: the desktop's screenshot tool", screenshot),
+    FunctionPreset("Lock screen", "Launch", "system-lock-screen-symbolic", "Lock the session", lock_screen),
+    FunctionPreset("My script", "Launch", "application-x-executable-symbolic", "Runs a command or bash script of yours; edit its tap action", run_script),
 )
 
-LIBRARY_CATEGORIES = ("System", "Navigation", "Media", "Editing", "Creative")
+LIBRARY_CATEGORIES = ("System", "Navigation", "Media", "Editing", "Creative", "Launch")
 
 
 def default_segments() -> list[Segment]:

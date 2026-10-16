@@ -180,10 +180,11 @@ def main():
     app.set_flags(Gio.ApplicationFlags.NON_UNIQUE)
 
     def start(_app):
-        # Overlay scrollbars fade in and out, so they would make otherwise
-        # equal pictures differ between runs (tools/update_previews.py).
+        # Overlay scrollbars fade in and out and the focus ring depends on
+        # timing, so they would make otherwise equal pictures differ between
+        # runs (tools/update_previews.py).
         css = Gtk.CssProvider()
-        css.load_from_string("scrollbar { opacity: 0; }")
+        css.load_from_string("scrollbar { opacity: 0; } * { outline: none; }")
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
         runner = steps(app)
 

@@ -57,7 +57,7 @@ python3Packages.buildPythonPackage {
 
     # Copy the driver script and the modules it imports
     install -Dm755 dialpad.py $out/share/asus-dialpad-driver/dialpad.py
-    install -Dm644 -t $out/share/asus-dialpad-driver dial_gesture.py dialpad_dbus.py backlight.py
+    install -Dm644 -t $out/share/asus-dialpad-driver dial_gesture.py dialpad_dbus.py backlight.py launch.py
     for dir in config desktop; do
       mkdir -p $out/share/asus-dialpad-driver/$dir
       install -Dm644 -t $out/share/asus-dialpad-driver/$dir $dir/*.py

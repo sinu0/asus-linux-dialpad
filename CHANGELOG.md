@@ -12,6 +12,8 @@
 - Guided calibration that fits the ring and centre button from finger traces
 - Skins for the on-screen dial (Dark glass, Midnight, Frost, ProArt bronze, Classic segments) and a skin editor with live preview, JSON import/export and an AI prompt; own skins live in `~/.config/asus-dialpad/skins/`
 
+- Services run with `NoNewPrivileges=yes`, so nothing started from the dial can gain root (sudo, pkexec), and importing profiles lists their shell commands and asks first
+- Launcher functions in the library (Calculator, Terminal, Files, Screenshot, Lock screen, My script): chosen in the radial menu, they run at once
 - Skins choose the dial's shape (circle, square, octagon, knurled or wavy edge, or an outline drawn in the editor by dragging points on a polar grid), the shape and size of the function tiles and a background picture; the skin editor got clear entry points and an opacity slider per colour
 - Brightness of the DialPad light: follows the keyboard backlight (its brightness key dims or switches off the DialPad light too) or a fixed level 0–8, where 0 keeps the light off
 - Unattended installer (`bash install.sh`; `--interactive` for the original questions)
@@ -22,6 +24,7 @@
 
 ### Fixed
 
+- Commands and shell scripts of dial actions blocked every further dial action until they ended (a calculator until it was closed), and programs started from the dial were killed with the driver service
 - Centre actions of rotating functions were unreachable in the radial menu
 - Switching application kept the previous application's selected function
 - GUI configuration overridden after `dialpad_dev` reloads

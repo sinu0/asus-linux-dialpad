@@ -161,6 +161,23 @@ class DialPadConfig:
     profiles: list[Profile] = field(default_factory=list)
 
 
+def shell_commands(profiles: list[Profile]) -> list[tuple[str, str, str]]:
+    """(profile, function, command) for everything that runs a program or
+    shell command, so imported profiles can be checked before use."""
+    found = []
+    for profile in profiles:
+        for segment in profile.segments:
+            for steps in (segment.macro_cw, segment.macro_ccw, segment.macro_center):
+                for step in steps:
+                    if step.type is StepType.SHELL and step.script:
+                        found.append((profile.name, segment.title, step.script))
+                    elif step.type is StepType.COMMAND and step.program:
+                        found.append((profile.name, segment.title, " ".join([step.program, *(step.args or [])])))
+            if segment.value_command:
+                found.append((profile.name, segment.title, segment.value_command))
+    return found
+
+
 def _default_segments() -> list[Segment]:
     from config.presets import default_segments
 

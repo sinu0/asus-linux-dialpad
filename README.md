@@ -84,6 +84,7 @@ Everything is set up in the **Turnpad** app (applications menu); changes apply i
 - Radial-menu mode with several functions, or single-function mode where the dial always controls one function
 - Per-profile sensitivity, scroll speed and "remember last function"
 - Pre-programmed packs for browsers, GIMP, Krita, Inkscape, Blender, Kdenlive, DaVinci Resolve, LibreOffice, code editors, Spotify, video players and darktable; import/export of profiles
+- Launchers: a function with only a tap action runs as soon as it is chosen in the radial menu, like the radial menus of 3D mice. The library has Calculator, Terminal, Files, Screenshot, Lock screen and My script (any command or bash script); programs keep running without blocking the dial
 
 **Functions**
 
@@ -395,6 +396,14 @@ You do not need to edit these files; they are described for backups and troubles
 | `/opt/asus-turnpad/layouts/*.py` | Default geometry of each touchpad family and the original Python format of shortcuts. Used only until `config.json` exists — the first start of the app converts them. |
 
 If `config.json` is deleted, the app recreates it from the layout on its next start.
+
+### Security
+
+- The driver runs as your user service, never as root. Commands and scripts of dial actions run with your rights only.
+- The services set `NoNewPrivileges=yes`: nothing started from the dial can gain privileges, so `sudo`, `pkexec` and other setuid helpers fail there even with passwordless sudo. A dial script that needs root is better served by a narrow polkit rule or a system service of its own.
+- Skins only describe looks (colours, shapes, a PNG next to the skin file); they cannot run anything.
+- Importing profiles lists every command they would run and asks first, since shared profiles can contain shell commands.
+- The program in `/opt/asus-turnpad` belongs to root, so other programs running as you cannot change the driver's code.
 
 ## Debugging
 

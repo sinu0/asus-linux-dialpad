@@ -43,6 +43,7 @@ from config.schema import (
     darktable_colour_labels_segment,
     load_config,
     save_config,
+    shell_commands,
 )
 from config.identity import APP_ID, APP_NAME, DBUS_INTERFACE, DBUS_NAME, DBUS_PATH
 from config.migrate import migrate_old_format
@@ -741,6 +742,28 @@ class Application(Adw.Application):
             except (GLib.Error, OSError, ValueError, KeyError, TypeError) as error:
                 self._toast(f"Import failed: {error}")
                 return
+            commands = shell_commands(profiles)
+            if not commands:
+                apply(profiles)
+                return
+            # Shared profiles can carry shell commands; they run as you.
+            listing = "\n".join(f"• {profile} › {function}: {command}" for profile, function, command in commands[:12])
+            if len(commands) > 12:
+                listing += f"\n… and {len(commands) - 12} more"
+            alert = Adw.AlertDialog(
+                heading="Run these commands?",
+                body="The imported profiles start programs or shell commands with your rights when you use "
+                "their functions. Import only if you trust where the file comes from.\n\n" + listing,
+            )
+            alert.add_response("cancel", "Cancel")
+            alert.add_response("import", "Import")
+            alert.set_response_appearance("import", Adw.ResponseAppearance.DESTRUCTIVE)
+            alert.set_default_response("cancel")
+            alert.set_close_response("cancel")
+            alert.connect("response", lambda _alert, response: apply(profiles) if response == "import" else None)
+            alert.present(self._window)
+
+        def apply(profiles):
             replaced = 0
             for profile in profiles:
                 existing = next(
@@ -1257,6 +1280,19 @@ class Application(Adw.Application):
             for group in state["groups"]:
                 page.remove(group)
             state["groups"] = []
+            # The driver runs a function with nothing to turn as soon as it
+            # is chosen in the menu (select_multifunction_segment).
+            if not segment.macro_cw and not segment.macro_ccw:
+                kind = Adw.PreferencesGroup()
+                row = Adw.ActionRow(
+                    title="Launcher",
+                    subtitle="Nothing to turn: choosing this function in the radial menu runs its tap action "
+                    "at once and the dial stays in the menu. Add a turning action to make it a dial function.",
+                )
+                row.add_prefix(Gtk.Image.new_from_icon_name("system-run-symbolic"))
+                kind.add(row)
+                page.add(kind)
+                state["groups"].append(kind)
             for field, label, icon_name, description in TRIGGERS:
                 group = Adw.PreferencesGroup(title=label, description=description)
                 add = _icon_button(

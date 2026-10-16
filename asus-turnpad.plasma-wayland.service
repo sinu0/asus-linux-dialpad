@@ -7,6 +7,9 @@ StartLimitIntervalSec=300
 
 [Service]
 Type=simple
+# Commands of dial actions run as the user and can never gain privileges
+# (sudo, pkexec and other setuid helpers fail), even with passwordless sudo.
+NoNewPrivileges=yes
 ExecStart=$INSTALL_DIR_PATH/.env/bin/python3 $INSTALL_DIR_PATH/dialpad.py $LAYOUT_NAME $CONFIG_FILE_DIR_PATH
 TimeoutSec=5
 Restart=on-failure

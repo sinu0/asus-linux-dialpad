@@ -221,7 +221,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
     sudo install dialpad.py "$INSTALL_DIR_PATH"
     sudo install dialpad_dbus.py "$INSTALL_DIR_PATH"
     sudo install dial_gesture.py "$INSTALL_DIR_PATH"
-    sudo install -m 644 backlight.py "$INSTALL_DIR_PATH"
+    sudo install -m 644 backlight.py launch.py "$INSTALL_DIR_PATH"
     sudo install -t "$INSTALL_DIR_PATH/layouts" layouts/*.py
     sudo install -m 644 -t "$INSTALL_DIR_PATH/config" config/*.py
     sudo install -m 644 -t "$INSTALL_DIR_PATH/desktop" desktop/*.py

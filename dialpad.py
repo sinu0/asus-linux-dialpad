@@ -43,6 +43,7 @@ import socket
 import json
 import queue
 
+import launch
 from backlight import KeyboardBacklight, commands_for_level
 from config.identity import SLUG, socket_path
 from desktop.active_window import ActiveWindow, Context as ActiveWindowContext
@@ -1250,7 +1251,8 @@ def execute_config_macro(steps, scroll_multiplier=1):
         send_keys([value] if isinstance(value, str) else value)
 
     def run_program(program, args):
-        subprocess.run([program, *args], check=True)
+        # Returns once the program ended or after a short wait (launch.py).
+        launch.run([program, *args])
 
     try:
         MacroExecutor(
@@ -1678,10 +1680,8 @@ def get_current_value_unit(shortcut_entry):
     return value
 
 def execute_command(command):
-    try:
-        subprocess.run(command, shell=True, check=True)
-    except subprocess.CalledProcessError as e:
-        log.error(f"Failed to execute command: {e}")
+    # A program started this way keeps running without blocking the dial.
+    launch.run_shell(command)
 
 def reset_center():
     global center_activated, title, treshold
