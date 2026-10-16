@@ -57,7 +57,7 @@ Turnpad currently supports **GNOME** (Shell 45–51). The driver itself also run
 
 How the parts fit together and how to support another desktop: [ARCHITECTURE.md](ARCHITECTURE.md).
 
-The pictures are generated from the code: `gjs -m tools/render_overlay_preview.js` paints the dial with the extension's own drawing code, and `python3 tools/screenshot_settings.py` opens the settings app on a demo configuration and saves each page.
+The pictures are generated from the code: `python3 tools/update_previews.py` paints the dial with the extension's own drawing code (`tools/render_overlay_preview.js`), opens the settings app on a demo configuration and saves each page (`tools/screenshot_settings.py`), and replaces only the pictures that really changed. To check them before every push: `git config core.hooksPath tools/git-hooks`.
 
 The sections below come from the original project and describe the base driver.
 
@@ -373,7 +373,7 @@ Use the **Turnpad** app for every setting:
 | --- | --- |
 | **Dial Controls** | Functions of the selected profile (add from the library, order, colour, show/hide, actions for turning and tapping, live value), dial mode, sensitivity, scroll speed, remembering the last function |
 | **Apps & Profiles** | Default and application profiles, pre-programmed packs, duplicate/rename/remove, import and export |
-| **Behaviour** | Corner icon hold time, co-activator keys, switching off after inactivity, default rotation step, jitter filter, centre hold time, minimum menu sectors, on-screen dial size, position, visibility time, hints, finger position, progress arc and accent colour |
+| **Behaviour** | Corner icon hold time, co-activator keys, switching off after inactivity, DialPad light (follows the keyboard backlight including off, or a fixed level 0–8 where 0 keeps it off), default rotation step, jitter filter, centre hold time, minimum menu sectors, on-screen dial size, position, visibility time, hints, finger position, progress arc and accent colour |
 | **Calibration** | Guided calibration (trace the ring and the centre button) or manual dial geometry and corner icon area |
 | **Driver** | Driver status, active profile and function, reload, configuration folder |
 

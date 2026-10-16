@@ -1669,6 +1669,7 @@ class Application(Adw.Application):
             lambda value: self._set_config("gesture", "disable_inactivity_time", int(value * 60)),
         ))
         content.append(activation)
+        content.append(self._light_group())
 
         gesture = Adw.PreferencesGroup(
             title="Rotation",
@@ -1752,6 +1753,31 @@ class Application(Adw.Application):
         self._on_skins_changed()
 
     # --- skins ------------------------------------------------------------------
+
+    def _light_group(self):
+        group = Adw.PreferencesGroup(
+            title="DialPad light",
+            description="Brightness of the DialPad while it is on.",
+        )
+        backlight = self.config.backlight
+        level = _spin_row(
+            "Brightness", "0 keeps the light off; the dial still works",
+            backlight.level, 0, 8, 1, 0,
+            lambda value: self._set_config("backlight", "level", int(value)),
+        )
+        level.set_sensitive(not backlight.follow_keyboard)
+
+        def follow_changed(active):
+            level.set_sensitive(not active)
+            self._set_config("backlight", "follow_keyboard", active)
+
+        group.add(_switch_row(
+            "Follow keyboard backlight",
+            "The keyboard brightness key sets the DialPad light too, including off",
+            backlight.follow_keyboard, follow_changed,
+        ))
+        group.add(level)
+        return group
 
     def _skin_group(self):
         group = Adw.PreferencesGroup(

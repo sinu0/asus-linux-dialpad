@@ -57,6 +57,15 @@ class GestureConfig:
 
 
 @dataclass
+class BacklightConfig:
+    # Brightness of the DialPad light while it is on: the keyboard
+    # backlight's (keyboard light off = DialPad light off) or a fixed level
+    # from 1 to 8; 0 keeps the light off.
+    follow_keyboard: bool = True
+    level: int = 4
+
+
+@dataclass
 class OverlayConfig:
     """Appearance of the GNOME Shell dial; read directly by the extension."""
 
@@ -148,6 +157,7 @@ class DialPadConfig:
     activation: ActivationConfig = field(default_factory=ActivationConfig)
     gesture: GestureConfig = field(default_factory=GestureConfig)
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
+    backlight: BacklightConfig = field(default_factory=BacklightConfig)
     profiles: list[Profile] = field(default_factory=list)
 
 
@@ -211,9 +221,10 @@ def _encoder(obj):
             "activation": _encoder(obj.activation),
             "gesture": _encoder(obj.gesture),
             "overlay": _encoder(obj.overlay),
+            "backlight": _encoder(obj.backlight),
             "profiles": [_encoder(p) for p in obj.profiles],
         }
-    if isinstance(obj, (TouchGeometry, ActivationConfig, GestureConfig, OverlayConfig)):
+    if isinstance(obj, (TouchGeometry, ActivationConfig, GestureConfig, OverlayConfig, BacklightConfig)):
         return {item.name: getattr(obj, item.name) for item in fields(obj)}
     if isinstance(obj, Profile):
         result: dict = {
@@ -277,6 +288,7 @@ def _decoder(d: dict, cls: type):
             activation=_decoder(d.get("activation", {}), ActivationConfig),
             gesture=_decoder(d.get("gesture", {}), GestureConfig),
             overlay=_decoder(d.get("overlay", {}), OverlayConfig),
+            backlight=_decoder(d.get("backlight", {}), BacklightConfig),
             profiles=[_decoder(p, Profile) for p in d.get("profiles", [])],
         )
     if cls is TouchGeometry:
@@ -296,6 +308,11 @@ def _decoder(d: dict, cls: type):
             overlay.skin_light = "frost"
         overlay.follow_system_style = bool(overlay.follow_system_style)
         return overlay
+    if cls is BacklightConfig:
+        return BacklightConfig(
+            follow_keyboard=bool(d.get("follow_keyboard", True)),
+            level=int(_clamp(d.get("level", 4), 0, 8, 4)),
+        )
     if cls is Profile:
         mode = d.get("mode", "multi")
         return Profile(

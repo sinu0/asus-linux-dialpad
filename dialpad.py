@@ -43,6 +43,7 @@ import socket
 import json
 import queue
 
+from backlight import KeyboardBacklight, commands_for_level
 from config.identity import SLUG, socket_path
 from desktop.active_window import ActiveWindow, Context as ActiveWindowContext
 from dial_gesture import (
@@ -485,6 +486,10 @@ def apply_gui_settings():
             load_evdev_keys_for_coactivator_modifiers(coactivator_keys)
         except Exception:
             log.debug("Failed to load GUI co-activator modifiers", exc_info=True)
+
+    # A changed brightness setting applies to a DialPad that is on.
+    if dialpad and "enqueue_action" in globals():
+        enqueue_action(apply_backlight)
 
     return True
 
@@ -1386,6 +1391,27 @@ def send_key_event(key_code, key_value=None, log_event=True):
     except Exception as e:
         log.error(f"Error sending key event: {e}")
 
+# Brightness of the DialPad light (backlight.py); None keeps the firmware's.
+keyboard_backlight = None
+
+def backlight_level():
+    settings = gui_config.backlight if gui_config is not None else None
+    if settings is None or settings.follow_keyboard:
+        if keyboard_backlight is not None:
+            keyboard_backlight.refresh()
+            level = keyboard_backlight.level()
+            if level is not None:
+                return level
+        if settings is None:
+            return None
+    return settings.level
+
+def apply_backlight():
+    level = backlight_level()
+    if dialpad and level is not None:
+        for command in commands_for_level(level):
+            send_value_to_touchpad(command)
+
 def activate_dialpad():
     global dialpad, multi_app_mode_titles, multi_app_mode_icons
 
@@ -1403,6 +1429,9 @@ def activate_dialpad():
     #set_touchpad_prop_tap_to_click(false)
 
     dialpad = True
+
+    # Brightness reads the keyboard backlight over D-Bus: not on the touch thread.
+    enqueue_action(apply_backlight)
 
     if overlay_enabled():
         send_to_socket({CONFIG_ENABLED: dialpad})
@@ -3081,6 +3110,12 @@ try:
 
     # D-Bus startup runs independently so an unavailable session bus cannot delay the driver.
     init_dbus()
+
+    # The keyboard brightness key also dims or brightens the DialPad light;
+    # changes arrive in the D-Bus service's main loop.
+    keyboard_backlight = KeyboardBacklight(on_change=lambda _level: enqueue_action(apply_backlight))
+    if dialpad:
+        enqueue_action(apply_backlight)
 
     # init the device
     initialize_virtual_device()

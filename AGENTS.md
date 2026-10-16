@@ -14,6 +14,7 @@
 - **Fork additions:**
   - `dialpad_dbus.py` – session D-Bus service (`io.github.sinu0.AsusTurnpad.Driver`), signal `OverlayState(bsasasidsbbb)`.
   - `dial_gesture.py` – pure gesture maths (angle, slices, `RotationTracker`), no hardware imports; unit tested.
+  - `backlight.py` – DialPad light brightness: `commands_for_level()` (0 = light off while the dial works, 1–8 = values `0x41`–`0x48` after `0x01`) and `KeyboardBacklight` (UPower `KbdBacklight` on the system bus, keyboard off = light off; change signals arrive in the D-Bus service's GLib loop). Config section `backlight` (`follow_keyboard`, `level`); the driver applies it through `apply_backlight()` on the action thread, never on the touch thread.
   - `tests/` – `unittest` suite for gesture maths, legacy adapter and D-Bus overlay state.
   - `config/` – JSON config model, macro runtime, legacy adapter, migration from old `dialpad_dev` INI + `layouts/*.py`.
   - `config/presets.py` – ASUS Dial-style function library and pre-programmed app packs (browser, GIMP, Krita, Inkscape, Blender, Kdenlive, Resolve, LibreOffice, code editors, Spotify, video players); `suggested_color()` colours functions without one.
@@ -30,7 +31,7 @@
   - `install_migrate.sh` – moves installs from before the rename (see Name above).
   - `uninstall.sh` – removes everything installed plus pre-rename leftovers; keeps `~/.config/asus-turnpad` unless confirmed with `--interactive`.
   - `ARCHITECTURE.md` – component map and how to add a desktop environment.
-  - `tools/` – `render_overlay_preview.js` (gjs, paints `preview/overlay-*.png` with `dial.js`) and `screenshot_settings.py` (opens the app on a demo config, saves `preview/settings-*.png`; never writes the user's config).
+  - `tools/` – `render_overlay_preview.js` (gjs, paints `preview/overlay-*.png` with `dial.js`), `screenshot_settings.py` (opens the app on a demo config, saves `preview/settings-*.png`; never writes the user's config), `update_previews.py` (runs both, keeps unchanged pictures) and `git-hooks/pre-push`.
   - `install_gnome_extension.sh` – sourced by `install.sh`.
 
 ## Developer commands
@@ -42,7 +43,7 @@
 - **Smoke test config:** `python3 -m config.runtime && python3 -m config.legacy_adapter`
 - **Validate GNOME extension (outside Shell):** `gjs -m gnome/extension/extension.js` – will fail with resource import errors because `resource:///org/gnome/shell/ui/main.js` only exists inside the shell process; that is expected and confirms ESM syntax is valid.
 - **Desktop file validate:** `desktop-file-validate config_app/io.github.sinu0.AsusTurnpad.desktop`
-- **Regenerate README pictures:** `gjs -m tools/render_overlay_preview.js && python3 tools/screenshot_settings.py` (the second one briefly opens a window).
+- **README pictures:** `python3 tools/update_previews.py` renders everything in `preview/` and replaces only pictures that really changed (rendering noise stays below a tolerance, so unchanged pictures are not re-committed); `--check` only reports. Run it before every push that touches the extension, settings app, painters or skins and commit the changed pictures. `tools/git-hooks/pre-push` enforces it once enabled with `git config core.hooksPath tools/git-hooks` (skip once: `SKIP_PREVIEWS=1 git push`). Opens the settings app briefly.
 - **Test D-Bus service standalone:** `python3 dialpad_dbus.py` – starts, emits one invisible state, exits.
 
 ## Key environment facts

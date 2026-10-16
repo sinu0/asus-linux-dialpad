@@ -23,7 +23,7 @@ gi.require_version("Graphene", "1.0")
 # config_app exports main(); import the module itself, which also pins the
 # GTK and Adwaita versions.
 app_main = importlib.import_module("config_app.main")
-from gi.repository import Adw, Gio, GLib, Graphene, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk  # noqa: E402
 
 from config.presets import pack_for_app, profile_for_pack  # noqa: E402
 from config.schema import _default_config  # noqa: E402
@@ -156,6 +156,11 @@ def main():
     app.set_flags(Gio.ApplicationFlags.NON_UNIQUE)
 
     def start(_app):
+        # Overlay scrollbars fade in and out, so they would make otherwise
+        # equal pictures differ between runs (tools/update_previews.py).
+        css = Gtk.CssProvider()
+        css.load_from_string("scrollbar { opacity: 0; }")
+        Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
         runner = steps(app)
 
         def tick():

@@ -73,8 +73,7 @@ Add a case to `install_overlay.sh` that sources an `install_<desktop>_overlay.sh
 `gnome/extension/dial.js` (GJS, inside GNOME Shell) and `overlay/painter.py` (Python, everywhere else and in the settings app) draw the same dial. Change both together, then compare the results:
 
 ```
-gjs -m tools/render_overlay_preview.js        # preview/overlay-*.png from dial.js
-python3 tools/screenshot_settings.py          # settings pages, dial from painter.py
+python3 tools/update_previews.py   # preview/overlay-*.png from dial.js, settings pages (dial from painter.py)
 ```
 
 Skin resolution has the same pairing: `resolveSkin()` in `dial.js` and `resolve_skin()` in `config/skins.py`.
