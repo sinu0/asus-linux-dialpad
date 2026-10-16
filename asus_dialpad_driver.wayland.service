@@ -1,5 +1,9 @@
 [Unit]
 Description=Asus DialPad Driver
+# Stop with the graphical session and start again with the next one, so a
+# logout does not leave the service restarting without a display.
+PartOf=graphical-session.target
+After=graphical-session.target
 StartLimitBurst=20
 StartLimitIntervalSec=300
 
@@ -21,4 +25,6 @@ Environment="PATH=/usr/sbin:/usr/bin:/bin"
 $LOG_ENV_LINE
 
 [Install]
-WantedBy=default.target
+# default.target covers sessions without graphical-session.target
+# (for example sway or Hyprland started without a session manager).
+WantedBy=default.target graphical-session.target
