@@ -49,6 +49,8 @@ MIN_PIXELS = 25
 
 # Tall enough for the 1168 px Dial Controls picture with window shadows.
 VIRTUAL_MONITOR = "2560x1600"
+# Seconds; a stuck renderer fails instead of hanging the push or CI.
+TIMEOUT = 180
 
 
 def headless(command: list[str]) -> list[str]:
@@ -63,13 +65,16 @@ def headless(command: list[str]) -> list[str]:
 
 def render(output: Path, visible: bool = False) -> None:
     subprocess.run(["gjs", "-m", str(ROOT / "tools" / "render_overlay_preview.js"), str(output)],
-                   check=True, stdout=subprocess.DEVNULL)
+                   check=True, stdout=subprocess.DEVNULL, timeout=TIMEOUT)
     screenshots = [sys.executable, str(ROOT / "tools" / "screenshot_settings.py"), str(output)]
     # The private D-Bus session has no accessibility bus. GSettings defaults
     # instead of the desktop's settings, so every machine renders the same.
     environment = {**os.environ, "GTK_A11Y": "none", "NO_AT_BRIDGE": "1", "GSETTINGS_BACKEND": "memory"}
-    subprocess.run(screenshots if visible else headless(screenshots), env=None if visible else environment,
-                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run = subprocess.run(screenshots if visible else headless(screenshots), env=None if visible else environment,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=TIMEOUT)
+    if run.returncode:
+        # mutter is chatty; the end holds the traceback.
+        sys.exit(f"screenshot_settings.py failed:\n{run.stderr[-4000:]}")
 
 
 def changed_pixels(old: Path, new: Path) -> int | None:

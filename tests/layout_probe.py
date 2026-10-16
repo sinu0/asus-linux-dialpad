@@ -14,6 +14,7 @@ shrink to the size.
 
 import json
 import sys
+import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,9 +36,6 @@ SIZES = {
 PAGES = ("actions", "profiles", "look", "device", "calibration", "diagnostics")
 # Long enough for a resize or a new page to be laid out and mapped.
 SETTLE_MS = 120
-# Ticks to wait for a resize before asking again, and how often to ask.
-RESIZE_TICKS = 15
-RESIZE_TRIES = 6
 
 
 def describe(widget):
@@ -103,18 +101,7 @@ def steps(app, result, size_names):
     app._select_profile(profile)
     for size_name in size_names:
         width, height = SIZES[size_name]
-        # On a slow machine without a GPU (CI) the first resize of a freshly
-        # shown window sometimes gets lost, so ask again until it arrives.
-        for _ in range(RESIZE_TRIES):
-            window.set_default_size(width - 1, height)
-            yield
-            window.set_default_size(width, height)
-            for _ in range(RESIZE_TICKS):
-                yield
-                if abs(window.get_width() - width) <= 1:
-                    break
-            if abs(window.get_width() - width) <= 1:
-                break
+        yield from demo.resize(window, width, height)
         minimum = window.measure(Gtk.Orientation.HORIZONTAL, -1)[0]
         if minimum > width:
             result.append(f"{size_name}: the window needs {minimum} px but the screen gives {width}")
@@ -150,6 +137,11 @@ def main():
             try:
                 next(runner)
             except StopIteration:
+                return GLib.SOURCE_REMOVE
+            except Exception:
+                # Without this the loop stops but the app keeps running.
+                result.append(f"the probe failed:\n{traceback.format_exc()}")
+                app.quit()
                 return GLib.SOURCE_REMOVE
             return GLib.SOURCE_CONTINUE
 

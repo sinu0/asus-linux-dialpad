@@ -8,6 +8,7 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # Arch has the GTK 4.22 / Libadwaita 1.9 the settings app needs.
     container: archlinux:latest
     env:

@@ -11,6 +11,7 @@ tools/update_previews.py runs it in a headless mutter instead.
 """
 
 import sys
+import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +34,12 @@ from config.skins import builtin_skins  # noqa: E402
 OUTPUT = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "preview"
 WIDTH, HEIGHT = 1080, 760
 SETTLE_MS = 700
+# A slow machine without a GPU (CI) sometimes loses the resize of a freshly
+# shown window or has not drawn it yet: ticks to wait before asking again,
+# how often to ask, and how long to wait for a drawn window.
+RESIZE_TICKS = 15
+RESIZE_TRIES = 6
+CAPTURE_TICKS = 20
 
 
 def demo_config():
@@ -69,13 +76,34 @@ class ScreenshotApp(app_main.Application):
         return False
 
 
+def resize(window, width, height):
+    """Resize the window; yields until it has the size."""
+    for attempt in range(RESIZE_TRIES):
+        if attempt:
+            # Asking for the same size again would be ignored.
+            window.set_default_size(width - 1, height)
+            yield
+        window.set_default_size(width, height)
+        for _ in range(RESIZE_TICKS):
+            yield
+            if abs(window.get_width() - width) <= 1 and abs(window.get_height() - height) <= 1:
+                return
+
+
 def capture(window, name):
+    """Save the window as name.png; yields until it has been drawn."""
     # No keyboard focus ring in the pictures.
     window.set_focus_visible(False)
-    width, height = window.get_width(), window.get_height()
-    snapshot = Gtk.Snapshot()
-    Gtk.WidgetPaintable.new(window).snapshot(snapshot, width, height)
-    node = snapshot.to_node()
+    for _ in range(CAPTURE_TICKS):
+        width, height = window.get_width(), window.get_height()
+        snapshot = Gtk.Snapshot()
+        Gtk.WidgetPaintable.new(window).snapshot(snapshot, width, height)
+        node = snapshot.to_node()
+        if node is not None:
+            break
+        yield
+    else:
+        raise RuntimeError(f"{name}: the window was never drawn")
     bounds = Graphene.Rect().init(0, 0, width, height)
     texture = window.get_renderer().render_texture(node, bounds)
     path = OUTPUT / f"{name}.png"
@@ -103,24 +131,24 @@ def steps(app):
 
     def page(name, size=(WIDTH, HEIGHT)):
         close_dialogs(app)
-        window.set_default_size(*size)
         app._view_stack.set_visible_child_name(name)
+        yield from resize(window, *size)
 
-    page("actions", (WIDTH, 1168))
+    yield from page("actions", (WIDTH, 1168))
     app._select_profile(default)
     yield
-    capture(window, "settings-dial-controls")
+    yield from capture(window, "settings-dial-controls")
 
-    page("profiles")
+    yield from page("profiles")
     yield
-    capture(window, "settings-profiles")
+    yield from capture(window, "settings-profiles")
 
-    page("actions")
+    yield from page("actions")
     app._select_profile(krita)
     yield
     app._show_function_library(krita)
     yield
-    capture(window, "settings-library")
+    yield from capture(window, "settings-library")
 
     close_dialogs(app)
     app._select_profile(darktable)
@@ -128,24 +156,24 @@ def steps(app):
     zoom = next(segment for segment in darktable.segments if segment.title == "Zoom")
     app._show_function_editor(darktable, zoom)
     yield
-    capture(window, "settings-function-editor")
+    yield from capture(window, "settings-function-editor")
 
-    page("calibration")
+    yield from page("calibration")
     yield
-    capture(window, "settings-calibration")
+    yield from capture(window, "settings-calibration")
 
-    page("device")
+    yield from page("device")
     yield
-    capture(window, "settings-behaviour")
+    yield from capture(window, "settings-behaviour")
 
-    page("look")
+    yield from page("look")
     yield
-    capture(window, "settings-skins")
+    yield from capture(window, "settings-skins")
 
     app._show_skin_editor(None, {"name": "My ProArt bronze", "base": "proart",
                                  "palette": {"rim": "#f5d1aa80", "pointer": "#ffe2bf"}})
     yield
-    capture(window, "settings-skin-editor")
+    yield from capture(window, "settings-skin-editor")
 
     close_dialogs(app)
     app._show_skin_editor(None, {
@@ -160,7 +188,7 @@ def steps(app):
     )
     scroll_to(outline)
     yield
-    capture(window, "settings-skin-shape")
+    yield from capture(window, "settings-skin-shape")
 
     close_dialogs(app)
     app.quit()
@@ -201,13 +229,21 @@ def main():
                 next(runner)
             except StopIteration:
                 return GLib.SOURCE_REMOVE
+            except Exception:
+                # Without this the loop stops but the app keeps running.
+                traceback.print_exc()
+                failed.append(True)
+                app.quit()
+                return GLib.SOURCE_REMOVE
             return GLib.SOURCE_CONTINUE
 
         GLib.timeout_add(SETTLE_MS, tick)
 
+    failed = []
     app.connect("activate", start)
     app.run([])
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
