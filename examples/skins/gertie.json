@@ -1,0 +1,53 @@
+{
+    "name": "Gertie the Dinosaur",
+    "description": "Winsor McCay's 1914 cartoon dinosaur pokes her tongue out through the dial",
+    "base": "frost",
+    "shape": "custom",
+    "outline": {
+        "points": [
+            1.08,
+            0.9,
+            1.2,
+            0.92,
+            1.24,
+            0.95,
+            1.05,
+            0.98,
+            1.12,
+            0.86,
+            0.95,
+            1.0,
+            0.9,
+            1.02,
+            0.8,
+            1.0,
+            1.24,
+            0.85,
+            1.0,
+            0.88,
+            1.24,
+            0.9,
+            1.15,
+            0.9
+        ],
+        "smooth": false
+    },
+    "palette": {
+        "surfaceTop": "#f7efdcf5",
+        "surfaceBottom": "#efe2c6f5",
+        "rim": "#2a211866",
+        "bubble": "#fff8e8cc",
+        "track": "#2a211826",
+        "centerTop": "#fffaf066",
+        "centerBottom": "#f4ead28c",
+        "text": "#1f1a14",
+        "muted": "#5a4c3c",
+        "icon": "#2a2118d9",
+        "pointer": "#2a2118f2"
+    },
+    "background": {
+        "image": "gertie.png",
+        "opacity": 0.9
+    },
+    "tile": "hexagon"
+}

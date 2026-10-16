@@ -42,23 +42,15 @@ Turnpad currently supports **GNOME** (Shell 45–51). The driver itself also run
 
 ![On-screen dial](./preview/overlay-states.png)
 
-**Skins** — five built-in looks, plus your own made in the skin editor or written as JSON by hand or by an AI assistant ([SKINS.md](SKINS.md)):
+**Settings app**: every function, shortcut, profile and skin is set up here, no config files to edit.
 
-![Built-in skins](./preview/overlay-skins.png)
+![Dial controls](./preview/settings-dial-controls.png)
 
-A skin also sets the dial's shape and its tiles, or an outline you draw in the editor, and can add a background picture:
+**Skins can be silly too.** [Gertie the Dinosaur](https://en.wikipedia.org/wiki/Gertie_the_Dinosaur) (Winsor McCay, 1914, public domain) pokes her tongue out through a see-through centre on a spiky outline drawn point by point. It is one JSON file and one picture: copy both files from [`examples/skins/`](examples/skins/) to `~/.config/asus-turnpad/skins/` and pick “Gertie the Dinosaur” on the Skins page.
 
-![Dial shapes](./preview/overlay-shapes.png)
+![Gertie the Dinosaur skin](./preview/overlay-example.png)
 
-**Settings app** — functions of a profile, application profiles, the function library, the per-function editor, calibration, behaviour and skins:
-
-| | |
-|---|---|
-| ![Dial controls](./preview/settings-dial-controls.png) | ![Profiles](./preview/settings-profiles.png) |
-| ![Function library](./preview/settings-library.png) | ![Function editor](./preview/settings-function-editor.png) |
-| ![Guided calibration](./preview/settings-calibration.png) | ![Behaviour](./preview/settings-behaviour.png) |
-| ![Skin gallery](./preview/settings-skins.png) | ![Skin editor](./preview/settings-skin-editor.png) |
-| ![Drawing an outline](./preview/settings-skin-shape.png) | |
+More pictures, with the built-in skins, dial shapes and every page of the settings app: [GALLERY.md](GALLERY.md).
 
 How the parts fit together and how to support another desktop: [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -90,7 +82,7 @@ Everything is set up in the **Turnpad** app (applications menu); changes apply i
 
 - Library of ready functions: volume, brightness, keyboard light, mute, workspaces, vertical/horizontal scroll, zoom, tabs, back/forward, arrow keys, media tracks, seek, undo/redo, font size, brush size, frame stepping, timeline zoom
 - Own colour, order on the dial, show/hide, rotation step and an optional live value (e.g. volume in % with a level gauge)
-- Separate actions for turning clockwise, counter-clockwise and tapping; each action can be a captured keyboard shortcut, media key, volume, brightness, vertical or horizontal scroll (optionally with Ctrl/Shift/Alt held, e.g. Ctrl + wheel zoom), a shell command or a wait — several steps run in order
+- Separate actions for turning clockwise, counter-clockwise and tapping; each action can be a keyboard shortcut (recorded from the keyboard, clicked together from key buttons or typed as `Ctrl+F12`; the ⓘ button in the action editor explains it), media key, volume, brightness, vertical or horizontal scroll (optionally with Ctrl/Shift/Alt held, e.g. Ctrl + wheel zoom), a shell command or a wait — several steps run in order
 
 **Using the dial**
 
@@ -377,11 +369,14 @@ Use the **Turnpad** app for every setting:
 
 | App page | What it configures |
 | --- | --- |
-| **Dial Controls** | Functions of the selected profile (add from the library, order, colour, show/hide, actions for turning and tapping, live value), dial mode, sensitivity, scroll speed, remembering the last function |
+| **Dial Controls** | Functions of the selected profile (add from the library, order, colour, icon, show/hide, actions for turning and tapping, live value), dial mode, sensitivity, scroll speed, remembering the last function, building a profile with an AI assistant |
 | **Apps & Profiles** | Default and application profiles, pre-programmed packs, duplicate/rename/remove, import and export |
-| **Behaviour** | Corner icon hold time, co-activator keys, switching off after inactivity, DialPad light (follows the keyboard backlight including off, or a fixed level 0–8 where 0 keeps it off), default rotation step, jitter filter, centre hold time, minimum menu sectors, on-screen dial size, position, visibility time, hints, finger position, progress arc and accent colour |
+| **Skins** | Skin gallery and editor, separate skins for light and dark style, on-screen dial size, position, visibility time, hints, finger position, progress arc and accent colour |
+| **Behaviour** | Corner icon hold time, co-activator keys, switching off after inactivity, DialPad light (follows the keyboard backlight including off, or a fixed level 0–8 where 0 keeps it off), default rotation step, jitter filter, centre hold time, minimum menu sectors |
 | **Calibration** | Guided calibration (trace the ring and the centre button) or manual dial geometry and corner icon area |
 | **Driver** | Driver status, active profile and function, reload, configuration folder |
+
+**Building a profile with an AI assistant.** At the bottom of Dial Controls, *Copy prompt for AI* copies a description of the profile format together with the current profile. Paste it into ChatGPT, Claude or any other assistant, add what you want (“Inkscape: zoom, rotate canvas, layers, undo”), copy the whole answer and choose *Paste from AI*. The app reads the JSON out of the answer, accepts short key names such as `Ctrl`, explains what is wrong if something is not usable, lists every shell command before you accept, and then replaces the profile or adds it as a new one.
 
 The layout (touchpad family) is chosen automatically during installation; to force one, run `LAYOUT_NAME=proartp16 bash install.sh` (or `bash install.sh --interactive`). Known layouts are listed in [Layouts](#layouts).
 
@@ -487,5 +482,7 @@ Listening on /run/user/1000/asus-turnpad.sock
 **Why was this project created?** Because linux does not support integration of DialPad into a Touchpad
 
 ## Credits
+
+The example skin uses a frame of *Gertie the Dinosaur* by Winsor McCay (1914, public domain), from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Gertie_the_Dinosaur_with_her_mouth_open.jpg).
 
 The driver this fork builds on — touchpad handling, layouts, installer and the original DialPad support — is the work of [Lukáš Drahník](https://github.com/ldrahnik) and the contributors of [asus-linux-drivers/asus-dialpad-driver](https://github.com/asus-linux-drivers/asus-dialpad-driver).

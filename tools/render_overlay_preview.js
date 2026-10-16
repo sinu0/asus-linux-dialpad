@@ -3,8 +3,9 @@
 //
 //   gjs -m tools/render_overlay_preview.js [output directory]
 //
-// Writes overlay-states.png (the dial in its main states) and
-// overlay-skins.png (the menu in every built-in skin). Icons come from the
+// Writes overlay-states.png (the dial in its main states),
+// overlay-skins.png (the menu in every built-in skin), overlay-shapes.png and
+// overlay-example.png (the skins in examples/skins). Icons come from the
 // Adwaita symbolic theme, as in the Shell.
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
@@ -206,3 +207,21 @@ renderRow(
     GLib.build_filenamev([OUTPUT, 'overlay-shapes.png']),
     Object.keys(shapes).map(name => scenes(resolveSkin(withShapes, name))[0]),
     Object.keys(shapes));
+
+// Example skins with their background pictures, as user skins are loaded.
+const examples = GLib.build_filenamev([ROOT, 'examples', 'skins']);
+const withExamples = { ...skins };
+const exampleIds = [];
+const enumerator = Gio.File.new_for_path(examples).enumerate_children('standard::name', Gio.FileQueryInfoFlags.NONE, null);
+for (let info = enumerator.next_file(null); info; info = enumerator.next_file(null)) {
+    const name = info.get_name();
+    if (!name.endsWith('.json'))
+        continue;
+    const id = name.slice(0, -5);
+    withExamples[id] = { ...readJson(GLib.build_filenamev([examples, name])), __dir: examples };
+    exampleIds.push(id);
+}
+exampleIds.sort();
+renderRow(
+    GLib.build_filenamev([OUTPUT, 'overlay-example.png']),
+    exampleIds.flatMap(id => scenes(resolveSkin(withExamples, id)).slice(0, 2)));

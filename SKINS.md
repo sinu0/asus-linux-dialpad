@@ -12,7 +12,7 @@ The GNOME Shell dial comes in five built-in skins:
 
 ![Built-in skins](./preview/overlay-skins.png)
 
-Pick one in **Turnpad → Behaviour → Skin**. With **Match system style** on, the dial uses one skin while GNOME is dark and another while it is light (Frost by default), switching together with the quick-settings style toggle.
+Pick one in **Turnpad → Skins**. With **Match system style** on, the dial uses one skin while GNOME is dark and another while it is light (Frost by default), switching together with the quick-settings style toggle.
 
 ## Making your own
 
@@ -27,6 +27,8 @@ Click **Customise the selected skin…** (or **New skin…**, or the pencil on a
 - **Colours**: every part of the dial. Many parts are see-through on purpose, so each colour has its own opacity slider. A reset button appears next to a changed colour.
 
 ![Drawing a square outline](./preview/settings-skin-shape.png)
+
+A finished example with a background picture and a drawn outline is in [`examples/skins/`](examples/skins/): copy `gertie.json` and `gertie.png` to `~/.config/asus-turnpad/skins/`.
 
 **Save** writes the skin to `~/.config/asus-turnpad/skins/<id>.json` and selects it.
 
@@ -89,6 +91,6 @@ A skin is one JSON object:
 | `pointer` | Dot that follows the finger around the ring |
 | `shadow` | Opacity of the shadow under the disc, a number from 0 to 1 |
 
-Function colours (Volume blue, Zoom champagne…) and the accent colour are set per function and in Behaviour, not by the skin. A broken or partial skin never breaks the dial: unknown values fall back to the base skin, a custom shape without a usable outline is a circle, and a missing picture leaves the plain disc. Shapes and pictures are painted by the same Cairo code in the GNOME extension (`dial.js`) and in the settings app (`overlay/painter.py`), so they look the same wherever the dial is drawn.
+Function colours (Volume blue, Zoom champagne…) and the accent colour are set per function and on the Skins page, not by the skin. A broken or partial skin never breaks the dial: unknown values fall back to the base skin, a custom shape without a usable outline is a circle, and a missing picture leaves the plain disc. Shapes and pictures are painted by the same Cairo code in the GNOME extension (`dial.js`) and in the settings app (`overlay/painter.py`), so they look the same wherever the dial is drawn.
 
 The built-in skins are in [`gnome/extension/skins.json`](gnome/extension/skins.json). The painting code is shared by the extension and the README pictures (`gjs -m tools/render_overlay_preview.js`). The legacy PySide overlay used on other desktops does not support skins.

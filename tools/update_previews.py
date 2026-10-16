@@ -3,14 +3,17 @@
 
 Renders every picture into a temporary directory (the on-screen dial with
 tools/render_overlay_preview.js, the settings app with
-tools/screenshot_settings.py, which briefly opens a window) and compares
-each with the committed one. Rendering is not bit-exact between runs
+tools/screenshot_settings.py) and compares each with the committed one. The
+settings app runs inside a headless mutter on its own D-Bus session, so no
+window shows up, nothing steals focus and the pictures never catch an
+unfocused window; without mutter (or with --visible) it opens on the desktop. Rendering is not bit-exact between runs
 (blurred and dithered backgrounds differ by a few levels), so a picture only
 counts as changed when enough pixels differ by more than a tolerance;
 otherwise the committed file stays untouched and git sees no change.
 
     python3 tools/update_previews.py           # replace the changed pictures
     python3 tools/update_previews.py --check   # only report; exit 1 if any changed
+    python3 tools/update_previews.py --visible # settings app on the desktop
 
 tools/git-hooks/pre-push runs the --check form before every push once
 enabled with: git config core.hooksPath tools/git-hooks
@@ -19,6 +22,7 @@ enabled with: git config core.hooksPath tools/git-hooks
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -36,10 +40,27 @@ TOLERANCE = 12
 MIN_PIXELS = 25
 
 
-def render(output: Path) -> None:
+# Tall enough for the 1168 px Dial Controls picture with window shadows.
+VIRTUAL_MONITOR = "2560x1600"
+
+
+def headless(command: list[str]) -> list[str]:
+    """Run command in a headless mutter of its own, when mutter is there."""
+    mutter, dbus = shutil.which("mutter"), shutil.which("dbus-run-session")
+    if not (mutter and dbus):
+        return command
+    return [dbus, "--", mutter, "--headless", "--wayland", "--no-x11",
+            "--virtual-monitor", VIRTUAL_MONITOR,
+            "--wayland-display", f"turnpad-previews-{os.getpid()}", "--", *command]
+
+
+def render(output: Path, visible: bool = False) -> None:
     subprocess.run(["gjs", "-m", str(ROOT / "tools" / "render_overlay_preview.js"), str(output)],
                    check=True, stdout=subprocess.DEVNULL)
-    subprocess.run([sys.executable, str(ROOT / "tools" / "screenshot_settings.py"), str(output)],
+    screenshots = [sys.executable, str(ROOT / "tools" / "screenshot_settings.py"), str(output)]
+    # The private D-Bus session has no accessibility bus.
+    environment = {**os.environ, "GTK_A11Y": "none", "NO_AT_BRIDGE": "1"}
+    subprocess.run(screenshots if visible else headless(screenshots), env=None if visible else environment,
                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -59,11 +80,12 @@ def changed_pixels(old: Path, new: Path) -> int | None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="report outdated pictures without writing")
+    parser.add_argument("--visible", action="store_true", help="open the settings app on the desktop")
     args = parser.parse_args()
 
     with tempfile.TemporaryDirectory(prefix="turnpad-previews-") as directory:
         output = Path(directory)
-        render(output)
+        render(output, visible=args.visible)
         outdated = []
         for new in sorted(output.glob("*.png")):
             old = PREVIEW / new.name

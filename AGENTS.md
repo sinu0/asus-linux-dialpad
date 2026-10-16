@@ -20,7 +20,8 @@
   - `tests/` – `unittest` suite for gesture maths, legacy adapter and D-Bus overlay state.
   - `config/` – JSON config model, macro runtime, legacy adapter, migration from old `dialpad_dev` INI + `layouts/*.py`.
   - `config/presets.py` – ASUS Dial-style function library and pre-programmed app packs (browser, GIMP, Krita, Inkscape, Blender, Kdenlive, Resolve, LibreOffice, code editors, Spotify, video players); `suggested_color()` colours functions without one.
-  - `config/labels.py` – key/macro labels shared by the GUI and the overlay hints (includes the evdev code table for old numeric keys).
+  - `config/profile_share.py` – profiles as text: `PROFILE_FORMAT` + `ai_prompt()` for assistants, `profiles_from_text()` reads an answer, a profile or an export file (normalises key names via `labels.parse_keys`, raises `ProfileTextError` with a readable reason); used by Dial Controls › Build with AI and by file import. Keep `PROFILE_FORMAT` in sync with the schema.
+  - `config/labels.py` – key/macro labels shared by the GUI and the overlay hints (includes the evdev code table for old numeric keys); `parse_keys()`/`keys_to_text()` read and write typed shortcuts ("Ctrl+F12"); `ICON_RULES` must match `dial.js` (`tests/test_labels.py`), `ICON_CHOICES` feeds the icon picker.
   - `config_app/` – GTK4/Libadwaita settings GUI (`io.github.sinu0.AsusTurnpad`).
   - `gnome/extension/` – GNOME Shell 45–51 extension (`asus-turnpad@sinu0.github.io`), renders radial dial natively. `dial.js` holds all painting and imports only `cairo` (shared with `tools/`); `extension.js` owns actors, D-Bus and config watching; `layers.js` paints in three layers (background, content, finger dot) that repaint only when their look changes, see "Rendering cost" in `ARCHITECTURE.md`. Every extension file must be listed in `install.sh` and `install_gnome_extension.sh` (`tests/test_install.py`).
   - `gnome/extension/skins.json` – built-in skins (`glass`, `midnight`, `frost`, `proart`, `classic`); user skins are `~/.config/asus-turnpad/skins/<id>.json`. Format and AI workflow in `SKINS.md`.
@@ -34,6 +35,8 @@
   - `install_migrate.sh` – moves installs from before the rename (see Name above).
   - `uninstall.sh` – removes everything installed plus pre-rename leftovers; keeps `~/.config/asus-turnpad` unless confirmed with `--interactive`.
   - `ARCHITECTURE.md` – component map and how to add a desktop environment.
+  - `examples/skins/` – example user skin (`gertie.json` + public-domain `gertie.png`); `tools/render_overlay_preview.js` paints it into `preview/overlay-example.png`, `tests/test_skins.py` loads it.
+  - `README.md` shows only the main pictures and the example skin; all others are in `GALLERY.md`.
   - `tools/` – `render_overlay_preview.js` (gjs, paints `preview/overlay-*.png` with `dial.js`), `screenshot_settings.py` (opens the app on a demo config, saves `preview/settings-*.png`; never writes the user's config), `update_previews.py` (runs both, keeps unchanged pictures) and `git-hooks/pre-push`.
   - `install_gnome_extension.sh` – sourced by `install.sh`.
 
@@ -46,7 +49,9 @@
 - **Smoke test config:** `python3 -m config.runtime && python3 -m config.legacy_adapter`
 - **Validate GNOME extension (outside Shell):** `gjs -m gnome/extension/extension.js` – will fail with resource import errors because `resource:///org/gnome/shell/ui/main.js` only exists inside the shell process; that is expected and confirms ESM syntax is valid.
 - **Desktop file validate:** `desktop-file-validate config_app/io.github.sinu0.AsusTurnpad.desktop`
-- **README pictures:** `python3 tools/update_previews.py` renders everything in `preview/` and replaces only pictures that really changed (rendering noise stays below a tolerance, so unchanged pictures are not re-committed); `--check` only reports. Run it before every push that touches the extension, settings app, painters or skins and commit the changed pictures. `tools/git-hooks/pre-push` enforces it once enabled with `git config core.hooksPath tools/git-hooks` (skip once: `SKIP_PREVIEWS=1 git push`). Opens the settings app briefly.
+- **README pictures:** `python3 tools/update_previews.py` renders everything in `preview/` and replaces only pictures that really changed (rendering noise stays below a tolerance, so unchanged pictures are not re-committed); `--check` only reports. Run it before every push that touches the extension, settings app, painters or skins and commit the changed pictures. The settings app renders in a headless mutter (own D-Bus session, virtual 2560×1600 monitor), so no window appears and focus cannot spoil the pictures; `--visible` opens it on the desktop instead. `tools/git-hooks/pre-push` enforces it once enabled with `git config core.hooksPath tools/git-hooks` (skip once: `SKIP_PREVIEWS=1 git push`).
+- **Overlay on monitors 1080p–4K:** `tests/test_overlay_placement.py` runs `overlayPlacement()` from `dial.js` in gjs for common monitors and GNOME scale factors (logical pixels; the PX13 at 200 % is 1440×900); the dial must stay on screen and top ≤ center ≤ lower ≤ bottom.
+- **Settings app layout 1080p–4K:** `tests/test_settings_layout.py` runs `tests/layout_probe.py` in one headless mutter per window size, in parallel (~9 s); it visits every page and the main dialogs and fails on widgets past the window edge, a window that cannot shrink to the size, or GTK warnings. Add new pages to `PAGES` and new dialogs to `dialogs()` there.
 - **Test D-Bus service standalone:** `python3 dialpad_dbus.py` – starts, emits one invisible state, exits.
 
 ## Key environment facts

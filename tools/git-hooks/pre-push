@@ -4,8 +4,8 @@
 # Enable once per clone:   git config core.hooksPath tools/git-hooks
 # Skip for one push:       SKIP_PREVIEWS=1 git push   (or git push --no-verify)
 #
-# Runs only when the pushed commits touch what the pictures show; rendering
-# opens the settings app for a few seconds.
+# Runs only when the pushed commits touch what the pictures show; the
+# settings app renders in a headless mutter, so no window shows up.
 
 [ -n "$SKIP_PREVIEWS" ] && exit 0
 
@@ -29,7 +29,7 @@ if ! command -v gjs >/dev/null 2>&1 || ! python3 -c "import PIL" 2>/dev/null; th
     exit 0
 fi
 
-echo "pre-push: checking README pictures (opens the settings app briefly)..." >&2
+echo "pre-push: checking README pictures..." >&2
 if ! python3 "$ROOT/tools/update_previews.py" --check >&2; then
     echo "pre-push: commit the updated pictures first: python3 tools/update_previews.py" >&2
     exit 1

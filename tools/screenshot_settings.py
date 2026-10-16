@@ -6,7 +6,8 @@
 Opens the settings app on a demo configuration (default profile plus a few
 application profiles), walks through its pages and saves each one as a PNG.
 Nothing is written to ~/.config: saving is disabled and only built-in skins
-are shown. The window briefly appears on screen while it runs.
+are shown. Run directly, the window briefly appears on screen;
+tools/update_previews.py runs it in a headless mutter instead.
 """
 
 import sys
@@ -130,7 +131,7 @@ def steps(app):
     yield
     capture(window, "settings-behaviour")
 
-    scroll_to(app._skin_gallery.get_ancestor(Adw.PreferencesGroup))
+    page("look")
     yield
     capture(window, "settings-skins")
 
