@@ -1,0 +1,47 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    # Arch has the GTK 4.22 / Libadwaita 1.9 the settings app needs.
+    container: archlinux:latest
+    env:
+      # The headless mutter puts its Wayland socket there.
+      XDG_RUNTIME_DIR: /tmp/runtime
+    steps:
+      - name: Install packages
+        run: |
+          mkdir -m 700 -p "$XDG_RUNTIME_DIR"
+          pacman -Syu --noconfirm --needed \
+            git python python-gobject python-cairo python-dbus python-pillow \
+            gtk4 libadwaita gjs mutter dbus \
+            adwaita-icon-theme adwaita-fonts noto-fonts
+
+      - uses: actions/checkout@v4
+
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Syntax checks
+        run: |
+          python3 -c "import ast; ast.parse(open('dialpad.py').read())"
+          python3 -m compileall -q config config_app desktop overlay tools dialpad_dbus.py
+          bash -n install*.sh uninstall.sh
+
+      # The settings pictures show the apps installed on the desktop that
+      # rendered them, so only the overlay pictures are compared here.
+      - name: README pictures
+        run: python3 tools/update_previews.py --check --only overlay --output rendered
+
+      - name: Keep the rendered pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rendered-pictures
+          path: rendered/
+          if-no-files-found: ignore

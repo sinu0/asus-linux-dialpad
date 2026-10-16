@@ -33,7 +33,8 @@ def probe_sizes():
 @unittest.skipUnless(all(shutil.which(tool) for tool in TOOLS), "needs mutter for a headless display")
 class SettingsLayoutTest(unittest.TestCase):
     def test_nothing_reaches_past_the_window(self):
-        environment = {**os.environ, "GTK_A11Y": "none", "NO_AT_BRIDGE": "1"}
+        # GSettings defaults, not the desktop's fonts and settings.
+        environment = {**os.environ, "GTK_A11Y": "none", "NO_AT_BRIDGE": "1", "GSETTINGS_BACKEND": "memory"}
         with tempfile.TemporaryDirectory(prefix="turnpad-layout-") as directory:
             runs = []
             for number, size in enumerate(probe_sizes()):

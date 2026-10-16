@@ -134,6 +134,9 @@ POSITION_LABELS = {
 
 def _load_proart_style():
     """Apply the local, intentionally restrained ProArt visual treatment."""
+    # The palette is dark only; on a light desktop Adwaita would draw white
+    # lists and cards on it.
+    Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
     display = Gdk.Display.get_default()
     if display is None or not STYLE_FILE.exists():
         return

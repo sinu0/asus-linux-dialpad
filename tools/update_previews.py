@@ -15,6 +15,13 @@ otherwise the committed file stays untouched and git sees no change.
     python3 tools/update_previews.py --check   # only report; exit 1 if any changed
     python3 tools/update_previews.py --visible # settings app on the desktop
 
+The settings pictures show the icons of the apps installed on the machine
+(Krita, Firefox, darktable), so only a desktop with them renders them as
+committed. CI therefore compares the overlay pictures alone and keeps the
+rest for viewing:
+
+    python3 tools/update_previews.py --check --only overlay --output rendered/
+
 tools/git-hooks/pre-push runs the --check form before every push once
 enabled with: git config core.hooksPath tools/git-hooks
 """
@@ -58,8 +65,9 @@ def render(output: Path, visible: bool = False) -> None:
     subprocess.run(["gjs", "-m", str(ROOT / "tools" / "render_overlay_preview.js"), str(output)],
                    check=True, stdout=subprocess.DEVNULL)
     screenshots = [sys.executable, str(ROOT / "tools" / "screenshot_settings.py"), str(output)]
-    # The private D-Bus session has no accessibility bus.
-    environment = {**os.environ, "GTK_A11Y": "none", "NO_AT_BRIDGE": "1"}
+    # The private D-Bus session has no accessibility bus. GSettings defaults
+    # instead of the desktop's settings, so every machine renders the same.
+    environment = {**os.environ, "GTK_A11Y": "none", "NO_AT_BRIDGE": "1", "GSETTINGS_BACKEND": "memory"}
     subprocess.run(screenshots if visible else headless(screenshots), env=None if visible else environment,
                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -81,13 +89,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="report outdated pictures without writing")
     parser.add_argument("--visible", action="store_true", help="open the settings app on the desktop")
+    parser.add_argument("--only", metavar="PREFIX", default="",
+                        help="compare only pictures whose name starts with PREFIX, e.g. overlay")
+    parser.add_argument("--output", metavar="DIR", type=Path,
+                        help="also keep every rendered picture in DIR")
     args = parser.parse_args()
 
     with tempfile.TemporaryDirectory(prefix="turnpad-previews-") as directory:
         output = Path(directory)
         render(output, visible=args.visible)
+        if args.output:
+            shutil.copytree(output, args.output, dirs_exist_ok=True)
         outdated = []
-        for new in sorted(output.glob("*.png")):
+        for new in sorted(output.glob(f"{args.only}*.png")):
             old = PREVIEW / new.name
             if not old.exists():
                 status, differs = "new", True

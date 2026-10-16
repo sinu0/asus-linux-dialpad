@@ -61,6 +61,13 @@ class ScreenshotApp(app_main.Application):
         self._save_source = 0
         return GLib.SOURCE_REMOVE
 
+    # A dark desktop in every picture, whatever the machine running this uses.
+    def _watch_system_style(self):
+        pass
+
+    def _system_is_light(self):
+        return False
+
 
 def capture(window, name):
     # No keyboard focus ring in the pictures.
