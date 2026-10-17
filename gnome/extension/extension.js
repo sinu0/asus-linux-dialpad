@@ -9,10 +9,13 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import {
     DEFAULT_SKIN,
     clearImageCache,
+    effectiveLook,
     iconLayout,
     iconNameFor,
     overlayPlacement,
     parseColor,
+    pillContent,
+    pillPlacement,
     resolveSkin,
 } from './dial.js';
 import { DialLayers } from './layers.js';
@@ -26,6 +29,10 @@ const SKINS_DIR = GLib.build_filenamev([CONFIG_DIR, 'skins']);
 const SKINS_NAME = 'skins.json';
 const FADE_IN_MS = 120;
 const FADE_OUT_MS = 260;
+// Visibility "fade": full this long after a touch, then fading slowly.
+const FADE_AFTER_MS = 1000;
+const FADE_SLOW_MS = 600;
+const PILL_ICON_SIZE = 18;
 
 const DEFAULT_APPEARANCE = {
     scale: 1.0,
@@ -37,6 +44,10 @@ const DEFAULT_APPEARANCE = {
     skin: DEFAULT_SKIN,
     skin_light: 'frost',
     follow_system_style: false,
+    custom_x: 0.5,
+    custom_y: 0.5,
+    visibility: 'full',
+    fade_opacity: 35,
 };
 
 export default class DialPadExtension extends Extension {
@@ -54,7 +65,12 @@ export default class DialPadExtension extends Extension {
         this._iconLayer = null;
         this._iconKey = '';
         this._hideTimeoutId = 0;
+        this._fadeTimeoutId = 0;
         this._shown = false;
+        this._shownActor = null;
+        this._pill = null;
+        this._pillKey = '';
+        this._lookKey = '';
         this._appearance = { ...DEFAULT_APPEARANCE };
         this._skin = resolveSkin(null, DEFAULT_SKIN);
         this._skinId = '';
@@ -80,6 +96,7 @@ export default class DialPadExtension extends Extension {
             hints: {},
             hold_returns: true,
             pointer: -1,
+            look: {},
         };
 
         try {
@@ -97,6 +114,7 @@ export default class DialPadExtension extends Extension {
 
     disable() {
         this._cancelHide();
+        this._cancelFade();
         try { this._unwatchConfig(); } catch (_) {}
         try { this._unwatchStyle(); } catch (_) {}
         try { this._disconnectFocus(); } catch (_) {}
@@ -277,6 +295,15 @@ export default class DialPadExtension extends Extension {
         this._centerIcon = new St.Icon({ style_class: 'dialpad-center-icon', visible: false });
         this._overlay.add_child(this._centerIcon);
         Main.layoutManager.uiGroup.add_child(this._overlay);
+
+        // A small label shown instead of the dial (visibility "pill").
+        this._pill = new St.BoxLayout({ visible: false, reactive: false, opacity: 0 });
+        this._pillIcon = new St.Icon({ y_align: Clutter.ActorAlign.CENTER });
+        this._pillTitle = new St.Label({ y_align: Clutter.ActorAlign.CENTER });
+        this._pillValue = new St.Label({ y_align: Clutter.ActorAlign.CENTER });
+        for (const child of [this._pillIcon, this._pillTitle, this._pillValue])
+            this._pill.add_child(child);
+        Main.layoutManager.uiGroup.add_child(this._pill);
         this._monitorsId = Main.layoutManager.connect('monitors-changed', () => this._applyGeometry());
         GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
             this._applyGeometry();
@@ -296,6 +323,10 @@ export default class DialPadExtension extends Extension {
         this._overlay.remove_all_transitions();
         this._overlay.destroy();
         this._overlay = null;
+        this._pill?.destroy();
+        this._pill = null;
+        this._pillKey = '';
+        this._shownActor = null;
         this._layers?.destroy();
         this._layers = null;
         this._iconLayer = null;
@@ -311,7 +342,9 @@ export default class DialPadExtension extends Extension {
         if (!monitor)
             return;
         const scale = this._appearance.scale;
-        const { x, y, width, height } = overlayPlacement(monitor, scale, this._appearance.position);
+        const look = this._look();
+        this._lookKey = JSON.stringify(look);
+        const { x, y, width, height } = overlayPlacement(monitor, scale, look.position, look.custom);
         // The overlay is only as large as the dial, so fading it composites
         // the dial and not the whole screen.
         this._overlay.set_size(width, height);
@@ -320,6 +353,47 @@ export default class DialPadExtension extends Extension {
         this._overlay.set_position(monitor.x + x, monitor.y + y);
         this._dialOrigin = [0, 0];
         this._updateIcons();
+        this._updatePill();
+    }
+
+    _look() {
+        return effectiveLook(this._appearance, this._details.look);
+    }
+
+    // --- pill -------------------------------------------------------------
+
+    _updatePill() {
+        const pill = this._pill;
+        const monitor = Main.layoutManager.primaryMonitor;
+        if (!pill || !monitor || this._look().visibility !== 'pill')
+            return;
+        const scale = this._appearance.scale;
+        const palette = this._skin.palette;
+        const content = pillContent(this._view());
+        // The driver signals every few degrees; restyle only on a change.
+        const key = JSON.stringify([content, scale, palette.surfaceTop, palette.rim, palette.text, this._lookKey,
+            monitor.x, monitor.y, monitor.width, monitor.height]);
+        if (key === this._pillKey)
+            return;
+        this._pillKey = key;
+        const rgba = ([r, g, b, a = 1]) => `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, ${a})`;
+        const fontSize = Math.round(15 * scale);
+        pill.set_style(
+            `background-color: ${rgba(palette.surfaceTop)}; border: 1px solid ${rgba(palette.rim)}; ` +
+            `border-radius: ${Math.round(24 * scale)}px; padding: ${Math.round(9 * scale)}px ${Math.round(18 * scale)}px; ` +
+            `spacing: ${Math.round(10 * scale)}px;`);
+        this._pillIcon.gicon = this._gicon(content.title, content.configured);
+        this._pillIcon.icon_size = Math.round(PILL_ICON_SIZE * scale);
+        this._pillIcon.set_style(this._cssColor(content.color));
+        this._pillTitle.text = content.title;
+        this._pillTitle.set_style(`color: ${rgba(palette.text)}; font-weight: bold; font-size: ${fontSize}px;`);
+        this._pillValue.text = content.value;
+        this._pillValue.visible = Boolean(content.value);
+        this._pillValue.set_style(`color: ${rgba(content.color)}; font-weight: bold; font-size: ${fontSize}px;`);
+        const [, width] = pill.get_preferred_width(-1);
+        const [, height] = pill.get_preferred_height(width);
+        const { x, y } = pillPlacement(monitor, scale, this._look(), width, height);
+        pill.set_position(monitor.x + x, monitor.y + y);
     }
 
     // --- D-Bus ----------------------------------------------------------
@@ -380,7 +454,15 @@ export default class DialPadExtension extends Extension {
     _onOverlayDetails(_conn, _sender, _path, _iface, _signal, params) {
         const [json] = params.deepUnpack();
         this._mergeDetails(json);
+        if (JSON.stringify(this._look()) !== this._lookKey) {
+            this._applyGeometry();
+            // Another profile or function may show the pill instead of the
+            // dial, or the other way round.
+            if (this._shown)
+                this._show(false);
+        }
         this._layers?.update();
+        this._updatePill();
     }
 
     _onOverlayState(_conn, _sender, _path, _iface, _signal, params) {
@@ -388,6 +470,7 @@ export default class DialPadExtension extends Extension {
         // Drivers without the touching field keep the dial up while enabled.
         const legacyDriver = params.n_children() < 10;
         const wasEnabled = this._state.enabled;
+        const wasTouching = this._state.touching;
         this._state.enabled = enabled;
         this._state.title = title || '';
         this._state.titles = titles || [];
@@ -404,8 +487,9 @@ export default class DialPadExtension extends Extension {
         this._state.touching = legacyDriver ? enabled : Boolean(touching);
 
         this._updateIcons();
-        this._updateVisibility(wasEnabled);
+        this._updateVisibility(wasEnabled, wasTouching);
         this._layers?.update();
+        this._updatePill();
     }
 
     _onFocusWindow() {
@@ -421,7 +505,7 @@ export default class DialPadExtension extends Extension {
 
     // --- visibility -----------------------------------------------------
 
-    _updateVisibility(wasEnabled) {
+    _updateVisibility(wasEnabled, wasTouching) {
         if (!this._overlay)
             return;
         if (!this._state.enabled) {
@@ -430,45 +514,90 @@ export default class DialPadExtension extends Extension {
         }
         if (this._state.touching) {
             this._cancelHide();
-            this._show();
+            this._show(!wasTouching);
             return;
         }
+        this._cancelFade();
         // Not touching: flash the dial after activation, and let an
         // already visible dial linger so the final value can be read.
         if (!wasEnabled || this._shown) {
-            this._show();
+            this._show(false);
             this._scheduleHide();
         }
     }
 
-    _show() {
-        if (this._shown)
-            return;
+    // The dial, or the pill in its place.
+    _activeActor() {
+        return this._look().visibility === 'pill' && this._pill ? this._pill : this._overlay;
+    }
+
+    // touchStarted: a new touch brings a faded dial back to full.
+    _show(touchStarted) {
+        const actor = this._activeActor();
+        if (this._shownActor && this._shownActor !== actor) {
+            this._shownActor.remove_all_transitions();
+            this._shownActor.opacity = 0;
+            this._shownActor.visible = false;
+        }
+        const wasShown = this._shown && this._shownActor === actor;
         this._shown = true;
-        this._overlay.remove_all_transitions();
-        this._overlay.visible = true;
-        this._overlay.ease({
+        this._shownActor = actor;
+        if (wasShown && !touchStarted)
+            return;
+        actor.remove_all_transitions();
+        actor.visible = true;
+        actor.ease({
             opacity: 255,
             duration: FADE_IN_MS,
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         });
+        this._scheduleFade();
     }
 
     _hide() {
         this._cancelHide();
-        if (!this._shown || !this._overlay)
+        this._cancelFade();
+        const actor = this._shownActor;
+        if (!this._shown || !actor)
             return;
         this._shown = false;
-        this._overlay.remove_all_transitions();
-        this._overlay.ease({
+        actor.remove_all_transitions();
+        actor.ease({
             opacity: 0,
             duration: FADE_OUT_MS,
             mode: Clutter.AnimationMode.EASE_IN_QUAD,
             onComplete: () => {
-                if (this._overlay && !this._shown)
-                    this._overlay.visible = false;
+                if (!this._shown || this._shownActor !== actor)
+                    actor.visible = false;
             },
         });
+    }
+
+    // Visibility "fade": after a moment of touching, fade so what lies
+    // underneath shows through.
+    _scheduleFade() {
+        this._cancelFade();
+        const look = this._look();
+        if (look.visibility !== 'fade')
+            return;
+        this._fadeTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, FADE_AFTER_MS, () => {
+            this._fadeTimeoutId = 0;
+            if (this._shown && this._state.touching && this._shownActor) {
+                this._shownActor.ease({
+                    opacity: Math.round(255 * look.fadeOpacity),
+                    duration: FADE_SLOW_MS,
+                    mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
+                });
+            }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _cancelFade() {
+        if (this._fadeTimeoutId) {
+            GLib.source_remove(this._fadeTimeoutId);
+            this._fadeTimeoutId = 0;
+        }
     }
 
     _scheduleHide() {

@@ -14,7 +14,10 @@ DARKTABLE_APP_ID = "org.darktable.darktable.desktop"
 
 
 PROFILE_MODES = ("multi", "single")
-OVERLAY_POSITIONS = ("center", "lower", "bottom", "top")
+OVERLAY_POSITIONS = ("center", "lower", "bottom", "top", "custom")
+# full: always fully visible; fade: full on touch, then fades to
+# fade_opacity while turning; pill: a small label instead of the dial.
+OVERLAY_VISIBILITIES = ("full", "fade", "pill")
 SCROLL_AXES = ("vertical", "horizontal")
 
 
@@ -85,6 +88,33 @@ class OverlayConfig:
     # Functions whose rotation step is at least this many degrees show a
     # progress arc while turning instead of waiting silently.
     progress_above_degrees: int = 120
+    # Centre of the dial for position "custom", as fractions of the screen.
+    custom_x: float = 0.5
+    custom_y: float = 0.5
+    visibility: str = "full"
+    # Percent the dial fades to with visibility "fade".
+    fade_opacity: int = 35
+
+
+# Keys a profile or a function may override; OverlayConfig holds defaults.
+OVERLAY_RULE_KEYS = ("position", "custom_x", "custom_y", "visibility", "fade_opacity")
+
+
+def overlay_rule(values) -> dict:
+    """The valid overrides in values, e.g. a profile's or function's "overlay"."""
+    if not isinstance(values, dict):
+        return {}
+    rule = {}
+    if values.get("position") in OVERLAY_POSITIONS:
+        rule["position"] = values["position"]
+    for key in ("custom_x", "custom_y"):
+        if isinstance(values.get(key), (int, float)) and not isinstance(values.get(key), bool):
+            rule[key] = round(_clamp(values[key], 0.0, 1.0, 0.5), 3)
+    if values.get("visibility") in OVERLAY_VISIBILITIES:
+        rule["visibility"] = values["visibility"]
+    if isinstance(values.get("fade_opacity"), (int, float)) and not isinstance(values.get("fade_opacity"), bool):
+        rule["fade_opacity"] = int(_clamp(values["fade_opacity"], 0, 100, 35))
+    return rule
 
 
 @dataclass
@@ -116,6 +146,8 @@ class Segment:
     unit: str | None = None
     enabled: bool = True
     color: str | None = None
+    # Overrides of the on-screen dial while this function is selected.
+    overlay: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -130,6 +162,8 @@ class Profile:
     sensitivity: float = 1.0
     scroll_speed: float = 1.0
     remember_last: bool = True
+    # Overrides of the on-screen dial for this profile (and its menu).
+    overlay: dict = field(default_factory=dict)
 
     def active_segments(self) -> list[Segment]:
         return [segment for segment in self.segments if segment.enabled]
@@ -256,6 +290,8 @@ def _encoder(obj):
         result["sensitivity"] = obj.sensitivity
         result["scroll_speed"] = obj.scroll_speed
         result["remember_last"] = obj.remember_last
+        if obj.overlay:
+            result["overlay"] = dict(obj.overlay)
         return result
     if isinstance(obj, Segment):
         result: dict = {
@@ -277,6 +313,8 @@ def _encoder(obj):
             result["enabled"] = False
         if obj.color:
             result["color"] = obj.color
+        if obj.overlay:
+            result["overlay"] = dict(obj.overlay)
         return result
     if isinstance(obj, MacroStep):
         result: dict = {"type": obj.type.value}
@@ -319,6 +357,11 @@ def _decoder(d: dict, cls: type):
         overlay.scale = _clamp(overlay.scale, 0.6, 1.6, 1.0)
         if overlay.position not in OVERLAY_POSITIONS:
             overlay.position = "lower"
+        overlay.custom_x = round(_clamp(overlay.custom_x, 0.0, 1.0, 0.5), 3)
+        overlay.custom_y = round(_clamp(overlay.custom_y, 0.0, 1.0, 0.5), 3)
+        if overlay.visibility not in OVERLAY_VISIBILITIES:
+            overlay.visibility = "full"
+        overlay.fade_opacity = int(_clamp(overlay.fade_opacity, 0, 100, 35))
         if not isinstance(overlay.skin, str) or not overlay.skin.strip():
             overlay.skin = "glass"
         if not isinstance(overlay.skin_light, str) or not overlay.skin_light.strip():
@@ -341,6 +384,7 @@ def _decoder(d: dict, cls: type):
             sensitivity=_clamp(d.get("sensitivity", 1.0), 0.25, 4.0, 1.0),
             scroll_speed=_clamp(d.get("scroll_speed", 1.0), 0.25, 4.0, 1.0),
             remember_last=bool(d.get("remember_last", True)),
+            overlay=overlay_rule(d.get("overlay")),
         )
     if cls is Segment:
         return Segment(
@@ -354,6 +398,7 @@ def _decoder(d: dict, cls: type):
             unit=d.get("unit"),
             enabled=bool(d.get("enabled", True)),
             color=d.get("color"),
+            overlay=overlay_rule(d.get("overlay")),
         )
     if cls is MacroStep:
         values = _known(d, MacroStep)

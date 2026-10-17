@@ -87,5 +87,74 @@ class OverlayPlacementTest(unittest.TestCase):
                 self.assertLessEqual(y["lower"], y["bottom"])
 
 
+LOOK_SCRIPT = """
+import { effectiveLook, overlayPlacement, pillContent, pillPlacement } from '%s';
+const monitor = { width: 1440, height: 900 };
+const appearance = { position: 'lower', custom_x: 0.5, custom_y: 0.5, visibility: 'full', fade_opacity: 35 };
+const state = (title, titles = []) => ({
+    title, titles, icons: titles.map(() => ''), menuTitles: ['Zoom', 'Volume'], menuIcons: ['', 'my-icon'],
+    value: 64, unit: '%%', valueShowOnlyProgress: false,
+});
+const view = (title, titles) => ({ state: state(title, titles), details: { profile: 'Krita', colors: [] }, accent: [1, 0, 0, 1] });
+const corners = [];
+for (const x of [0, 0.5, 1])
+    for (const y of [0, 0.5, 1])
+        corners.push(overlayPlacement(monitor, 1.6, 'custom', [x, y]));
+print(JSON.stringify({
+    corners,
+    middle: overlayPlacement({ width: 1920, height: 1080 }, 1, 'custom', [0.25, 0.75]),
+    defaults: effectiveLook(appearance, {}),
+    profile: effectiveLook(appearance, { position: 'custom', custom_x: 0.9, visibility: 'fade', fade_opacity: 50 }),
+    invalid: effectiveLook(appearance, { position: 'side', custom_x: 7, visibility: 'loud', fade_opacity: -1 }),
+    selected: pillContent(view('Volume', [])),
+    hovered: pillContent(view('Zoom', ['Zoom', 'Volume'])),
+    menu: pillContent(view('Menu', ['Zoom', 'Volume'])),
+    pill: pillPlacement(monitor, 1, effectiveLook(appearance, { position: 'custom', custom_x: 1, custom_y: 0 }), 200, 40),
+}));
+"""
+
+
+@unittest.skipUnless(shutil.which("gjs"), "gjs is not installed")
+class DialLookTest(unittest.TestCase):
+    """Custom position, profile and function overrides, and the pill."""
+
+    @classmethod
+    def setUpClass(cls):
+        with tempfile.NamedTemporaryFile("w", suffix=".js") as script:
+            script.write(LOOK_SCRIPT % (ROOT / "gnome" / "extension" / "dial.js").as_uri())
+            script.flush()
+            result = subprocess.run(["gjs", "-m", script.name], capture_output=True, text=True, check=True)
+        cls.result = json.loads(result.stdout.strip().splitlines()[-1])
+
+    def test_custom_position_stays_on_the_monitor(self):
+        for placed in self.result["corners"]:
+            self.assertGreaterEqual(placed["x"], 0)
+            self.assertGreaterEqual(placed["y"], 0)
+            self.assertLessEqual(placed["x"] + placed["width"], 1440)
+            self.assertLessEqual(placed["y"] + placed["height"], 900)
+
+    def test_custom_position_is_the_dial_centre(self):
+        middle = self.result["middle"]
+        self.assertEqual(middle["x"] + middle["width"] // 2, 480)
+        self.assertEqual(middle["y"] + middle["width"] // 2, 810)
+
+    def test_overrides_win_and_invalid_values_fall_back(self):
+        self.assertEqual(self.result["defaults"],
+                         {"position": "lower", "custom": [0.5, 0.5], "visibility": "full", "fadeOpacity": 0.35})
+        self.assertEqual(self.result["profile"],
+                         {"position": "custom", "custom": [0.9, 0.5], "visibility": "fade", "fadeOpacity": 0.5})
+        self.assertEqual(self.result["invalid"], self.result["defaults"])
+
+    def test_pill_shows_function_and_value(self):
+        self.assertEqual(self.result["selected"]["title"], "Volume")
+        self.assertEqual(self.result["selected"]["value"], "64%")
+        self.assertEqual(self.result["selected"]["configured"], "my-icon")
+        self.assertEqual((self.result["hovered"]["title"], self.result["hovered"]["value"]), ("Zoom", ""))
+        self.assertEqual(self.result["menu"]["title"], "Krita")
+
+    def test_pill_stays_on_the_monitor(self):
+        self.assertEqual(self.result["pill"], {"x": 1240, "y": 0})
+
+
 if __name__ == "__main__":
     unittest.main()

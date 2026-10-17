@@ -47,6 +47,12 @@ def describe(widget):
     return f"{type(widget).__name__}{f' “{label}”' if label else ''}"
 
 
+def unfold(widget):
+    """Open folded rows (the dial look of profiles and functions) so they count."""
+    for expander in demo._descendants(widget, Adw.ExpanderRow):
+        expander.set_expanded(True)
+
+
 def overflowing(window):
     """The outermost widgets that reach past the window's left or right edge."""
     width = window.get_width()
@@ -109,10 +115,12 @@ def steps(app, result, size_names):
             result.append(f"{size_name}: window is {window.get_width()} px wide, wanted {width}")
         for page in PAGES:
             app._view_stack.set_visible_child_name(page)
+            unfold(window)
             yield
             result.extend(f"{size_name}, {page} page: {fault}" for fault in overflowing(window))
         app._view_stack.set_visible_child_name("actions")
         for dialog_name in dialogs(app, profile):
+            unfold(window)
             yield
             result.extend(f"{size_name}, {dialog_name}: {fault}" for fault in overflowing(window))
     app.quit()
@@ -122,6 +130,11 @@ def main():
     output = Path(sys.argv[1])
     size_names = sys.argv[2:] or list(SIZES)
     config = demo.demo_config()
+    # Show every dial look row: the screen picker and the fade level.
+    config.overlay.position = "custom"
+    config.overlay.visibility = "fade"
+    config.profiles[0].overlay = {"position": "custom", "custom_x": 0.8, "custom_y": 0.7, "visibility": "fade"}
+    config.profiles[0].segments[0].overlay = {"position": "custom", "visibility": "fade"}
     demo.app_main.CONFIG_FILE = Path(__file__)
     demo.app_main.load_config = lambda: config
     demo.app_main.load_skins = demo.builtin_skins

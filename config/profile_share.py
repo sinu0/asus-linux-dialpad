@@ -15,6 +15,7 @@ PROFILE_FORMAT = """A Turnpad profile is one JSON object:
 - "app_id": optional; the .desktop id of the application it is for, e.g. "org.gimp.GIMP.desktop" or "firefox.desktop". Leave it out for a default profile.
 - "mode": "multi" (radial menu of functions) or "single" (the dial always runs the function named in "single_function").
 - "sensitivity" and "scroll_speed": 0.25 to 4 (1 = normal); "remember_last": true reopens the last used function.
+- "overlay": optional; how the on-screen dial shows for this profile, overriding the user's defaults: "position" ("top", "center", "lower", "bottom" or "custom" with "custom_x" and "custom_y", the dial's centre as fractions 0 to 1 of the screen), "visibility" ("full"; "fade": fades to "fade_opacity" percent while turning; "pill": a small label instead of the dial). Leave it out unless asked.
 - "segments": the functions, clockwise from the top of the dial; 3 to 8 work best. Each one has:
   - "title": short and unique in the profile, shown on the dial.
   - "color": optional "#rrggbb".
@@ -23,6 +24,7 @@ PROFILE_FORMAT = """A Turnpad profile is one JSON object:
   - "macro_cw" and "macro_ccw": steps run once per rotation step clockwise and counter-clockwise.
   - "macro_center": steps for a tap on the centre. A function with only "macro_center" is a launcher: choosing it in the menu runs it at once.
   - "value_command": optional shell command that prints a number shown in the centre; "unit" such as "%" (with % the dial draws a gauge).
+  - "overlay": optional, like the profile's, while this function is selected; e.g. {"visibility": "pill"} keeps the view clear while zooming.
 
 Steps run from top to bottom. Each is {"type": ...} with an optional "title", a short label shown as a hint below the dial ("Zoom in"):
 - "keystroke": "keys" pressed together, modifiers first, as evdev names, e.g. ["KEY_LEFTCTRL", "KEY_Z"]. Names: KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_LEFTALT, KEY_LEFTMETA (Super), KEY_A to KEY_Z, KEY_0 to KEY_9, KEY_F1 to KEY_F24, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_PAGEUP, KEY_PAGEDOWN, KEY_HOME, KEY_END, KEY_ENTER, KEY_ESC, KEY_TAB, KEY_SPACE, KEY_BACKSPACE, KEY_DELETE, KEY_LEFTBRACE ([), KEY_RIGHTBRACE (]), KEY_MINUS, KEY_EQUAL, KEY_COMMA, KEY_DOT, KEY_SLASH. They are key positions on a US keyboard.

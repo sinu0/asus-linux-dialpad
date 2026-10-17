@@ -129,6 +129,12 @@ POSITION_LABELS = {
     "lower": "Slightly below centre",
     "bottom": "Bottom of the screen",
     "top": "Top of the screen",
+    "custom": "Custom place",
+}
+VISIBILITY_LABELS = {
+    "full": "Always visible",
+    "fade": "Fade while turning",
+    "pill": "Small label instead of the dial",
 }
 
 
@@ -1044,6 +1050,19 @@ class Application(Adw.Application):
                 profile.remember_last,
                 lambda active: self._set_profile_value(profile, "remember_last", active),
             ))
+
+        def set_look(key, value):
+            if value is None:
+                profile.overlay.pop(key, None)
+            else:
+                profile.overlay[key] = value
+            self._changed(rebuild=False)
+
+        group.add(self._dial_look_expander(
+            "Where and how the dial shows for this profile and its menu",
+            profile.overlay.get, set_look, "As default",
+            lambda key: getattr(self.config.overlay, key),
+        ))
         return group
 
     def _functions_group(self, profile):
@@ -1446,6 +1465,19 @@ class Application(Adw.Application):
         general.add(_switch_row(
             "Show on the dial", None, segment.enabled,
             lambda active: (setattr(segment, "enabled", active), changed()),
+        ))
+
+        def set_look(key, value):
+            if value is None:
+                segment.overlay.pop(key, None)
+            else:
+                segment.overlay[key] = value
+            changed()
+
+        general.add(self._dial_look_expander(
+            "Where and how the dial shows while this function is selected",
+            segment.overlay.get, set_look, "As profile",
+            lambda key: profile.overlay.get(key, getattr(self.config.overlay, key)),
         ))
         page.add(general)
 
@@ -2124,13 +2156,11 @@ class Application(Adw.Application):
             self.config.overlay.scale, 0.6, 1.6, 0.05, 2,
             lambda value: self._set_config("overlay", "scale", round(value, 2)),
         ))
-        positions = list(OVERLAY_POSITIONS)
-        overlay.add(_combo_row(
-            "Position", None,
-            [POSITION_LABELS[position] for position in positions],
-            positions.index(self.config.overlay.position) if self.config.overlay.position in positions else 1,
-            lambda index: self._set_config("overlay", "position", positions[index]),
-        ))
+        self._dial_look_rows(
+            overlay.add,
+            lambda key: getattr(self.config.overlay, key),
+            lambda key, value: self._set_config("overlay", key, value),
+        )
         overlay.add(_spin_row(
             "Stay visible after release", "Milliseconds, so the final value can be read",
             self.config.overlay.hide_delay_ms, 0, 5000, 100, 0,
@@ -2162,6 +2192,169 @@ class Application(Adw.Application):
         overlay.add(accent_row)
         content.append(overlay)
         return self._scrolled_content(content)
+
+    def _dial_look_expander(self, tooltip, get, set_value, inherit_label, inherited):
+        """The dial look rows of a profile or function, folded."""
+        expander = Adw.ExpanderRow(title="On-screen dial")
+        expander.set_tooltip_text(tooltip)
+
+        def summary():
+            parts = []
+            if get("position") is not None:
+                parts.append(POSITION_LABELS[get("position")])
+            if get("visibility") is not None:
+                parts.append(VISIBILITY_LABELS[get("visibility")])
+            expander.set_subtitle(" · ".join(parts) or inherit_label)
+
+        def changed(key, value):
+            set_value(key, value)
+            summary()
+
+        self._dial_look_rows(expander.add_row, get, changed, inherit_label, inherited)
+        summary()
+        return expander
+
+    def _dial_look_rows(self, add, get, set_value, inherit_label=None, inherited=None):
+        """Position and visibility of the on-screen dial.
+
+        get(key) is this level's value and set_value(key, value) stores one.
+        A profile or function also gets inherit_label ("As default"), a
+        choice that removes its own value (set_value(key, None)), and
+        inherited(key), the value from the level above.
+        """
+
+        def current(key):
+            value = get(key)
+            return inherited(key) if value is None and inherited else value
+
+        def choices_row(title, key, labels, extra_keys):
+            options = ([None] if inherit_label else []) + list(labels)
+            names = [
+                f"{inherit_label} ({labels[inherited(key)]})" if option is None else labels[option]
+                for option in options
+            ]
+
+            def chosen(index):
+                option = options[index]
+                if option is None:
+                    for extra in (key, *extra_keys):
+                        set_value(extra, None)
+                else:
+                    set_value(key, option)
+                    # Keep the inherited details so the choice looks the same.
+                    for extra in extra_keys:
+                        if get(extra) is None:
+                            set_value(extra, current(extra))
+                update()
+
+            selected = get(key)
+            return _combo_row(title, None, names, options.index(selected) if selected in options else 0, chosen)
+
+        position = choices_row("Position", "position", POSITION_LABELS, ("custom_x", "custom_y"))
+        add(position)
+        picker = self._screen_point_picker(
+            lambda: (current("custom_x"), current("custom_y")),
+            lambda x, y: (set_value("custom_x", x), set_value("custom_y", y)),
+        )
+        add(picker)
+        visibility = choices_row("Visibility", "visibility", VISIBILITY_LABELS, ("fade_opacity",))
+        add(visibility)
+        fade = _spin_row(
+            "Fade to", "Percent of full opacity, reached a second after the finger lands",
+            current("fade_opacity"), 0, 100, 5, 0,
+            lambda value: set_value("fade_opacity", int(value)),
+        )
+        add(fade)
+
+        def update():
+            picker.set_visible(get("position") == "custom")
+            fade.set_visible(get("visibility") == "fade")
+
+        update()
+
+    def _monitor_size(self):
+        """Logical size of the first monitor, as GNOME places the dial on it."""
+        display = Gdk.Display.get_default()
+        monitors = display.get_monitors() if display else None
+        if monitors is not None and monitors.get_n_items():
+            geometry = monitors.get_item(0).get_geometry()
+            if geometry.width and geometry.height:
+                return geometry.width, geometry.height
+        return 1440, 900
+
+    def _screen_point_picker(self, get_point, set_point):
+        """A miniature screen; dragging the dial on it picks its centre."""
+        screen_width, screen_height = self._monitor_size()
+        area = Gtk.DrawingArea(hexpand=True, margin_top=10, margin_bottom=10, margin_start=12, margin_end=12)
+        area.set_content_height(160)
+        area.set_cursor_from_name("grab")
+        area.set_tooltip_text("Drag the dial to where it should appear")
+        dragging = {"start": None, "point": None}
+
+        def screen(width, height):
+            ratio = screen_width / screen_height
+            w, h = (height - 4) * ratio, height - 4
+            if w > width - 4:
+                w, h = width - 4, (width - 4) / ratio
+            return (width - w) / 2, (height - h) / 2, w, h
+
+        def draw(_area, cr, width, height):
+            x0, y0, w, h = screen(width, height)
+            cr.rectangle(x0, y0, w, h)
+            cr.set_source_rgba(1, 1, 1, 0.05)
+            cr.fill_preserve()
+            cr.set_source_rgba(1, 1, 1, 0.3)
+            cr.set_line_width(1)
+            cr.stroke()
+            # GNOME's top bar.
+            cr.rectangle(x0, y0, w, max(2, h * 0.03))
+            cr.set_source_rgba(1, 1, 1, 0.14)
+            cr.fill()
+            px, py = dragging["point"] or get_point()
+            radius = 180 * self.config.overlay.scale / screen_height * h
+            # The extension keeps the dial on the screen.
+            cx = min(max(x0 + px * w, x0 + radius), x0 + w - radius)
+            cy = min(max(y0 + py * h, y0 + radius), y0 + h - radius)
+            red, green, blue = _hex_to_rgb(self.config.overlay.accent or DEFAULT_ACCENT)
+            cr.arc(cx, cy, radius, 0, 2 * math.pi)
+            cr.set_source_rgba(red, green, blue, 0.35)
+            cr.fill_preserve()
+            cr.set_source_rgba(red, green, blue, 0.9)
+            cr.set_line_width(1.5)
+            cr.stroke()
+            cr.arc(x0 + px * w, y0 + py * h, 2.5, 0, 2 * math.pi)
+            cr.set_source_rgba(1, 1, 1, 0.9)
+            cr.fill()
+
+        def point_at(x, y):
+            x0, y0, w, h = screen(area.get_width(), area.get_height())
+            return (round(min(max((x - x0) / w, 0.0), 1.0), 3), round(min(max((y - y0) / h, 0.0), 1.0), 3))
+
+        def begin(_gesture, x, y):
+            dragging["start"] = (x, y)
+            dragging["point"] = point_at(x, y)
+            area.queue_draw()
+
+        def update(_gesture, dx, dy):
+            x, y = dragging["start"]
+            dragging["point"] = point_at(x + dx, y + dy)
+            area.queue_draw()
+
+        def end(gesture, dx, dy):
+            update(gesture, dx, dy)
+            set_point(*dragging["point"])
+            dragging["point"] = None
+            area.queue_draw()
+
+        drag = Gtk.GestureDrag()
+        drag.connect("drag-begin", begin)
+        drag.connect("drag-update", update)
+        drag.connect("drag-end", end)
+        area.add_controller(drag)
+        area.set_draw_func(draw)
+        row = Adw.PreferencesRow(activatable=False)
+        row.set_child(area)
+        return row
 
     def _set_accent(self, value):
         self._set_config("overlay", "accent", value)

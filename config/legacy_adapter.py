@@ -39,6 +39,8 @@ def _legacy_segment(segment: Segment, index: int = 0) -> dict:
         result["value"] = segment.value_command
     if segment.unit:
         result["unit"] = segment.unit
+    if segment.overlay:
+        result["overlay"] = dict(segment.overlay)
     return result
 
 
@@ -49,6 +51,7 @@ def _profile_meta(profile: Profile) -> dict:
         "sensitivity": profile.sensitivity,
         "scroll_speed": profile.scroll_speed,
         "remember_last": profile.remember_last,
+        "overlay": dict(profile.overlay),
     }
 
 
@@ -68,7 +71,7 @@ def _profile_shortcuts(profile: Profile) -> dict | None:
             "title": segment.title,
             **{
                 key: legacy[key]
-                for key in ("icon", "color", "hints", "treshold", "value", "unit")
+                for key in ("icon", "color", "hints", "treshold", "value", "unit", "overlay")
                 if key in legacy
             },
         }

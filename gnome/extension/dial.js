@@ -127,9 +127,20 @@ const ICON_RULES = [
 
 // Where the overlay goes on a monitor ({width, height} in logical pixels):
 // centred horizontally, at the chosen height, never past an edge.
-export function overlayPlacement(monitor, scale, position) {
+// custom: [x, y], the dial's centre as fractions of the monitor, used
+// with position "custom".
+export function overlayPlacement(monitor, scale, position, custom = null) {
     const width = Math.round(DIAL_D * scale);
     const height = Math.round((DIAL_D + HINT_H) * scale);
+    const clamp = (value, maximum) => Math.max(0, Math.min(maximum, Math.round(value)));
+    if (position === 'custom' && custom) {
+        return {
+            x: clamp(monitor.width * custom[0] - width / 2, monitor.width - width),
+            y: clamp(monitor.height * custom[1] - width / 2, monitor.height - height),
+            width,
+            height,
+        };
+    }
     const centred = (monitor.height - width) / 2;
     // A slightly lower placement mirrors the unobtrusive Windows ASUS
     // Dial overlay without obscuring the focused application's toolbar.
@@ -148,6 +159,61 @@ export function overlayPlacement(monitor, scale, position) {
         y: Math.max(0, Math.min(monitor.height - height, wanted)),
         width,
         height,
+    };
+}
+
+const LOOK_POSITIONS = ['center', 'lower', 'bottom', 'top', 'custom'];
+const LOOK_VISIBILITIES = ['full', 'fade', 'pill'];
+
+// Where and how the dial shows: the overlay section of config.json
+// (appearance) with the profile's and function's overrides from the
+// driver (look) on top; invalid values fall back a level.
+export function effectiveLook(appearance, look) {
+    const levels = [look && typeof look === 'object' ? look : {}, appearance, {}];
+    const pick = (key, valid, fallback) => {
+        for (const level of levels) {
+            if (valid(level[key]))
+                return level[key];
+        }
+        return fallback;
+    };
+    const fraction = value => typeof value === 'number' && value >= 0 && value <= 1;
+    return {
+        position: pick('position', value => LOOK_POSITIONS.includes(value), 'lower'),
+        custom: [pick('custom_x', fraction, 0.5), pick('custom_y', fraction, 0.5)],
+        visibility: pick('visibility', value => LOOK_VISIBILITIES.includes(value), 'full'),
+        fadeOpacity: pick('fade_opacity', value => typeof value === 'number' && value >= 0 && value <= 100, 35) / 100,
+    };
+}
+
+// What the small label shows in place of the dial (visibility "pill"):
+// the selected function and its value, the function under the finger in
+// the menu, or the profile.
+export function pillContent(view) {
+    const { state, details } = view;
+    const { titles, icons } = segmentState(state);
+    const configured = title => icons[titles.indexOf(title)] || '';
+    if (isSelectedMode(state)) {
+        const value = !state.valueShowOnlyProgress && state.unit ? `${state.value}${state.unit}` : '';
+        return { title: state.title, value, configured: configured(state.title), color: functionColor(view) };
+    }
+    if (state.title && state.title !== 'Menu')
+        return { title: state.title, value: '', configured: configured(state.title), color: activeColor(view) };
+    return { title: details.profile || 'Dial', value: '', configured: '', color: view.accent };
+}
+
+// The pill sits where the dial's centre would be, inside the monitor; a
+// custom point near an edge puts it at that edge.
+export function pillPlacement(monitor, scale, look, width, height) {
+    let [cx, cy] = [monitor.width * look.custom[0], monitor.height * look.custom[1]];
+    if (look.position !== 'custom') {
+        const dial = overlayPlacement(monitor, scale, look.position);
+        [cx, cy] = [dial.x + dial.width / 2, dial.y + dial.width / 2];
+    }
+    const clamp = (value, maximum) => Math.max(0, Math.min(maximum, Math.round(value)));
+    return {
+        x: clamp(cx - width / 2, monitor.width - width),
+        y: clamp(cy - height / 2, monitor.height - height),
     };
 }
 

@@ -1732,6 +1732,18 @@ def send_details(**details):
     if overlay_enabled():
         send_to_socket({"details": details})
 
+def overlay_look(function_title=None):
+    """How the on-screen dial shows: the profile's overrides, then the
+    selected function's; the extension applies them over config defaults."""
+    look = {}
+    sources = [profile_meta()]
+    if function_title is not None:
+        sources.append(function_settings(function_title))
+    for source in sources:
+        if isinstance(source.get("overlay"), dict):
+            look.update(source["overlay"])
+    return look
+
 def send_function_details(function_title):
     settings = function_settings(function_title)
     hints = settings.get("hints") if isinstance(settings.get("hints"), dict) else {}
@@ -1742,6 +1754,7 @@ def send_function_details(function_title):
         hints=hints,
         hold_returns=bool(multi_app_mode),
         pointer=-1,
+        look=overlay_look(function_title),
     )
 
 def show_multifunction_menu():
@@ -1753,6 +1766,7 @@ def show_multifunction_menu():
             color="",
             hints={},
             pointer=-1,
+            look=overlay_look(),
         )
         send_to_socket({
             "titles": multi_app_mode_titles,

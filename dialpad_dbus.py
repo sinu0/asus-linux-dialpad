@@ -139,6 +139,9 @@ class DialPadDBusService:
             "hints": {},
             "hold_returns": True,
             "pointer": -1,
+            # Profile and function overrides of the dial's position and
+            # visibility (see config.schema.OVERLAY_RULE_KEYS).
+            "look": {},
         }
 
     def _details_json(self) -> str:

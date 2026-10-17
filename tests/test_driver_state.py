@@ -5,6 +5,7 @@ extracted from its syntax tree and executed against recorded side effects.
 """
 
 import ast
+import dataclasses
 import os
 import sys
 import unittest
@@ -23,6 +24,7 @@ STATE_FUNCTIONS = {
     "profile_float",
     "function_settings",
     "menu_colors",
+    "overlay_look",
     "send_details",
     "send_function_details",
     "show_multifunction_menu",
@@ -100,7 +102,12 @@ class DriverStateTest(unittest.TestCase):
     def setUp(self):
         config = DialPadConfig(profiles=[
             Profile(name="Default", segments=[volume(), vertical_scroll(), tracks()]),
-            Profile(name="Krita", app_id="org.kde.krita.desktop", segments=[zoom_wheel(), volume()]),
+            Profile(
+                name="Krita",
+                app_id="org.kde.krita.desktop",
+                segments=[dataclasses.replace(zoom_wheel(), overlay={"visibility": "pill"}), volume()],
+                overlay={"position": "custom", "custom_x": 0.9, "custom_y": 0.2},
+            ),
             Profile(
                 name="Player",
                 app_id="mpv.desktop",
@@ -122,6 +129,18 @@ class DriverStateTest(unittest.TestCase):
         details = last_details(self.sent)
         self.assertEqual(details["profile"], "Krita")
         self.assertEqual(details["colors"][:2], ["#e7b98d", "#6cb6ff"])
+
+    def test_dial_look_comes_from_profile_then_function(self):
+        self.focus("org.kde.krita.desktop")
+        profile_look = {"position": "custom", "custom_x": 0.9, "custom_y": 0.2}
+        self.assertEqual(last_details(self.sent)["look"], profile_look)
+        self.driver["enter_function"]("Zoom")
+        self.assertEqual(last_details(self.sent)["look"], {**profile_look, "visibility": "pill"})
+        self.driver["enter_function"]("Volume")
+        self.assertEqual(last_details(self.sent)["look"], profile_look)
+        # Another application's profile has no overrides: the defaults apply.
+        self.focus("firefox.desktop")
+        self.assertEqual(last_details(self.sent)["look"], {})
 
     def test_last_function_is_remembered_per_application(self):
         self.focus("org.kde.krita.desktop")

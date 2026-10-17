@@ -11,7 +11,9 @@ from config.schema import (  # noqa: E402
     Profile,
     Segment,
     StepType,
+    _decoder,
     _default_config,
+    _encoder,
 )
 
 
@@ -142,6 +144,43 @@ class PresetsTest(unittest.TestCase):
         for pack in APP_PACKS:
             titles = [segment.title for segment in pack.factory()]
             self.assertEqual(len(titles), len(set(titles)), pack.name)
+
+
+
+class DialLookTest(unittest.TestCase):
+    """Profile and function overrides of where and how the dial shows."""
+
+    def config(self):
+        zoom = Segment(title="Zoom", macro_cw=[MacroStep(type=StepType.SHELL, script="true")],
+                       overlay={"visibility": "pill"})
+        return DialPadConfig(profiles=[
+            Profile(name="Default", segments=[zoom], overlay={"position": "custom", "custom_x": 0.9, "custom_y": 0.1}),
+            Profile(name="Player", app_id="mpv.desktop", mode="single", segments=[volume_segment()],
+                    overlay={"visibility": "fade", "fade_opacity": 20}),
+        ])
+
+    def test_overrides_reach_the_driver(self):
+        shortcuts = shortcuts_from_config(self.config())
+        menu = shortcuts["none"]
+        self.assertEqual(menu["_meta"]["overlay"], {"position": "custom", "custom_x": 0.9, "custom_y": 0.1})
+        self.assertEqual(menu["Zoom"]["overlay"], {"visibility": "pill"})
+        self.assertEqual(shortcuts["mpv.desktop"]["_meta"]["overlay"], {"visibility": "fade", "fade_opacity": 20})
+        self.assertNotIn("overlay", shortcuts["mpv.desktop"]["_meta"]["single"])
+
+    def test_saved_and_read_back_and_invalid_values_dropped(self):
+        data = _encoder(self.config())
+        self.assertNotIn("overlay", data["profiles"][1]["segments"][0])
+        data["profiles"][0]["overlay"].update({"visibility": "loud", "custom_y": 4, "fade_opacity": "x"})
+        loaded = _decoder(data, DialPadConfig)
+        self.assertEqual(loaded.profiles[0].overlay, {"position": "custom", "custom_x": 0.9, "custom_y": 1.0})
+        self.assertEqual(loaded.profiles[0].segments[0].overlay, {"visibility": "pill"})
+
+    def test_defaults_are_validated(self):
+        data = _encoder(_default_config())
+        data["overlay"].update({"position": "custom", "custom_x": -2, "visibility": "nope", "fade_opacity": 250})
+        overlay = _decoder(data, DialPadConfig).overlay
+        self.assertEqual((overlay.position, overlay.custom_x, overlay.visibility, overlay.fade_opacity),
+                         ("custom", 0.0, "full", 100))
 
 
 if __name__ == "__main__":
