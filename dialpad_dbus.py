@@ -142,6 +142,12 @@ class DialPadDBusService:
             # Profile and function overrides of the dial's position and
             # visibility (see config.schema.OVERLAY_RULE_KEYS).
             "look": {},
+            # The selected function's icon; the group it was chosen from.
+            "icon": "",
+            "parent": "",
+            # A group's list beside the dial while it is open: title, index
+            # (its menu sector), items, icons, colors, selected.
+            "submenu": None,
         }
 
     def _details_json(self) -> str:

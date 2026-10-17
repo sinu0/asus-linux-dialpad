@@ -4,7 +4,8 @@
 //   gjs -m tools/render_overlay_preview.js [output directory]
 //
 // Writes overlay-states.png (the dial in its main states),
-// overlay-skins.png (the menu in every built-in skin), overlay-shapes.png and
+// overlay-skins.png (the menu in every built-in skin), overlay-shapes.png,
+// overlay-submenu.png (a group's list beside the dial) and
 // overlay-example.png (the skins in examples/skins). Icons come from the
 // Adwaita symbolic theme, as in the Shell.
 import Gio from 'gi://Gio';
@@ -18,9 +19,14 @@ import {
     HINT_H,
     iconLayout,
     iconNameFor,
+    openSubmenu,
     paintDial,
+    paintSubmenu,
     parseColor,
     resolveSkin,
+    submenuLayout,
+    submenuPlacement,
+    submenuSize,
 } from '../gnome/extension/dial.js';
 
 const ROOT = GLib.path_get_dirname(GLib.path_get_dirname(System.programPath));
@@ -183,6 +189,97 @@ function renderRow(path, dials, captions) {
     print(`wrote ${path}`);
 }
 
+// A group's list: opened from a sector on the right, a long list opened
+// from the left (it scrolls) and a function chosen from a list.
+function submenuScenes(skin) {
+    const group = 'view-list-bullet-symbolic';
+    const menu = ['Zoom', 'Brush', 'Undo / Redo', 'Rotate', 'Mirror', 'System'];
+    const menuIcons = ['', group, '', '', '', group];
+    const colors = ['#e7b98d', '#ffad66', '#c99bff', '#9ad17b', '#6cb6ff', '#ff8f8f'];
+    const menuState = { titles: menu, icons: menuIcons, menuTitles: menu, menuIcons };
+    const brush = [
+        ['Size', 'zoom-in-symbolic', '#ffad66'],
+        ['Opacity', 'display-brightness-symbolic', '#f4c95d'],
+        ['Flow', 'view-continuous-symbolic', '#6cb6ff'],
+        ['Rotation', 'object-rotate-right-symbolic', '#9ad17b'],
+        ['Smoothing', 'document-edit-symbolic', '#c99bff'],
+    ];
+    const system = ['Volume', 'Mute', 'Play / Pause', 'Next track', 'Microphone', 'Screenshot',
+        'Brightness', 'Keyboard light', 'Workspaces', 'Notifications'];
+    const systemColors = ['#6cb6ff', '#ff8f8f', '#9ad17b', '#c99bff', '#f4c95d'];
+    const list = (title, items, selected) => ({
+        title,
+        items: items.map(([item]) => item),
+        icons: items.map(([, icon]) => icon),
+        colors: items.map(([, , color]) => color),
+        selected,
+    });
+    return [
+        view(skin,
+            { ...menuState, title: 'Opacity' },
+            { profile: 'Krita', colors, pointer: 64, submenu: list('Brush', brush, 1) }),
+        view(skin,
+            { ...menuState, title: 'Brightness' },
+            {
+                profile: 'Krita', colors, pointer: 288,
+                submenu: list('System', system.map((item, index) => [item, '', systemColors[index % 5]]), 6),
+            }),
+        view(skin,
+            { title: 'Opacity', titles: menu.map(() => ''), icons: menu.map(() => ''), menuTitles: menu, menuIcons, value: 70, unit: '%' },
+            {
+                profile: 'Krita', colors, color: '#f4c95d', icon: 'display-brightness-symbolic', parent: 'Brush', pointer: 140,
+                hints: { ccw: 'Less opaque', cw: 'More opaque', center: 'Full opacity' },
+            }),
+    ];
+}
+
+// A dial with its list beside it; returns the width it takes.
+function placeWithList(dialView) {
+    const submenu = openSubmenu(dialView);
+    if (!submenu)
+        return { width: DIAL_D, dialX: 0, list: null };
+    const size = submenuSize(submenu.items.length, dialView.appearance.show_hints);
+    // On a wide monitor, so the list goes to the side of its sector.
+    const far = 10000;
+    const dial = { x: far, y: far, width: DIAL_D, height: DIAL_D + HINT_H };
+    const list = submenuPlacement({ width: 2 * far, height: 2 * far }, dial, 1, size, submenu.preferRight);
+    const left = Math.min(far, list.x);
+    return {
+        width: Math.max(far + DIAL_D, list.x + list.width) - left,
+        dialX: far - left,
+        list: { ...list, x: list.x - left, y: list.y - far },
+    };
+}
+
+function renderSubmenuRow(path, dials) {
+    const pad = 40;
+    const gap = 50;
+    const top = 30;
+    const placed = dials.map(placeWithList);
+    const width = pad * 2 + placed.reduce((sum, item) => sum + item.width, 0) + gap * (dials.length - 1);
+    const height = top + DIAL_D + HINT_H + 24;
+    const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, width, height);
+    const cr = new Cairo.Context(surface);
+    background(cr, width, height);
+    let x = pad;
+    dials.forEach((dialView, index) => {
+        const { dialX, list } = placed[index];
+        drawDial(cr, dialView, x + dialX, top);
+        if (list) {
+            cr.save();
+            cr.translate(x + list.x, top + list.y);
+            paintSubmenu(cr, dialView, list.side, list.scale);
+            for (const icon of submenuLayout(dialView, list.scale).rows)
+                drawIcon(cr, icon.title, icon.configured, icon.x, icon.y, icon.size, icon.color);
+            cr.restore();
+        }
+        x += placed[index].width + gap;
+    });
+    surface.writeToPNG(path);
+    cr.$dispose();
+    print(`wrote ${path}`);
+}
+
 const skins = readJson(GLib.build_filenamev([ROOT, 'gnome', 'extension', 'skins.json']));
 GLib.mkdir_with_parents(OUTPUT, 0o755);
 renderRow(GLib.build_filenamev([OUTPUT, 'overlay-states.png']), scenes(resolveSkin(skins, 'glass')));
@@ -191,6 +288,8 @@ renderRow(
     GLib.build_filenamev([OUTPUT, 'overlay-skins.png']),
     ids.map(id => scenes(resolveSkin(skins, id))[0]),
     ids.map(id => skins[id].name || id));
+
+renderSubmenuRow(GLib.build_filenamev([OUTPUT, 'overlay-submenu.png']), submenuScenes(resolveSkin(skins, 'glass')));
 
 // Shapes a skin can take, on top of built-in looks.
 const shapes = {

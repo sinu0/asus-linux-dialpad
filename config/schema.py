@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from enum import Enum
 from pathlib import Path
 
@@ -148,6 +148,31 @@ class Segment:
     color: str | None = None
     # Overrides of the on-screen dial while this function is selected.
     overlay: dict = field(default_factory=dict)
+    # A group: choosing it opens these functions as a list beside the dial
+    # (one level, items never hold items). A group has no actions itself.
+    items: list[Segment] | None = None
+
+    @property
+    def is_group(self) -> bool:
+        return self.items is not None
+
+    def active_items(self) -> list[Segment]:
+        return [item for item in self.items or [] if item.enabled]
+
+
+def macro_lists(segment: Segment) -> tuple[list[MacroStep], list[MacroStep], list[MacroStep]]:
+    """The turning and tap macros of a function."""
+    return segment.macro_cw, segment.macro_ccw, segment.macro_center
+
+
+def all_functions(segments: list[Segment]):
+    """(group or None, function) for every function, the items of groups too."""
+    for segment in segments:
+        if segment.is_group:
+            for item in segment.items:
+                yield segment, item
+        else:
+            yield None, segment
 
 
 @dataclass
@@ -169,7 +194,8 @@ class Profile:
         return [segment for segment in self.segments if segment.enabled]
 
     def single_segment(self) -> Segment | None:
-        segments = self.active_segments()
+        # The dial can be bound to a function, not to a group.
+        segments = [segment for segment in self.active_segments() if not segment.is_group]
         for segment in segments:
             if segment.title == self.single_function:
                 return segment
@@ -200,15 +226,16 @@ def shell_commands(profiles: list[Profile]) -> list[tuple[str, str, str]]:
     shell command, so imported profiles can be checked before use."""
     found = []
     for profile in profiles:
-        for segment in profile.segments:
-            for steps in (segment.macro_cw, segment.macro_ccw, segment.macro_center):
+        for group, segment in all_functions(profile.segments):
+            title = f"{group.title} › {segment.title}" if group else segment.title
+            for steps in macro_lists(segment):
                 for step in steps:
                     if step.type is StepType.SHELL and step.script:
-                        found.append((profile.name, segment.title, step.script))
+                        found.append((profile.name, title, step.script))
                     elif step.type is StepType.COMMAND and step.program:
-                        found.append((profile.name, segment.title, " ".join([step.program, *(step.args or [])])))
+                        found.append((profile.name, title, " ".join([step.program, *(step.args or [])])))
             if segment.value_command:
-                found.append((profile.name, segment.title, segment.value_command))
+                found.append((profile.name, title, segment.value_command))
     return found
 
 
@@ -315,6 +342,8 @@ def _encoder(obj):
             result["color"] = obj.color
         if obj.overlay:
             result["overlay"] = dict(obj.overlay)
+        if obj.is_group:
+            result["items"] = [_encoder(item) for item in obj.items]
         return result
     if isinstance(obj, MacroStep):
         result: dict = {"type": obj.type.value}
@@ -387,6 +416,7 @@ def _decoder(d: dict, cls: type):
             overlay=overlay_rule(d.get("overlay")),
         )
     if cls is Segment:
+        items = d.get("items")
         return Segment(
             title=d["title"],
             icon_url=d.get("icon_url"),
@@ -399,6 +429,10 @@ def _decoder(d: dict, cls: type):
             enabled=bool(d.get("enabled", True)),
             color=d.get("color"),
             overlay=overlay_rule(d.get("overlay")),
+            # One level only: the items of an item are dropped.
+            items=[
+                replace(_decoder(item, Segment), items=None) for item in items if isinstance(item, dict)
+            ] if isinstance(items, list) else None,
         )
     if cls is MacroStep:
         values = _known(d, MacroStep)

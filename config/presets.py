@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+from config.labels import GROUP_ICON
 from config.schema import MacroStep, Profile, Segment, StepType
 
 VOLUME_QUERY = "pactl get-sink-volume @DEFAULT_SINK@ | grep -oP '\\d+%' | head -n 1 | tr -d '%'"
@@ -507,6 +508,11 @@ def run_script() -> Segment:
         "$HOME/.local/bin/turnpad-action", "Run ~/.local/bin/turnpad-action (change it to your script)"))
 
 
+def apps_group() -> Segment:
+    """Launchers in one group: more programs without smaller sectors."""
+    return Segment(title="Apps", items=[calculator(), terminal(), files(), screenshot(), lock_screen()])
+
+
 @dataclass(frozen=True)
 class FunctionPreset:
     title: str
@@ -542,6 +548,7 @@ FUNCTION_LIBRARY: tuple[FunctionPreset, ...] = (
     FunctionPreset("Screenshot", "Launch", "camera-photo-symbolic", "The Print key: the desktop's screenshot tool", screenshot),
     FunctionPreset("Lock screen", "Launch", "system-lock-screen-symbolic", "Lock the session", lock_screen),
     FunctionPreset("My script", "Launch", "application-x-executable-symbolic", "Runs a command or bash script of yours; edit its tap action", run_script),
+    FunctionPreset("Apps", "Launch", GROUP_ICON, "A group: calculator, terminal, files, screenshot and lock screen in one list", apps_group),
 )
 
 LIBRARY_CATEGORIES = ("System", "Navigation", "Media", "Editing", "Creative", "Launch")
