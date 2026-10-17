@@ -125,6 +125,10 @@ class PresetsTest(unittest.TestCase):
         segments = [preset.factory() for preset in FUNCTION_LIBRARY]
         for pack in APP_PACKS:
             segments.extend(pack.factory())
+        # A group has no actions; its functions have.
+        groups = [segment for segment in segments if segment.is_group]
+        self.assertTrue(all(group.items for group in groups))
+        segments = [item for segment in segments for item in (segment.items if segment.is_group else [segment])]
         for segment in segments:
             self.assertTrue(segment.macro_cw or segment.macro_center, segment.title)
             for step in segment.macro_cw + segment.macro_ccw:
@@ -196,6 +200,53 @@ class DialLookTest(unittest.TestCase):
         self.assertEqual(overlay_rule(rule), {"position": "pointer", "pointer_side": "left", "pointer_gap": 12})
         self.assertEqual(overlay_rule({"pointer_side": ["left"], "pointer_gap": True}), {})
         self.assertEqual(overlay_rule({"pointer_gap": -5}), {"pointer_gap": 0})
+
+
+
+class GroupTest(unittest.TestCase):
+    """A group: a menu sector that opens a list of more functions."""
+
+    def config(self):
+        group = Segment(title="Display", color="#f4c95d", overlay={"position": "top"}, items=[
+            volume_segment(),
+            Segment(title="Off", enabled=False),
+            Segment(title="Mute", macro_center=[MacroStep(type=StepType.SHELL, script="mute")]),
+        ])
+        return DialPadConfig(profiles=[
+            Profile(name="Default", segments=[group, Segment(title="Empty", items=[]), Segment(title="Zoom")]),
+            Profile(name="Player", app_id="mpv.desktop", mode="single", segments=[group, volume_segment()]),
+        ])
+
+    def test_group_reaches_the_driver_with_its_enabled_functions(self):
+        menu = shortcuts_from_config(self.config())["none"]
+        group = menu["Display"]
+        self.assertEqual(list(group["items"]), ["Volume", "Mute"])
+        self.assertEqual(group["icon"], "view-list-bullet-symbolic")
+        self.assertEqual((group["clockwise"], group["counterclockwise"], group["center"]), ([], [], []))
+        self.assertEqual(group["overlay"], {"position": "top"})
+        self.assertEqual(group["items"]["Volume"]["value"], "echo 42")
+        self.assertTrue(group["items"]["Mute"]["center"])
+        # A group without functions to open is left out.
+        self.assertNotIn("Empty", menu)
+        self.assertIn("Zoom", menu)
+
+    def test_single_mode_binds_a_function_not_a_group(self):
+        single = shortcuts_from_config(self.config())["mpv.desktop"]["_meta"]["single"]
+        self.assertEqual(single["title"], "Volume")
+
+    def test_saved_and_read_back_one_level_deep(self):
+        data = _encoder(self.config())
+        group = data["profiles"][0]["segments"][0]
+        self.assertEqual([item["title"] for item in group["items"]], ["Volume", "Off", "Mute"])
+        self.assertNotIn("items", data["profiles"][0]["segments"][2])
+        group["items"][0]["items"] = [{"title": "Too deep"}]
+        loaded = _decoder(data, DialPadConfig)
+        display = loaded.profiles[0].segments[0]
+        self.assertTrue(display.is_group)
+        self.assertIsNone(display.items[0].items)
+        self.assertEqual([item.title for item in display.active_items()], ["Volume", "Mute"])
+        self.assertTrue(loaded.profiles[0].segments[1].is_group)
+        self.assertFalse(loaded.profiles[0].segments[2].is_group)
 
 
 if __name__ == "__main__":

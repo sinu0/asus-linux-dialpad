@@ -16,6 +16,10 @@ The dial in its main states: the radial menu, a level gauge, an endless function
 
 ![Dial shapes](./preview/overlay-shapes.png)
 
+**Groups.** A group opens a straight list of more functions beside the dial, on the side of its sector: turn to move the highlight, tap the centre to choose, hold it to go back. A long list scrolls and keeps the highlight in the middle; a function chosen from a list returns to it when the centre is held.
+
+![Group lists](./preview/overlay-submenu.png)
+
 **Background pictures.** The example skin in [`examples/skins/`](examples/skins/): *Gertie the Dinosaur* by Winsor McCay (1914, public domain, from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Gertie_the_Dinosaur_with_her_mouth_open.jpg)) behind a see-through centre and a spiky drawn outline.
 
 ![Gertie the Dinosaur skin](./preview/overlay-example.png)
@@ -32,5 +36,5 @@ The dial in its main states: the radial menu, a level gauge, an endless function
 | Guided and manual calibration | Activation, DialPad light and rotation |
 | ![Skin gallery](./preview/settings-skins.png) | ![Skin editor](./preview/settings-skin-editor.png) |
 | Skins page: gallery, light and dark choice, on-screen dial | Skin editor with a live preview |
-| ![Drawing an outline](./preview/settings-skin-shape.png) | |
-| Drawing your own outline | |
+| ![Drawing an outline](./preview/settings-skin-shape.png) | ![Group editor](./preview/settings-group-editor.png) |
+| Drawing your own outline | A group: its list as on screen and its functions |

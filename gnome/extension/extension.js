@@ -3,6 +3,7 @@ import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 import Clutter from 'gi://Clutter';
+import Cairo from 'cairo';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
@@ -12,11 +13,17 @@ import {
     effectiveLook,
     iconLayout,
     iconNameFor,
+    openSubmenu,
     overlayPlacement,
+    paintSubmenu,
     parseColor,
     pillContent,
     pillPlacement,
     resolveSkin,
+    submenuKey,
+    submenuLayout,
+    submenuPlacement,
+    submenuSize,
 } from './dial.js';
 import { DialLayers } from './layers.js';
 
@@ -33,6 +40,10 @@ const FADE_OUT_MS = 260;
 const FADE_AFTER_MS = 1000;
 const FADE_SLOW_MS = 600;
 const PILL_ICON_SIZE = 18;
+// A group's list slides out from the dial.
+const LIST_OPEN_MS = 180;
+const LIST_CLOSE_MS = 120;
+const LIST_SLIDE = 24;
 
 const DEFAULT_APPEARANCE = {
     scale: 1.0,
@@ -77,6 +88,13 @@ export default class DialPadExtension extends Extension {
         this._pill = null;
         this._pillKey = '';
         this._lookKey = '';
+        this._list = null;
+        this._listKey = '';
+        this._listIconKey = '';
+        this._listSide = 'right';
+        this._listScale = 1;
+        this._listOpen = false;
+        this._dialPlacement = null;
         this._appearance = { ...DEFAULT_APPEARANCE };
         this._skin = resolveSkin(null, DEFAULT_SKIN);
         this._skinId = '';
@@ -103,6 +121,9 @@ export default class DialPadExtension extends Extension {
             hold_returns: true,
             pointer: -1,
             look: {},
+            icon: '',
+            parent: '',
+            submenu: null,
         };
 
         try {
@@ -193,6 +214,8 @@ export default class DialPadExtension extends Extension {
             this._applySkin();
             this._updateIcons();
             this._layers?.invalidate();
+            this._listKey = '';
+            this._updateSubmenu();
         });
     }
 
@@ -271,6 +294,8 @@ export default class DialPadExtension extends Extension {
             this._applyGeometry();
             this._iconKey = '';
             this._updateIcons();
+            this._listKey = '';
+            this._updateSubmenu();
             return GLib.SOURCE_REMOVE;
         });
     }
@@ -300,6 +325,24 @@ export default class DialPadExtension extends Extension {
         this._overlay.add_child(this._iconLayer);
         this._centerIcon = new St.Icon({ style_class: 'dialpad-center-icon', visible: false });
         this._overlay.add_child(this._centerIcon);
+
+        // A group's list beside the dial. A child of the dial, so it shows,
+        // fades and hides with it; it may lie outside the dial's box.
+        this._list = new St.Widget({ visible: false, reactive: false, opacity: 0 });
+        this._listArea = new St.DrawingArea();
+        this._listArea.connect('repaint', () => {
+            const cr = this._listArea.get_context();
+            cr.save();
+            cr.setOperator(Cairo.Operator.CLEAR);
+            cr.paint();
+            cr.restore();
+            paintSubmenu(cr, this._view(), this._listSide, this._listScale);
+            cr.$dispose();
+        });
+        this._listIcons = new St.Widget({ reactive: false });
+        this._list.add_child(this._listArea);
+        this._list.add_child(this._listIcons);
+        this._overlay.add_child(this._list);
         Main.layoutManager.uiGroup.add_child(this._overlay);
 
         // A small label shown instead of the dial (visibility "pill").
@@ -344,6 +387,12 @@ export default class DialPadExtension extends Extension {
         this._iconLayer = null;
         this._centerIcon = null;
         this._iconKey = '';
+        this._list = null;
+        this._listArea = null;
+        this._listIcons = null;
+        this._listKey = '';
+        this._listIconKey = '';
+        this._listOpen = false;
         this._shown = false;
     }
 
@@ -396,8 +445,11 @@ export default class DialPadExtension extends Extension {
         this._iconLayer.set_size(width, width);
         this._overlay.set_position(monitor.x + x, monitor.y + y);
         this._dialOrigin = [0, 0];
+        this._dialPlacement = { x, y, width, height };
         this._updateIcons();
         this._updatePill();
+        this._listKey = '';
+        this._updateSubmenu();
     }
 
     _look() {
@@ -439,6 +491,89 @@ export default class DialPadExtension extends Extension {
         const [, height] = pill.get_preferred_height(width);
         const { x, y } = pillPlacement(monitor, scale, this._look(), width, height, pointer);
         pill.set_position(monitor.x + x, monitor.y + y);
+    }
+
+    // --- group list -----------------------------------------------------
+
+    // Opens, moves, repaints or closes the list of the open group.
+    _updateSubmenu() {
+        const list = this._list;
+        const monitor = this._dialMonitor();
+        if (!list || !monitor || !this._dialPlacement)
+            return;
+        const view = this._view();
+        const submenu = openSubmenu(view);
+        if (!submenu) {
+            this._closeSubmenu();
+            return;
+        }
+        const scale = this._appearance.scale;
+        const size = submenuSize(submenu.items.length, this._appearance.show_hints);
+        const dial = this._dialPlacement;
+        const placement = submenuPlacement(monitor, dial, scale, size, submenu.preferRight);
+        const { x, y, width, height, side } = placement;
+        this._listSide = side;
+        this._listScale = placement.scale;
+        // Placed relative to the dial, whose child it is.
+        list.set_position(x - dial.x, y - dial.y);
+        list.set_size(width, height);
+        this._listArea.set_size(width, height);
+        this._listIcons.set_size(width, height);
+        const key = JSON.stringify([submenuKey(view, side), placement.scale, width, height]);
+        if (key !== this._listKey) {
+            this._listKey = key;
+            this._listArea.queue_repaint();
+        }
+        this._updateListIcons(view);
+        if (!this._listOpen) {
+            this._listOpen = true;
+            list.remove_all_transitions();
+            list.visible = true;
+            list.opacity = 0;
+            list.translation_x = (side === 'right' ? -1 : 1) * Math.round(LIST_SLIDE * scale);
+            list.ease({
+                opacity: 255,
+                translation_x: 0,
+                duration: LIST_OPEN_MS,
+                mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+            });
+        }
+    }
+
+    _closeSubmenu() {
+        const list = this._list;
+        if (!list || !this._listOpen)
+            return;
+        this._listOpen = false;
+        this._listKey = '';
+        list.remove_all_transitions();
+        list.ease({
+            opacity: 0,
+            translation_x: (this._listSide === 'right' ? -1 : 1) * Math.round(LIST_SLIDE * this._appearance.scale / 2),
+            duration: LIST_CLOSE_MS,
+            mode: Clutter.AnimationMode.EASE_IN_QUAD,
+            onComplete: () => {
+                if (!this._listOpen)
+                    list.visible = false;
+            },
+        });
+    }
+
+    _updateListIcons(view) {
+        const layout = submenuLayout(view, this._listScale);
+        const rows = layout ? layout.rows : [];
+        const key = JSON.stringify(rows.map(({ title, configured, x, y, size }) => [title, configured, x, y, size]));
+        if (key !== this._listIconKey) {
+            this._listIconKey = key;
+            this._listIcons.destroy_all_children();
+            for (const row of rows) {
+                const icon = new St.Icon({ gicon: this._gicon(row.title, row.configured), icon_size: row.size });
+                icon.set_position(row.x, row.y);
+                this._listIcons.add_child(icon);
+            }
+        }
+        const icons = this._listIcons.get_children();
+        rows.forEach((row, index) => icons[index]?.set_style(this._cssColor(row.color)));
     }
 
     // --- D-Bus ----------------------------------------------------------
@@ -508,6 +643,7 @@ export default class DialPadExtension extends Extension {
         }
         this._layers?.update();
         this._updatePill();
+        this._updateSubmenu();
     }
 
     _onOverlayState(_conn, _sender, _path, _iface, _signal, params) {
@@ -535,6 +671,7 @@ export default class DialPadExtension extends Extension {
         this._updateVisibility(wasEnabled, wasTouching);
         this._layers?.update();
         this._updatePill();
+        this._updateSubmenu();
     }
 
     _onFocusWindow() {

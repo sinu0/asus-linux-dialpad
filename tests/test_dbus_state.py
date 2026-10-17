@@ -128,6 +128,20 @@ class OverlayStateTest(unittest.TestCase):
         self.service.emit_overlay_state({"details": {"hints": {"cw": "Zoom in"}}})
         self.assertEqual(json.loads(self.service._details_json())["hints"], {"cw": "Zoom in"})
 
+    def test_submenu_details_open_and_close(self):
+        import json
+
+        submenu = {"title": "Brush", "index": 1, "items": ["Size", "Opacity"], "icons": ["", ""],
+                   "colors": ["#ffad66", "#f4c95d"], "selected": 1}
+        self.service.emit_overlay_state({"details": {"submenu": submenu, "parent": ""},
+                                         "titles": ["Zoom", "Brush"], "title": "Opacity"})
+        self.assertEqual(json.loads(self.service._details_json())["submenu"], submenu)
+        # Choosing a function closes the list; its group stays as the parent.
+        self.service.emit_overlay_state({"details": {"submenu": None, "parent": "Brush"}})
+        details = json.loads(self.service._details_json())
+        self.assertIsNone(details["submenu"])
+        self.assertEqual(details["parent"], "Brush")
+
 
 if __name__ == "__main__":
     unittest.main()

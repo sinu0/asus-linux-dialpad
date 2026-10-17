@@ -118,4 +118,6 @@ The GNOME extension therefore paints in three layers that the compositor puts to
 | Content: menu or gauge, centre, hints | `contentKey()` changes (value, function, menu) | about 0.6 ms; the centre disc is a cached image |
 | Finger dot | its colour changes | moving it paints nothing |
 
+A group's list is one more actor beside the dial, painted by `paintSubmenu()` only when the list, its highlight or the skin changes; it is a child of the dial, so it fades and hides with it.
+
 The layer-shell frontend has the same three layers (`DialLayers` in `overlay/frontend.py`). The overlay actor (or layer surface) is only as large as the dial, so its fade does not composite the whole screen. The driver sends the finger angle in `POINTER_STEP_DEGREES` steps (at most once per touch frame). `paintDial()` remains the one-call version for the README pictures and produces the same pixels.

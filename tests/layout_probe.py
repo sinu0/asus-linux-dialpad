@@ -97,6 +97,18 @@ def dialogs(app, profile):
         combo.set_selected(names.index(labels[0]))
         yield f"action: {labels[0]}"
     demo.close_dialogs(app)
+    group = demo.apps_group()
+    profile.segments.append(group)
+    app._show_function_editor(profile, group)
+    yield "group editor"
+    demo.close_dialogs(app)
+    app._show_function_library(profile, group)
+    yield "function library of a group"
+    demo.close_dialogs(app)
+    app._show_function_editor(profile, group.items[0], group)
+    yield "function in a group"
+    profile.segments.remove(group)
+    demo.close_dialogs(app)
     app._show_skin_editor(None, {"name": "Probe", "base": "proart"})
     yield "skin editor"
     demo.close_dialogs(app)

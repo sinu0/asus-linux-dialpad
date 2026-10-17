@@ -26,6 +26,23 @@ const GAUGE_START = 0.75 * Math.PI;
 const GAUGE_SWEEP = 1.5 * Math.PI;
 const FONT = 'Adwaita Sans';
 
+// A group's list beside the dial: rows of functions, a header with the
+// group's name and, with hints on, a footer saying how to use it. The
+// panel sits in a margin for its shadow; that margin may overlap the
+// dial's own empty margin.
+const LIST_W = 232;
+const LIST_ROW_H = 40;
+const LIST_HEADER_H = 34;
+const LIST_FOOTER_H = 22;
+const LIST_PAD = 8;
+const LIST_MARGIN = 12;
+const LIST_RADIUS = 18;
+const LIST_ICON_SIZE = 18;
+// More functions scroll; the highlight stays near the middle.
+export const LIST_ROWS_MAX = 7;
+// The smallest a list gets to fit beside a large dial on a small screen.
+const LIST_SCALE_MIN = 0.6;
+
 export const DEFAULT_SKIN = 'glass';
 
 // Outline of the disc. 'custom' is drawn in the settings app: points
@@ -212,6 +229,49 @@ export function overlayPlacement(monitor, scale, position, custom = null, pointe
     };
 }
 
+// Size of a group's list with count functions, shadow margin included
+// (unscaled).
+export function submenuSize(count, hints = true) {
+    const rows = Math.max(1, Math.min(LIST_ROWS_MAX, count));
+    return {
+        width: LIST_W + 2 * LIST_MARGIN,
+        height: LIST_HEADER_H + rows * LIST_ROW_H + 2 * LIST_PAD + (hints ? LIST_FOOTER_H : 0) + 2 * LIST_MARGIN,
+    };
+}
+
+// Where a group's list goes on a monitor: beside the dial (its
+// overlayPlacement()), on the side of the group's sector when that side
+// has room, else on the other one. Where neither side has room for it at
+// the dial's scale, the list gets smaller (scale in the result) rather
+// than cover the dial; it never passes an edge. size comes from
+// submenuSize().
+export function submenuPlacement(monitor, dial, scale, size, preferRight = true) {
+    // The shadow margin may overlap the dial's own empty margin.
+    const reach = size.width - LIST_MARGIN;
+    const room = {
+        right: (monitor.width - dial.x - dial.width) / reach,
+        left: dial.x / reach,
+    };
+    const preferred = preferRight ? 'right' : 'left';
+    const other = preferRight ? 'left' : 'right';
+    let side = preferred;
+    if (room[preferred] < scale)
+        side = room[other] >= scale || room[other] > room[preferred] ? other : preferred;
+    const fitted = Math.max(LIST_SCALE_MIN, Math.min(scale, room[side], monitor.height / size.height));
+    const width = Math.round(size.width * fitted);
+    const height = Math.round(size.height * fitted);
+    const inset = Math.round(LIST_MARGIN * fitted);
+    const clamp = (value, maximum) => Math.max(0, Math.min(maximum, Math.round(value)));
+    return {
+        x: clamp(side === 'right' ? dial.x + dial.width - inset : dial.x - width + inset, monitor.width - width),
+        y: clamp(dial.y + dial.width / 2 - height / 2, monitor.height - height),
+        width,
+        height,
+        side,
+        scale: fitted,
+    };
+}
+
 const LOOK_POSITIONS = ['center', 'lower', 'bottom', 'top', 'custom', 'pointer'];
 const LOOK_VISIBILITIES = ['full', 'fade', 'pill'];
 
@@ -246,9 +306,19 @@ export function pillContent(view) {
     const { state, details } = view;
     const { titles, icons } = segmentState(state);
     const configured = title => icons[titles.indexOf(title)] || '';
+    const submenu = openSubmenu(view);
+    if (submenu) {
+        return {
+            title: state.title,
+            value: `${submenu.selected + 1}/${submenu.items.length}`,
+            configured: submenu.icons[submenu.selected],
+            color: submenu.colors[submenu.selected],
+        };
+    }
     if (isSelectedMode(state)) {
         const value = !state.valueShowOnlyProgress && state.unit ? `${state.value}${state.unit}` : '';
-        return { title: state.title, value, configured: configured(state.title), color: functionColor(view) };
+        const icon = typeof details.icon === 'string' ? details.icon : configured(state.title);
+        return { title: state.title, value, configured: icon, color: functionColor(view) };
     }
     if (state.title && state.title !== 'Menu')
         return { title: state.title, value: '', configured: configured(state.title), color: activeColor(view) };
@@ -395,11 +465,54 @@ function segmentColor(view, index) {
     return parseColor(view.details.colors?.[index], view.accent);
 }
 
+// The group whose list is open beside the menu, from details.submenu, or
+// null: { title, index (its sector), items, icons, colors (parsed),
+// selected, first (top visible row), rows (visible), preferRight }.
+export function openSubmenu(view) {
+    const { state, details } = view;
+    const submenu = details.submenu;
+    if (!submenu || typeof submenu !== 'object' || !Array.isArray(submenu.items) || !submenu.items.length)
+        return null;
+    if (!state.enabled || isSelectedMode(state) || !state.titles.some(label => Boolean(label)))
+        return null;
+    const items = submenu.items.map(item => String(item ?? ''));
+    const count = items.length;
+    const selected = Math.max(0, Math.min(count - 1, Math.round(Number(submenu.selected) || 0)));
+    const rows = Math.min(LIST_ROWS_MAX, count);
+    const first = Math.max(0, Math.min(count - rows, selected - Math.floor(rows / 2)));
+    const { titles } = segmentState(state);
+    const index = titles.indexOf(String(submenu.title ?? ''));
+    const sectors = Math.max(titles.length, 4);
+    return {
+        title: String(submenu.title ?? ''),
+        index,
+        items,
+        icons: items.map((_, position) => String(submenu.icons?.[position] ?? '')),
+        colors: items.map((_, position) => parseColor(submenu.colors?.[position], view.accent)),
+        selected,
+        first,
+        rows,
+        // A sector on the right half of the dial opens its list to the right.
+        preferRight: index < 0 || (index + 0.5) / sectors <= 0.5,
+    };
+}
+
+// The highlighted sector: the group of an open list, else the title.
+function activeTitle(view) {
+    const submenu = openSubmenu(view);
+    if (submenu)
+        return submenu.title;
+    return view.state.title === 'Menu' ? '' : view.state.title;
+}
+
 function functionColor(view) {
     return parseColor(view.details.color, view.accent);
 }
 
 function activeColor(view) {
+    const submenu = openSubmenu(view);
+    if (submenu)
+        return submenu.colors[submenu.selected];
     const { titles } = segmentState(view.state);
     const index = titles.indexOf(view.state.title);
     return index >= 0 ? segmentColor(view, index) : view.accent;
@@ -411,7 +524,8 @@ function activeColor(view) {
 export function iconLayout(view) {
     const { state, appearance, skin } = view;
     const { titles, icons, count } = segmentState(state);
-    const activeTitle = state.title === 'Menu' ? '' : state.title;
+    const active = activeTitle(view);
+    const submenu = openSubmenu(view);
     const scale = appearance.scale;
     const selected = isSelectedMode(state);
     const slice = (2 * Math.PI) / count;
@@ -421,14 +535,14 @@ export function iconLayout(view) {
         if (!titles[index])
             continue;
         const angle = (index + 0.5) * slice - Math.PI / 2;
-        const active = titles[index] === activeTitle;
+        const highlighted = titles[index] === active;
         menu.push({
             title: titles[index],
             configured: icons[index] || '',
             x: Math.round((DIAL_R + Math.cos(angle) * ICON_R) * scale - size / 2),
             y: Math.round((DIAL_R + Math.sin(angle) * ICON_R) * scale - size / 2),
             size,
-            color: active ? skin.palette.iconOnColor : skin.palette.icon,
+            color: highlighted ? skin.palette.iconOnColor : skin.palette.icon,
         });
     }
 
@@ -438,9 +552,15 @@ export function iconLayout(view) {
         const index = titles.indexOf(state.title);
         const centerSize = Math.round(CENTER_ICON_SIZE * scale);
         const offset = selected ? 34 : 26;
+        let configured = index >= 0 ? icons[index] || '' : '';
+        if (submenu)
+            configured = submenu.icons[submenu.selected];
+        // A function of a group is not in the menu; the driver sends its icon.
+        else if (selected && typeof view.details.icon === 'string')
+            configured = view.details.icon;
         center = {
             title: state.title,
-            configured: index >= 0 ? icons[index] || '' : '',
+            configured,
             x: Math.round(DIAL_R * scale - centerSize / 2),
             y: Math.round((DIAL_R - offset) * scale - centerSize / 2),
             size: centerSize,
@@ -499,6 +619,7 @@ export function contentKey(view) {
         state.enabled, state.title, state.titles, state.menuTitles, state.value,
         state.valueAngleStart, state.unit, state.centerPressed, state.valueShowOnlyProgress,
         details.profile, details.mode, details.colors, details.color, details.hints,
+        details.parent, details.submenu,
     ]);
 }
 
@@ -523,6 +644,153 @@ export function paintPointer(cr, view, color) {
     cr.save();
     cr.scale(view.appearance.scale, view.appearance.scale);
     drawPointer(cr, view, POINTER_GLOW_R, POINTER_GLOW_R, color);
+    cr.restore();
+}
+
+// --- group list -----------------------------------------------------------
+
+const LIST_FOOTER = 'Turn: move  ·  Tap centre: choose  ·  Hold: back';
+
+// Top left corner of a row of the list and its size, unscaled.
+function listRow(row) {
+    return {
+        x: LIST_MARGIN + LIST_PAD,
+        y: LIST_MARGIN + LIST_HEADER_H + row * LIST_ROW_H,
+        width: LIST_W - 2 * LIST_PAD,
+        height: LIST_ROW_H - 4,
+    };
+}
+
+// Rows hidden above or below fade the row at that edge.
+function listRowFaded(submenu, row) {
+    return (row === 0 && submenu.first > 0)
+        || (row === submenu.rows - 1 && submenu.first + submenu.rows < submenu.items.length);
+}
+
+// Where the extension places the list's icon actors, relative to the
+// list's top left corner and already scaled (scale: from
+// submenuPlacement()); null without an open list.
+export function submenuLayout(view, scale = view.appearance.scale) {
+    const submenu = openSubmenu(view);
+    if (!submenu)
+        return null;
+    const palette = view.skin.palette;
+    const size = Math.round(LIST_ICON_SIZE * scale);
+    const rows = [];
+    for (let row = 0; row < submenu.rows; row++) {
+        const position = submenu.first + row;
+        const box = listRow(row);
+        const [r, g, b, a] = position === submenu.selected ? palette.iconOnColor : palette.icon;
+        rows.push({
+            title: submenu.items[position],
+            configured: submenu.icons[position],
+            x: Math.round((box.x + 22) * scale - size / 2),
+            y: Math.round((box.y + box.height / 2) * scale - size / 2),
+            size,
+            color: [r, g, b, a * (listRowFaded(submenu, row) ? 0.4 : 1)],
+        });
+    }
+    return { rows };
+}
+
+// Everything paintSubmenu() depends on besides the skin and the scale.
+export function submenuKey(view, side) {
+    const submenu = openSubmenu(view);
+    return JSON.stringify(submenu
+        ? [submenu, side, view.appearance.show_hints, view.details.colors]
+        : null);
+}
+
+// The open group's list in a submenuSize() box; side and scale come from
+// submenuPlacement(), the colour edge goes on the side facing the dial.
+export function paintSubmenu(cr, view, side = 'right', scale = view.appearance.scale) {
+    const submenu = openSubmenu(view);
+    if (!submenu)
+        return;
+    cr.save();
+    cr.scale(scale, scale);
+    drawSubmenu(cr, view, submenu, side);
+    cr.restore();
+}
+
+function drawSubmenu(cr, view, submenu, side) {
+    const palette = view.skin.palette;
+    const hints = view.appearance.show_hints !== false;
+    const { width, height } = submenuSize(submenu.items.length, hints);
+    const left = LIST_MARGIN;
+    const top = LIST_MARGIN;
+    const panelW = width - 2 * LIST_MARGIN;
+    const panelH = height - 2 * LIST_MARGIN;
+    cr.save();
+
+    // Soft shadow, slightly lower like the dial's.
+    for (let step = 5; step >= 0; step--) {
+        const grow = step * 1.8 - 3;
+        roundedRect(cr, left - grow, top + 3 - grow, panelW + 2 * grow, panelH + 2 * grow, LIST_RADIUS + grow);
+        cr.setSourceRGBA(0, 0, 0, palette.shadow * 0.12);
+        cr.fill();
+    }
+    const surface = new Cairo.LinearGradient(0, top, 0, top + panelH);
+    surface.addColorStopRGBA(0, ...palette.surfaceTop);
+    surface.addColorStopRGBA(1, ...palette.surfaceBottom);
+    roundedRect(cr, left, top, panelW, panelH, LIST_RADIUS);
+    cr.setSource(surface);
+    cr.fill();
+    roundedRect(cr, left + 0.5, top + 0.5, panelW - 1, panelH - 1, LIST_RADIUS - 0.5);
+    cr.setLineWidth(1);
+    cr.setSourceRGBA(...palette.rim);
+    cr.stroke();
+
+    // The group's colour on the edge that faces the dial.
+    const groupColor = submenu.index >= 0 ? segmentColor(view, submenu.index) : view.accent;
+    const edge = side === 'left' ? left + panelW - 2.5 : left + 2.5;
+    cr.newPath();
+    cr.setLineCap(Cairo.LineCap.ROUND);
+    cr.setLineWidth(3);
+    cr.setSourceRGBA(...groupColor);
+    cr.moveTo(edge, top + LIST_RADIUS + 4);
+    cr.lineTo(edge, top + panelH - LIST_RADIUS - 4);
+    cr.stroke();
+
+    const headerY = top + LIST_HEADER_H / 2 + 1;
+    drawAlignedText(cr, truncate(submenu.title.toUpperCase(), 22), left + 18, headerY, 9.5, palette.muted, 'left', true);
+    if (submenu.items.length > submenu.rows) {
+        drawAlignedText(cr, `${submenu.selected + 1} / ${submenu.items.length}`,
+            left + panelW - 18, headerY, 9.5, palette.muted, 'right');
+    }
+
+    for (let row = 0; row < submenu.rows; row++) {
+        const position = submenu.first + row;
+        const box = listRow(row);
+        const color = submenu.colors[position];
+        const selected = position === submenu.selected;
+        const iconX = box.x + 22;
+        const middle = box.y + box.height / 2;
+        cr.pushGroup();
+        if (selected) {
+            roundedRect(cr, box.x, box.y, box.width, box.height, 12);
+            cr.setSourceRGBA(...color);
+            cr.fill();
+        } else {
+            cr.newPath();
+            cr.arc(iconX, middle, 14, 0, 2 * Math.PI);
+            cr.setSourceRGBA(...palette.bubble);
+            cr.fill();
+            cr.arc(iconX, middle, 13.25, Math.PI - 0.6, Math.PI + 0.6);
+            cr.setLineWidth(1.5);
+            cr.setSourceRGBA(color[0], color[1], color[2], 0.75);
+            cr.stroke();
+        }
+        drawAlignedText(cr, truncate(submenu.items[position], 20), box.x + 44, middle, 13,
+            selected ? palette.iconOnColor : palette.text, 'left', selected);
+        cr.popGroupToSource();
+        cr.paintWithAlpha(listRowFaded(submenu, row) ? 0.4 : 1);
+    }
+
+    if (hints) {
+        const footerY = top + LIST_HEADER_H + submenu.rows * LIST_ROW_H + LIST_FOOTER_H / 2;
+        drawCenteredText(cr, LIST_FOOTER, left + panelW / 2, footerY, 8.5, palette.muted, false);
+    }
     cr.restore();
 }
 
@@ -681,13 +949,13 @@ function drawSurface(cr, view, cx, cy) {
 function menuSlices(view) {
     const { titles, count } = segmentState(view.state);
     const slice = (2 * Math.PI) / count;
-    const activeTitle = view.state.title === 'Menu' ? '' : view.state.title;
+    const active = activeTitle(view);
     return Array.from({ length: count }, (_, index) => {
         const label = titles[index] || '';
         return {
             index,
             label,
-            active: Boolean(label) && label === activeTitle,
+            active: Boolean(label) && label === active,
             start: index * slice - Math.PI / 2,
             end: (index + 1) * slice - Math.PI / 2,
             mid: (index + 0.5) * slice - Math.PI / 2,
@@ -920,7 +1188,8 @@ function drawCenter(cr, view, cx, cy, cache) {
             drawCenteredText(cr, truncate(profile, 16), cx, cy + 26, 8.5, palette.muted, false);
     } else if (title && title !== 'Menu') {
         drawCenteredText(cr, truncate(title, 14), cx, cy + 10, title.length > 10 ? 13 : 16, palette.text, true);
-        drawCenteredText(cr, 'Release to select', cx, cy + 32, 8.5, palette.muted, false);
+        const action = openSubmenu(view) ? 'Tap to choose' : 'Release to select';
+        drawCenteredText(cr, action, cx, cy + 32, 8.5, palette.muted, false);
     } else {
         drawCenteredText(cr, truncate(profile || 'DIAL', 14), cx, cy - 8, profile.length > 10 ? 11 : 13, palette.text, true);
         drawCenteredText(cr, 'Choose a function', cx, cy + 14, 9, palette.muted, false);
@@ -936,12 +1205,14 @@ function drawHints(cr, view, cx, cy) {
     const multi = view.details.mode !== 'single';
     const ccw = truncate(hints.ccw, 20);
     const cw = truncate(hints.cw, 20);
+    // A function of a group goes back to the group's list.
+    const back = view.details.parent ? 'back' : 'menu';
     let center = '';
     if (hints.center) {
         const action = truncate(hints.center, 26);
-        center = multi ? `Tap: ${action}  ·  Hold: menu` : `Tap: ${action}`;
+        center = multi ? `Tap: ${action}  ·  Hold: ${back}` : `Tap: ${action}`;
     } else if (multi) {
-        center = 'Tap centre: menu';
+        center = `Tap centre: ${back}`;
     }
     if (!ccw && !cw && !center)
         return;
@@ -1022,10 +1293,10 @@ function drawCenteredText(cr, text, x, y, size, color, bold) {
     cr.restore();
 }
 
-function drawAlignedText(cr, text, x, y, size, color, align) {
+function drawAlignedText(cr, text, x, y, size, color, align, bold = false) {
     cr.save();
     cr.setSourceRGBA(...color);
-    setFont(cr, size, false);
+    setFont(cr, size, bold);
     const extents = cr.textExtents(text);
     const left = align === 'right' ? x - extents.width - extents.xBearing : x - extents.xBearing;
     cr.moveTo(left, y + extents.height / 2);

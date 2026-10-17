@@ -27,7 +27,7 @@ gi.require_version("Graphene", "1.0")
 app_main = importlib.import_module("config_app.main")
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gtk  # noqa: E402
 
-from config.presets import pack_for_app, profile_for_pack  # noqa: E402
+from config.presets import apps_group, pack_for_app, profile_for_pack  # noqa: E402
 from config.schema import _default_config  # noqa: E402
 from config.skins import builtin_skins  # noqa: E402
 
@@ -157,6 +157,18 @@ def steps(app):
     app._show_function_editor(darktable, zoom)
     yield
     yield from capture(window, "settings-function-editor")
+
+    # A group on the dial; added only now so the pictures before stay as
+    # they were.
+    yield from page("actions")
+    app._select_profile(default)
+    group = apps_group()
+    default.segments.insert(4, group)
+    app._changed()
+    yield
+    app._show_function_editor(default, group)
+    yield
+    yield from capture(window, "settings-group-editor")
 
     yield from page("calibration")
     yield

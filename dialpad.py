@@ -236,6 +236,7 @@ def get_dbus_status():
         "menu_active": bool(
             multi_app_mode and not globals().get("center_activated", False)
         ),
+        "submenu": submenu or "",
         "profile": str(profile_meta().get("name") or ""),
         "mode": "multi" if multi_app_mode else "single",
         "touchpad_max_x": int(globals().get("max_x") or 0),
@@ -428,8 +429,15 @@ gui_config = None
 legacy_app_shortcuts = app_shortcuts
 angle_hysteresis = DEFAULT_HYSTERESIS
 center_hold_time = 0.5
-# Function last used per application, restored like the ASUS Dial does.
+# Function last used per application, restored like the ASUS Dial does:
+# (group, function), group None for a function of the radial menu itself.
 last_function_by_app = {}
+# A group's list beside the dial: the group while its list is open or one of
+# its functions is selected, and the highlighted function of the list.
+submenu = None
+submenu_index = 0
+# Turning per step of the highlight in a group's list.
+SUBMENU_STEP_DEGREES = 30
 
 def load_gui_shortcuts():
     global app_shortcuts, gui_config
@@ -1697,11 +1705,13 @@ def execute_command(command):
     launch.run_shell(command)
 
 def reset_center():
-    global center_activated, title, treshold
+    global center_activated, title, treshold, submenu, submenu_index
 
     center_activated = False
     title = None
     treshold = None
+    submenu = None
+    submenu_index = 0
 
 def show_pointer_enabled():
     overlay = getattr(gui_config, "overlay", None)
@@ -1723,11 +1733,28 @@ def profile_float(key, default=1.0):
     except (TypeError, ValueError):
         return default
 
+def group_settings(group_title=None):
+    """The menu entry of a group, the open one by default; {} if it is none."""
+    group_title = group_title or submenu
+    group = app_specific_shortcuts.get(group_title) if multi_app_mode and group_title else None
+    return group if isinstance(group, dict) and isinstance(group.get("items"), dict) else {}
+
+def is_group(function_title):
+    return bool(function_title) and bool(group_settings(function_title))
+
+def submenu_titles():
+    return list(group_settings().get("items", {})) if submenu else []
+
+def function_entry(function_title):
+    """A function's shortcuts: from the open group's list, else from the menu."""
+    entries = group_settings().get("items") if submenu else app_specific_shortcuts
+    entry = entries.get(function_title) if isinstance(entries, dict) and function_title else None
+    return entry if isinstance(entry, dict) else {}
+
 def function_settings(function_title):
     """Return the segment dictionary that defines a function's metadata."""
     if multi_app_mode:
-        segment = app_specific_shortcuts.get(function_title) if function_title else None
-        return segment if isinstance(segment, dict) else {}
+        return function_entry(function_title)
     return single_function_settings()
 
 def menu_colors():
@@ -1746,6 +1773,8 @@ def overlay_look(function_title=None):
     selected function's; the extension applies them over config defaults."""
     look = {}
     sources = [profile_meta()]
+    if submenu:
+        sources.append(group_settings())
     if function_title is not None:
         sources.append(function_settings(function_title))
     for source in sources:
@@ -1764,6 +1793,11 @@ def send_function_details(function_title):
         hold_returns=bool(multi_app_mode),
         pointer=-1,
         look=overlay_look(function_title),
+        # A function of a group is not in the menu: its icon comes along,
+        # and holding the centre goes back to the group's list.
+        icon=settings.get("icon") or "",
+        parent=submenu or "",
+        submenu=None,
     )
 
 def show_multifunction_menu():
@@ -1776,6 +1810,8 @@ def show_multifunction_menu():
             hints={},
             pointer=-1,
             look=overlay_look(),
+            parent="",
+            submenu=None,
         )
         send_to_socket({
             "titles": multi_app_mode_titles,
@@ -1783,17 +1819,76 @@ def show_multifunction_menu():
             "title": "Menu",
         })
 
+def show_submenu():
+    """The open group's list beside the menu; the highlighted function is
+    the title, so the centre (and an older overlay) shows it."""
+    global title, submenu_index
+
+    items = group_settings().get("items", {})
+    titles = list(items)
+    if not titles:
+        return_to_multifunction_menu()
+        return
+    submenu_index = max(0, min(submenu_index, len(titles) - 1))
+    title = titles[submenu_index]
+    if overlay_enabled():
+        menu_titles = multi_app_mode_titles or []
+        # No pointer here: the touch loop moves the finger dot meanwhile.
+        send_details(
+            profile=profile_meta().get("name") or "",
+            mode="multi",
+            colors=menu_colors(),
+            color=items[title].get("color") or "",
+            hints={},
+            look=overlay_look(),
+            parent="",
+            submenu={
+                "title": submenu,
+                "index": menu_titles.index(submenu) if submenu in menu_titles else -1,
+                "items": titles,
+                "icons": [entry.get("icon") or "" for entry in items.values()],
+                "colors": [entry.get("color") or "" for entry in items.values()],
+                "selected": submenu_index,
+            },
+        )
+        send_to_socket({
+            "titles": multi_app_mode_titles,
+            "icons": multi_app_mode_icons,
+            "title": title,
+        })
+
+def open_submenu(group_title, index=0):
+    """Open a group's list: turning moves the highlight, a tap on the centre
+    chooses, holding it goes back to the menu."""
+    global center_activated, submenu, submenu_index
+
+    center_activated = False
+    submenu = group_title
+    submenu_index = index
+    show_submenu()
+    log.info("Opened the DialPad list of %s", group_title)
+
+def move_submenu_highlight(direction):
+    """One step along the list; it stops at both ends."""
+    global submenu_index
+
+    step = 1 if direction == "clockwise" else -1
+    index = max(0, min(len(submenu_titles()) - 1, submenu_index + step))
+    if index == submenu_index:
+        return False
+    submenu_index = index
+    show_submenu()
+    return True
+
 def enter_function(function_title, query_value=True):
     """Bind the dial to one function of the current multi-function profile."""
     global center_activated, title
 
-    selected_shortcuts = app_specific_shortcuts.get(function_title, {})
-    if not isinstance(selected_shortcuts, dict):
-        return False
+    selected_shortcuts = function_entry(function_title)
     center_activated = True
     title = function_title
     if app_name and profile_meta().get("remember_last", True):
-        last_function_by_app[app_name] = function_title
+        last_function_by_app[app_name] = (submenu, function_title)
     if overlay_enabled():
         send_function_details(function_title)
         send_to_socket({
@@ -1820,23 +1915,33 @@ def show_single_function():
         enqueue_action(lambda: send_function_value(settings, function_title))
 
 def remembered_function():
+    """(group, function) to reopen for this application, or None."""
     if not multi_app_mode or not profile_meta().get("remember_last", True):
         return None
     remembered = last_function_by_app.get(app_name)
-    if remembered and remembered in (multi_app_mode_titles or []):
-        segment = app_specific_shortcuts.get(remembered)
-        if isinstance(segment, dict) and (segment.get("clockwise") or segment.get("counterclockwise")):
-            return remembered
+    if not isinstance(remembered, tuple) or len(remembered) != 2:
+        return None
+    group, function_title = remembered
+    menu_titles = multi_app_mode_titles or []
+    if group is None:
+        segment = app_specific_shortcuts.get(function_title) if function_title in menu_titles else None
+    else:
+        segment = group_settings(group).get("items", {}).get(function_title) if group in menu_titles else None
+    if isinstance(segment, dict) and (segment.get("clockwise") or segment.get("counterclockwise")):
+        return remembered
     return None
 
 def show_initial_function_state():
     """Show the menu, the remembered function or the single bound function."""
+    global submenu
+
     if multi_app_mode:
         remembered = remembered_function()
+        reset_center()
         if remembered:
-            enter_function(remembered)
+            submenu = remembered[0]
+            enter_function(remembered[1])
         else:
-            reset_center()
             show_multifunction_menu()
     elif single_function_settings():
         reset_center()
@@ -1929,8 +2034,7 @@ def run_function_center_action(selected_shortcuts, modifiers, selected_title):
         send_function_value(selected_shortcuts, selected_title)
 
 def function_has_center_action(function_title):
-    segment = app_specific_shortcuts.get(function_title) if function_title else None
-    return isinstance(segment, dict) and bool(segment.get("center"))
+    return bool(function_entry(function_title).get("center"))
 
 def select_multifunction_segment():
     """Select the highlighted radial-menu segment or invoke an action-only one."""
@@ -1941,20 +2045,26 @@ def select_multifunction_segment():
     if not dialpad or not multi_app_mode or not title or title == "Menu":
         return False
 
-    selected_shortcuts = app_specific_shortcuts.get(title, {})
-    if not isinstance(selected_shortcuts, dict):
-        return False
+    # A group opens its list at once; one level only, so not inside a list.
+    if not submenu and is_group(title):
+        open_submenu(title)
+        return True
 
+    selected_shortcuts = function_entry(title)
     has_rotation = bool(
         selected_shortcuts.get("clockwise")
         or selected_shortcuts.get("counterclockwise")
     )
     if not has_rotation:
         # Action-only segments (for example Mute or Notifications) are
-        # invoked by tapping their sector and then stay in the menu.
+        # invoked by tapping their sector and then stay in the menu, or in
+        # the list they were chosen from.
         selected_title = title
-        title = None
-        show_multifunction_menu()
+        if submenu:
+            show_submenu()
+        else:
+            title = None
+            show_multifunction_menu()
         modifiers = set(active_modifiers)
         enqueue_action(lambda: run_menu_action(selected_shortcuts, modifiers, selected_title))
         return True
@@ -1971,6 +2081,16 @@ def return_to_multifunction_menu():
     last_function_by_app.pop(app_name, None)
     show_multifunction_menu()
     log.info("Returned to the DialPad menu from %s", selected_title)
+
+def leave_function():
+    """One level back: from a function of a group to its list, from
+    anything else to the menu."""
+    if submenu and center_activated:
+        titles = submenu_titles()
+        last_function_by_app.pop(app_name, None)
+        open_submenu(submenu, titles.index(title) if title in titles else 0)
+    else:
+        return_to_multifunction_menu()
 
 window_binary = None
 
@@ -2155,12 +2275,12 @@ def listen_touchpad_events():
                                 if (
                                     center_button_triggered
                                     and multi_app_mode
-                                    and center_activated
+                                    and (center_activated or submenu)
                                     and not center_hold_fired
                                     and time() - center_enter_time >= center_hold_time
                                 ):
                                     center_hold_fired = True
-                                    return_to_multifunction_menu()
+                                    leave_function()
 
                                 if not center_button_triggered:
 
@@ -2192,7 +2312,17 @@ def listen_touchpad_events():
                                         send_to_socket({"input": "center", "value": 0, "title": title})
                                     log.debug("Touch ended in center button area.")
 
-                                if multi_app_mode and not center_activated:
+                                if multi_app_mode and submenu and not center_activated:
+                                    # A group's list: turning moves the
+                                    # highlight, the centre chooses.
+                                    if settle_counter >= SETTLE_FRAMES:
+                                        moved = rotation.update(
+                                            angle, time(),
+                                            max(2, SUBMENU_STEP_DEGREES / profile_float("sensitivity")),
+                                        )
+                                        if moved is not None:
+                                            move_submenu_highlight(moved[0])
+                                elif multi_app_mode and not center_activated:
 
                                     current_slice_idx = slice_index(
                                         angle,
@@ -2227,9 +2357,8 @@ def listen_touchpad_events():
 
                                     # A scroll uses a smaller angular step for smooth low-speed
                                     # control.  Other actions retain their configured threshold.
-                                    if center_activated and title in app_specific_shortcuts:
-                                        sht = app_specific_shortcuts[title]
-                                    else:
+                                    sht = function_entry(title) if center_activated else {}
+                                    if not sht:
                                         sht = app_specific_shortcuts
                                     is_scroll_action = shortcut_has_scroll_action(sht, "clockwise") or shortcut_has_scroll_action(sht, "counterclockwise")
                                     trigger_threshold = min(treshold, SCROLL_TRIGGER_DEGREES) if is_scroll_action else treshold
@@ -2307,7 +2436,7 @@ def listen_touchpad_events():
                                     # (for example "Fit image"); a long press or a
                                     # function without one returns to the menu.
                                     if duration_held < center_hold_time and function_has_center_action(title):
-                                        selected_shortcuts = app_specific_shortcuts.get(title, {})
+                                        selected_shortcuts = function_entry(title)
                                         function_title = title
                                         modifiers = set(active_modifiers)
                                         enqueue_action(
@@ -2315,11 +2444,13 @@ def listen_touchpad_events():
                                                 run_function_center_action(selected_shortcuts, modifiers, function_title)
                                         )
                                     else:
-                                        return_to_multifunction_menu()
+                                        leave_function()
                                 else:
                                     select_multifunction_segment()
-                            elif not center_activated and title:
-                                # A tap on an outer menu sector selects it directly.
+                            elif not center_activated and title and not submenu:
+                                # A tap on an outer menu sector selects it
+                                # directly; in a list, lifting after turning
+                                # only leaves the highlight where it is.
                                 select_multifunction_segment()
                         elif center_button_triggered:
                             shortcuts = app_specific_shortcuts
@@ -2338,7 +2469,10 @@ def listen_touchpad_events():
                         center_enter_time = 0
 
                         if multi_app_mode and not center_activated:
-                            show_multifunction_menu()
+                            if submenu:
+                                show_submenu()
+                            else:
+                                show_multifunction_menu()
 
                         if touching_sent:
                             touching_sent = False
@@ -2751,15 +2885,16 @@ def window_was_changed(window_binary_local, force=False):
     # The window watcher starts before the touch-event loop creates its
     # gesture state, so treat that early state as "menu active".
     current_title = globals().get("title")
-    if (
-        multi_app_mode
-        and globals().get("center_activated", False)
-        and current_title in multi_app_mode_titles
-        and app_name_changed is False
-    ):
-        # Configuration reload: keep the selected function, refresh its look.
-        send_function_details(current_title)
-        return
+    selected = globals().get("center_activated", False)
+    if multi_app_mode and app_name_changed is False and (not submenu or is_group(submenu)):
+        if submenu and not selected:
+            # Configuration reload with a group's list open: keep it open.
+            show_submenu()
+            return
+        if selected and current_title in (submenu_titles() if submenu else multi_app_mode_titles):
+            # Configuration reload: keep the selected function, refresh its look.
+            send_function_details(current_title)
+            return
 
     show_initial_function_state()
 

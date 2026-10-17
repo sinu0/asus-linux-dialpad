@@ -8,7 +8,7 @@ import json
 import re
 
 from config.labels import parse_keys
-from config.schema import SCROLL_AXES, MacroStep, Profile, StepType, _decoder, _encoder
+from config.schema import SCROLL_AXES, MacroStep, Profile, Segment, StepType, _decoder, _encoder
 
 PROFILE_FORMAT = """A Turnpad profile is one JSON object:
 - "name": shown in the settings app.
@@ -25,6 +25,7 @@ PROFILE_FORMAT = """A Turnpad profile is one JSON object:
   - "macro_center": steps for a tap on the centre. A function with only "macro_center" is a launcher: choosing it in the menu runs it at once.
   - "value_command": optional shell command that prints a number shown in the centre; "unit" such as "%" (with % the dial draws a gauge).
   - "overlay": optional, like the profile's, while this function is selected; e.g. {"visibility": "pill"} keeps the view clear while zooming.
+  - "items": optional; makes the function a group (a folder): choosing it opens a straight list of these functions beside the dial; turning moves the highlight, a tap on the centre chooses, holding it goes back. Items have the same fields but no "items" of their own (one level), and the group has no steps itself, only "title", "color", "icon_url", "enabled" and "overlay". Use a group when a profile needs more than about 8 functions.
 
 Steps run from top to bottom. Each is {"type": ...} with an optional "title", a short label shown as a hint below the dial ("Zoom in"):
 - "keystroke": "keys" pressed together, modifiers first, as evdev names, e.g. ["KEY_LEFTCTRL", "KEY_Z"]. Names: KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_LEFTALT, KEY_LEFTMETA (Super), KEY_A to KEY_Z, KEY_0 to KEY_9, KEY_F1 to KEY_F24, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_PAGEUP, KEY_PAGEDOWN, KEY_HOME, KEY_END, KEY_ENTER, KEY_ESC, KEY_TAB, KEY_SPACE, KEY_BACKSPACE, KEY_DELETE, KEY_LEFTBRACE ([), KEY_RIGHTBRACE (]), KEY_MINUS, KEY_EQUAL, KEY_COMMA, KEY_DOT, KEY_SLASH. They are key positions on a US keyboard.
@@ -110,7 +111,24 @@ def _profile(data, number: int) -> Profile:
     if not isinstance(data.get("segments"), list):
         raise ProfileTextError(f"{where} has no \"segments\" list.")
     data = {"name": "Imported profile", **data}
-    for index, segment in enumerate(data["segments"], 1):
+    _check_functions(data["segments"], where)
+    try:
+        profile = _decoder(data, Profile)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ProfileTextError(f"{where} could not be read: {error}") from None
+
+    _clean_functions(profile.segments, where)
+    for segment in profile.segments:
+        if segment.is_group:
+            _clean_functions(segment.items, f"{where}, “{segment.title}”")
+    titles = [segment.title for segment in profile.segments if not segment.is_group]
+    if profile.mode == "single" and profile.single_function not in titles and titles:
+        profile.single_function = titles[0]
+    return profile
+
+
+def _check_functions(segments, where: str, nested: bool = False) -> None:
+    for index, segment in enumerate(segments, 1):
         if not isinstance(segment, dict) or not str(segment.get("title") or "").strip():
             raise ProfileTextError(f"{where}, function {index} has no \"title\".")
         for field in ("macro_cw", "macro_ccw", "macro_center"):
@@ -121,13 +139,21 @@ def _profile(data, number: int) -> Profile:
                         f"{where}, “{segment['title']}”: unknown step type {kind!r}; use "
                         + ", ".join(item.value for item in StepType) + "."
                     )
-    try:
-        profile = _decoder(data, Profile)
-    except (KeyError, TypeError, ValueError) as error:
-        raise ProfileTextError(f"{where} could not be read: {error}") from None
+        if "items" in segment:
+            if nested:
+                raise ProfileTextError(
+                    f"{where}, “{segment['title']}”: a function in a group cannot have \"items\"; "
+                    "groups go one level deep."
+                )
+            if not isinstance(segment["items"], list):
+                raise ProfileTextError(f"{where}, “{segment['title']}”: \"items\" must be a list of functions.")
+            _check_functions(segment["items"], f"{where}, “{segment['title']}”", nested=True)
 
+
+def _clean_functions(segments: list[Segment], where: str) -> None:
+    """Unique titles, valid colours and steps; a group keeps no steps."""
     seen = set()
-    for segment in profile.segments:
+    for segment in segments:
         segment.title = segment.title.strip()
         title, copy = segment.title, 2
         while segment.title.lower() in seen:
@@ -138,13 +164,12 @@ def _profile(data, number: int) -> Profile:
             segment.color = None
         if not isinstance(segment.treshold, int) or not 5 <= segment.treshold <= 360:
             segment.treshold = None
+        if segment.is_group:
+            segment.macro_cw, segment.macro_ccw, segment.macro_center = [], [], []
+            segment.value_command = segment.unit = segment.treshold = None
         for field in ("macro_cw", "macro_ccw", "macro_center"):
             for step in getattr(segment, field):
                 _check_step(step, f"{where}, “{segment.title}”")
-    titles = [segment.title for segment in profile.segments]
-    if profile.mode == "single" and profile.single_function not in titles and titles:
-        profile.single_function = titles[0]
-    return profile
 
 
 def profiles_from_text(text: str) -> list[Profile]:
