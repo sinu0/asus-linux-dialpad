@@ -48,7 +48,7 @@ if (( ! RELOGIN )); then
     systemctl --user restart "$SERVICE" && echo "Driver started."
 fi
 
-if [[ "${XDG_CURRENT_DESKTOP,,}" == *gnome* ]] && command -v gnome-extensions >/dev/null 2>&1; then
+if [[ "${XDG_CURRENT_DESKTOP:-}" == *[Gg][Nn][Oo][Mm][Ee]* ]] && command -v gnome-extensions >/dev/null 2>&1; then
     if gnome-extensions enable "$GNOME_EXTENSION_UUID" 2>/dev/null; then
         echo "GNOME extension enabled."
     else
