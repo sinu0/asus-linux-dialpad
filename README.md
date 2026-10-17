@@ -11,7 +11,7 @@ Turnpad turns the DialPad printed on the touchpad of ASUS laptops into an ASUS D
 
 What Turnpad adds to the original driver:
 
-- **Settings app** (GTK4/libadwaita): per-application profiles, a function library, pre-programmed packs (browsers, GIMP, Krita, Inkscape, Blender, Kdenlive, DaVinci Resolve, LibreOffice, code editors, Spotify, video players), function colours and order, import/export.
+- **Settings app** (GTK4/libadwaita): per-application profiles, a function library, pre-programmed packs in a basic and an advanced variant (browsers, GIMP, Krita, Inkscape, darktable, Blender, Kdenlive, DaVinci Resolve, Shotcut, Audacity, OBS Studio, LibreOffice, code editors, file managers, Spotify, video players), ready groups, function colours and order, import/export.
 - **ASUS Dial behaviour**: radial menu or single-function mode, per-app sensitivity and scroll speed, remembered last function, tap centre for the function's action, hold centre for the menu, horizontal scroll and Ctrl+wheel zoom.
 - **Groups**: a sector that opens a straight list of more functions beside the dial; turn to move along it, tap the centre to choose. More functions fit without smaller sectors.
 - **GNOME Shell overlay**: native radial dial with value gauge, rotation hints and finger position; size, position (anywhere on the screen or next to the mouse pointer) and visibility configurable: always visible, fading while you turn, or a small label instead of the dial — for all apps, per profile or per function.
@@ -94,7 +94,7 @@ Everything is set up in the **Turnpad** app (applications menu); changes apply i
 - A default profile plus profiles per application, switched automatically with the focused window (desktop ID on GNOME, window title or binary elsewhere)
 - Radial-menu mode with several functions, or single-function mode where the dial always controls one function
 - Per-profile sensitivity, scroll speed and "remember last function"
-- Pre-programmed packs for browsers, GIMP, Krita, Inkscape, Blender, Kdenlive, DaVinci Resolve, LibreOffice, code editors, Spotify, video players and darktable; import/export of profiles
+- Pre-programmed packs, basic or advanced, for browsers, GIMP, Krita, Inkscape, darktable, Blender, Kdenlive, DaVinci Resolve, Shotcut, Audacity, OBS Studio, LibreOffice, code editors, file managers, Spotify and video players; import/export of profiles
 - Launchers: a function with only a tap action runs as soon as it is chosen in the radial menu, like the radial menus of 3D mice. The library has Calculator, Terminal, Files, Screenshot, Lock screen and My script (any command or bash script); programs keep running without blocking the dial
 - Groups (folders): a sector of the menu that opens a straight list of more functions beside the dial, one level deep. The library's *Apps* group holds all the launchers; *Group* under Custom starts an empty one, and functions already on the dial can be moved into it
 

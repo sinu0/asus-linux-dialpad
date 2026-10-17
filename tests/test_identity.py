@@ -107,7 +107,8 @@ class IdentityTest(unittest.TestCase):
     def test_repository_links(self):
         # The repository was renamed; GitHub redirects, but links should not rely on it.
         for path in ROOT.rglob("*"):
-            if path == Path(__file__).resolve() or ".git" in path.parts:
+            # .claude holds git worktrees of coding assistants, not this checkout.
+            if path == Path(__file__).resolve() or ".git" in path.parts or ".claude" in path.parts:
                 continue
             if path.is_file() and path.suffix in {".md", ".sh", ".py", ".yml", ".json", ".js", ""}:
                 with self.subTest(path=str(path.relative_to(ROOT))):

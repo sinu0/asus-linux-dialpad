@@ -109,6 +109,9 @@ def dialogs(app, profile):
     yield "function in a group"
     profile.segments.remove(group)
     demo.close_dialogs(app)
+    app._choose_pack_variant(demo.app_main.pack_for_app("org.blender.Blender.desktop"), "Blender", lambda _advanced: None)
+    yield "basic or advanced pack"
+    demo.close_dialogs(app)
     app._show_skin_editor(None, {"name": "Probe", "base": "proart"})
     yield "skin editor"
     demo.close_dialogs(app)

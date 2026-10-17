@@ -41,6 +41,7 @@ from config.presets import (
     pack_for_app,
     profile_for_app,
     segment_color,
+    variant_summary,
 )
 from config.schema import (
     CONFIG_DIR,
@@ -824,12 +825,46 @@ class Application(Adw.Application):
             if profile.app_id == app_id:
                 self._select_profile(profile)
                 return
-        profile = profile_for_app(name, app_id)
-        self.config.profiles.append(profile)
-        self._select_profile(profile)
-        self._schedule_save()
-        if profile.segments:
-            self._toast(f"Added {len(profile.segments)} pre-programmed functions for {name}")
+
+        def add(advanced):
+            profile = profile_for_app(name, app_id, advanced)
+            self.config.profiles.append(profile)
+            self._select_profile(profile)
+            self._schedule_save()
+            if profile.segments:
+                variant = "advanced" if advanced else "basic"
+                self._toast(f"Added the {variant} pre-programmed functions for {name}")
+
+        pack = pack_for_app(app_id)
+        if pack is None or pack.advanced is None:
+            add(False)
+            return
+        self._choose_pack_variant(pack, name, add)
+
+    def _choose_pack_variant(self, pack, name, chosen):
+        """Ask for the basic or the advanced pre-programmed functions."""
+        dialog = Adw.AlertDialog(
+            heading=f"Pre-programmed functions for {name}",
+            body=(
+                f"Basic: {variant_summary(pack)}, a short menu with the most used ones.\n\n"
+                f"Advanced: {variant_summary(pack, True)}, grouped by the stages of the work; "
+                "the dial keeps out of the way of the picture or timeline while you turn."
+                + (f"\n\n{pack.note}." if pack.note else "")
+            ),
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("basic", "Basic")
+        dialog.add_response("advanced", "Advanced")
+        dialog.set_response_appearance("advanced", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("advanced")
+        dialog.set_close_response("cancel")
+
+        def respond(_dialog, response):
+            if response in ("basic", "advanced"):
+                chosen(response == "advanced")
+
+        dialog.connect("response", respond)
+        dialog.present(self._window)
 
     def _export_profiles(self):
         dialog = Gtk.FileDialog(title="Export DialPad profiles", initial_name="dialpad-profiles.json")
@@ -1186,10 +1221,13 @@ class Application(Adw.Application):
                 subtitle=", ".join(segment.title for segment in pack.factory()),
             )
             row.add_prefix(Gtk.Image.new_from_icon_name("starred-symbolic"))
-            apply = Gtk.Button(label="Add all")
-            apply.set_valign(Gtk.Align.CENTER)
-            apply.connect("clicked", lambda _button: self._apply_pack(profile, pack))
-            row.add_suffix(apply)
+            variants = [("Basic", False)] + ([("Advanced", True)] if pack.advanced else [])
+            for label, advanced in variants:
+                apply = Gtk.Button(label=label)
+                apply.set_valign(Gtk.Align.CENTER)
+                apply.set_tooltip_text(variant_summary(pack, advanced))
+                apply.connect("clicked", lambda _button, advanced=advanced: self._apply_pack(profile, pack, advanced))
+                row.add_suffix(apply)
             group.add(row)
 
         last = len(profile.segments) - 1
@@ -1291,12 +1329,14 @@ class Application(Adw.Application):
                 refresh()
             self._toast(f"Removed “{segment.title}”")
 
-    def _apply_pack(self, profile, pack):
-        for segment in pack.factory():
+    def _apply_pack(self, profile, pack, advanced=False):
+        for segment in pack.segments(advanced):
             segment.title = self._unique_title(profile, segment.title)
             profile.segments.append(segment)
+        if advanced and pack.advanced_look and not profile.overlay:
+            profile.overlay = dict(pack.advanced_look)
         self._changed()
-        self._toast(f"Added the {pack.name} functions")
+        self._toast(f"Added the {'advanced' if advanced else 'basic'} {pack.name} functions")
 
     def _preview_segments(self, profile):
         if profile is None:
@@ -1486,14 +1526,20 @@ class Application(Adw.Application):
 
             if pack is not None and not query and group is None:
                 section = Adw.PreferencesGroup(title="Pre-programmed")
-                row = Adw.ActionRow(
-                    title=f"All {pack.name} functions",
-                    subtitle=", ".join(segment.title for segment in pack.factory()),
-                )
-                row.add_prefix(Gtk.Image.new_from_icon_name("starred-symbolic"))
-                row.set_activatable(True)
-                row.connect("activated", lambda _row: (dialog.close(), self._apply_pack(profile, pack)))
-                section.add(row)
+                variants = [(False, f"Basic {pack.name} functions")]
+                if pack.advanced:
+                    variants.append((True, f"Advanced {pack.name} functions"))
+                for advanced, title in variants:
+                    row = Adw.ActionRow(
+                        title=title,
+                        subtitle=f"{variant_summary(pack, advanced)}: "
+                                 + ", ".join(segment.title for segment in pack.segments(advanced)),
+                    )
+                    row.add_prefix(Gtk.Image.new_from_icon_name("starred-symbolic"))
+                    row.set_activatable(True)
+                    row.connect("activated", lambda _row, advanced=advanced: (
+                        dialog.close(), self._apply_pack(profile, pack, advanced)))
+                    section.add(row)
                 page.add(section)
                 groups.append(section)
 

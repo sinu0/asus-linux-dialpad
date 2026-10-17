@@ -289,9 +289,34 @@ def _turn(title, cw, ccw, tap=None, *, color, treshold=30):
     )
 
 
-def _tap(title, tap, *, color):
+def _tap(title, tap, *, color, icon=None):
     """An action-only function: tapping its menu sector runs it."""
-    return _segment(title, [], [], [keys(*tap[1:], title=tap[0])], color=color)
+    segment = _segment(title, [], [], [keys(*tap[1:], title=tap[0])], color=color)
+    segment.icon_url = icon
+    return segment
+
+
+def _group(title, items, *, icon=None):
+    """Functions in one sector that opens them as a list beside the dial."""
+    return Segment(title=title, items=items, icon_url=icon)
+
+
+def _look(segment, look):
+    """The dial's look while this function is selected (Segment.overlay)."""
+    segment.overlay = dict(look)
+    return segment
+
+
+# How the dial looks while a function is in use, so it never hides the work:
+# - CANVAS: a small label instead of the dial for controls used while looking
+#   at the picture (brush size, opacity).
+# - VIEW: full on touch, then nearly transparent while turning (zoom,
+#   rotation, orbit), so the view stays visible.
+# - TIMELINE: at the top of the screen, away from the timeline, and fading
+#   while scrubbing.
+CANVAS = {"visibility": "pill"}
+VIEW = {"visibility": "fade", "fade_opacity": 20}
+TIMELINE = {"position": "top", "visibility": "fade", "fade_opacity": 30}
 
 
 def brush_size() -> Segment:
@@ -513,6 +538,108 @@ def apps_group() -> Segment:
     return Segment(title="Apps", items=[calculator(), terminal(), files(), screenshot(), lock_screen()])
 
 
+# --- more everyday functions ------------------------------------------------
+#
+# Taps work everywhere: in the radial menu and in a group's list choosing one
+# runs it at once and the dial stays where it was.
+
+def play_pause() -> Segment:
+    return _segment(
+        "Play / Pause", [], [], [MacroStep(type=StepType.MEDIA, keys=["KEY_PLAYPAUSE"], title="Play / Pause")],
+        color=COLORS["media"],
+    )
+
+
+def mic_mute() -> Segment:
+    return _segment(
+        "Microphone", [], [], [MacroStep(type=StepType.MEDIA, keys=["KEY_MICMUTE"], title="Mute microphone")],
+        color=COLORS["audio"],
+    )
+
+
+def overview() -> Segment:
+    return _tap("Overview", ("Activities overview", "KEY_LEFTMETA"), color=COLORS["tabs"], icon="view-app-grid-symbolic")
+
+
+def pages() -> Segment:
+    segment = _segment(
+        "Pages",
+        [keys("KEY_PAGEDOWN", title="Page down")],
+        [keys("KEY_PAGEUP", title="Page up")],
+        [keys("KEY_LEFTCTRL", "KEY_HOME", title="Go to the start")],
+        color=COLORS["navigate"], treshold=45,
+    )
+    segment.icon_url = "view-paged-symbolic"
+    return segment
+
+
+def up_down() -> Segment:
+    segment = _segment(
+        "Up / Down",
+        [keys("KEY_DOWN", title="Down")],
+        [keys("KEY_UP", title="Up")],
+        [keys("KEY_ENTER", title="Enter")],
+        color=COLORS["navigate"], treshold=30,
+    )
+    segment.icon_url = "go-down-symbolic"
+    return segment
+
+
+def copy() -> Segment:
+    return _tap("Copy", ("Copy", CTRL, "KEY_C"), color=COLORS["history"], icon="edit-copy-symbolic")
+
+
+def cut() -> Segment:
+    return _tap("Cut", ("Cut", CTRL, "KEY_X"), color=COLORS["cut"], icon="edit-cut-symbolic")
+
+
+def paste() -> Segment:
+    return _tap("Paste", ("Paste", CTRL, "KEY_V"), color=COLORS["history"], icon="edit-paste-symbolic")
+
+
+def select_all() -> Segment:
+    return _tap("Select all", ("Select all", CTRL, "KEY_A"), color=COLORS["navigate"], icon="edit-select-all-symbolic")
+
+
+def find() -> Segment:
+    return _tap("Find", ("Find", CTRL, "KEY_F"), color=COLORS["zoom"], icon="edit-find-symbolic")
+
+
+def save() -> Segment:
+    return _tap("Save", ("Save", CTRL, "KEY_S"), color=COLORS["record"], icon="document-save-symbolic")
+
+
+def fullscreen() -> Segment:
+    return _tap("Full screen", ("Full screen", "KEY_F11"), color=COLORS["tabs"], icon="view-fullscreen-symbolic")
+
+
+# Ready groups: a whole set in one sector, e.g. a "Clipboard" next to the
+# functions of an application.
+
+def clipboard_group() -> Segment:
+    return _group("Clipboard", [copy(), cut(), paste(), select_all(), undo_redo()], icon="edit-paste-symbolic")
+
+
+def media_group() -> Segment:
+    return _group("Media controls", [play_pause(), tracks(), volume(), mute(), mic_mute()],
+                  icon="media-playback-start-symbolic")
+
+
+def system_group() -> Segment:
+    return _group("System", [volume(), brightness(), keyboard_light(), mic_mute(), workspaces(), overview()],
+                  icon="preferences-system-symbolic")
+
+
+def navigation_group() -> Segment:
+    return _group("Navigation", [vertical_scroll(), horizontal_scroll(), pages(), up_down(), tabs(), browser_history()],
+                  icon="view-continuous-symbolic")
+
+
+def documents_group() -> Segment:
+    return _group("Documents", [undo_redo(), find(), save(), select_all(), font_size(), zoom_keys()],
+                  icon="document-edit-symbolic")
+
+
 @dataclass(frozen=True)
 class FunctionPreset:
     title: str
@@ -527,17 +654,29 @@ FUNCTION_LIBRARY: tuple[FunctionPreset, ...] = (
     FunctionPreset("Brightness", "System", "display-brightness-symbolic", "Screen brightness with live value", brightness),
     FunctionPreset("Keyboard light", "System", "keyboard-brightness-symbolic", "Keyboard backlight level", keyboard_light),
     FunctionPreset("Mute", "System", "audio-volume-muted-symbolic", "Tap the sector to toggle mute", mute),
+    FunctionPreset("Microphone", "System", "audio-input-microphone-symbolic", "Tap to mute or unmute the microphone", mic_mute),
     FunctionPreset("Workspaces", "System", "view-grid-symbolic", "Switch workspaces, tap for overview", workspaces),
+    FunctionPreset("Overview", "System", "view-app-grid-symbolic", "Tap for the activities overview (Super)", overview),
     FunctionPreset("Scroll", "Navigation", "view-continuous-symbolic", "Smooth vertical scrolling", vertical_scroll),
     FunctionPreset("Horizontal scroll", "Navigation", "object-flip-horizontal-symbolic", "Timelines, wide tables and canvases", horizontal_scroll),
     FunctionPreset("Zoom", "Navigation", "zoom-in-symbolic", "Ctrl + wheel zoom, tap to reset", zoom_wheel),
     FunctionPreset("Tabs", "Navigation", "tab-new-symbolic", "Next / previous tab", tabs),
     FunctionPreset("Back / Forward", "Navigation", "go-previous-symbolic", "Browser history, tap to reload", browser_history),
     FunctionPreset("Arrow keys", "Navigation", "go-next-symbolic", "Left / right arrows, tap for Enter", arrows),
+    FunctionPreset("Up / Down", "Navigation", "go-down-symbolic", "Up / down arrows for lists and menus, tap for Enter", up_down),
+    FunctionPreset("Pages", "Navigation", "view-paged-symbolic", "Page down / up, tap to go to the start", pages),
+    FunctionPreset("Full screen", "Navigation", "view-fullscreen-symbolic", "Tap for full screen (F11)", fullscreen),
     FunctionPreset("Media", "Media", "media-playback-start-symbolic", "Next / previous track, tap to play", tracks),
     FunctionPreset("Seek", "Media", "media-seek-forward-symbolic", "Arrow-key seeking in players", seek),
+    FunctionPreset("Play / Pause", "Media", "media-playback-start-symbolic", "Tap to play or pause any player", play_pause),
     FunctionPreset("Undo / Redo", "Editing", "edit-undo-symbolic", "Step through history", undo_redo),
     FunctionPreset("Font size", "Editing", "font-x-generic-symbolic", "LibreOffice-style Ctrl+[ / Ctrl+]", font_size),
+    FunctionPreset("Copy", "Editing", "edit-copy-symbolic", "Tap to copy (Ctrl+C)", copy),
+    FunctionPreset("Cut", "Editing", "edit-cut-symbolic", "Tap to cut (Ctrl+X)", cut),
+    FunctionPreset("Paste", "Editing", "edit-paste-symbolic", "Tap to paste (Ctrl+V)", paste),
+    FunctionPreset("Select all", "Editing", "edit-select-all-symbolic", "Tap to select all (Ctrl+A)", select_all),
+    FunctionPreset("Find", "Editing", "edit-find-symbolic", "Tap to search (Ctrl+F)", find),
+    FunctionPreset("Save", "Editing", "document-save-symbolic", "Tap to save (Ctrl+S)", save),
     FunctionPreset("Brush size", "Creative", "document-edit-symbolic", "[ and ] in GIMP, Krita, Photoshop", brush_size),
     FunctionPreset("Frame", "Creative", "media-skip-forward-symbolic", "Frame stepping in video editors", frame_step),
     FunctionPreset("Timeline zoom", "Creative", "zoom-fit-best-symbolic", "Ctrl+= / Ctrl+- timeline zoom", resolve_timeline_zoom),
@@ -548,10 +687,15 @@ FUNCTION_LIBRARY: tuple[FunctionPreset, ...] = (
     FunctionPreset("Screenshot", "Launch", "camera-photo-symbolic", "The Print key: the desktop's screenshot tool", screenshot),
     FunctionPreset("Lock screen", "Launch", "system-lock-screen-symbolic", "Lock the session", lock_screen),
     FunctionPreset("My script", "Launch", "application-x-executable-symbolic", "Runs a command or bash script of yours; edit its tap action", run_script),
-    FunctionPreset("Apps", "Launch", GROUP_ICON, "A group: calculator, terminal, files, screenshot and lock screen in one list", apps_group),
+    FunctionPreset("Apps", "Groups", GROUP_ICON, "Calculator, terminal, files, screenshot and lock screen in one list", apps_group),
+    FunctionPreset("Clipboard", "Groups", "edit-paste-symbolic", "Copy, cut, paste, select all and undo in one list", clipboard_group),
+    FunctionPreset("Media controls", "Groups", "media-playback-start-symbolic", "Play, tracks, volume, mute and microphone", media_group),
+    FunctionPreset("System", "Groups", "preferences-system-symbolic", "Volume, brightness, keyboard light, microphone, workspaces", system_group),
+    FunctionPreset("Navigation", "Groups", "view-continuous-symbolic", "Scrolling, pages, arrows, tabs and history", navigation_group),
+    FunctionPreset("Documents", "Groups", "document-edit-symbolic", "Undo, find, save, select all, font size and zoom", documents_group),
 )
 
-LIBRARY_CATEGORIES = ("System", "Navigation", "Media", "Editing", "Creative", "Launch")
+LIBRARY_CATEGORIES = ("System", "Navigation", "Media", "Editing", "Creative", "Launch", "Groups")
 
 
 def default_segments() -> list[Segment]:
@@ -559,46 +703,418 @@ def default_segments() -> list[Segment]:
     return [volume(), brightness(), vertical_scroll(), zoom_wheel(), undo_redo(), tracks()]
 
 
+# --- advanced packs ---------------------------------------------------------
+#
+# Basic packs keep a short menu with the most used functions. Advanced packs
+# put more into groups, ordered by the stages of the work rather than by
+# technical kind: what turns (sizes, zoom, time) is on the dial, the tap does
+# what usually follows the turn (fit the view, play, insert a keyframe, cut
+# at the playhead). Precise controls need more turning (higher treshold),
+# fast ones less. The dial's look keeps the work visible (CANVAS, VIEW,
+# TIMELINE above). Keys go to the window and editor under the pointer, as
+# with the keyboard.
+
+
+# Blender 4/5 (keymap_data/blender_default.py): Space plays (default
+# "Spacebar Action: Play"), Up / Down jump to the previous / next keyframe,
+# I inserts a keyframe and Alt+I deletes it in the 3D view, numpad orbits
+# (Ctrl+numpad pans), [ / ] scale the brush in sculpt and paint modes.
+def blender_advanced_segments() -> list[Segment]:
+    view = _group("View", [
+        _look(_turn("Zoom view", ("Zoom in", CTRL, "KEY_EQUAL"), ("Zoom out", CTRL, "KEY_MINUS"),
+                    ("Frame selected", "KEY_KPDOT"), color=COLORS["zoom"]), VIEW),
+        _look(_turn("Orbit", ("Orbit right", "KEY_KP6"), ("Orbit left", "KEY_KP4"),
+                    ("View all", "KEY_HOME"), color=COLORS["navigate"], treshold=20), VIEW),
+        _look(_turn("Orbit up / down", ("Orbit down", "KEY_KP2"), ("Orbit up", "KEY_KP8"),
+                    ("Perspective / Orthographic", "KEY_KP5"), color=COLORS["navigate"], treshold=20), VIEW),
+        _look(_turn("Pan", ("Pan right", CTRL, "KEY_KP6"), ("Pan left", CTRL, "KEY_KP4"),
+                    ("Camera view", "KEY_KP0"), color=COLORS["navigate"], treshold=20), VIEW),
+        _tap("Local view", ("Isolate the selection", "KEY_KPSLASH"), color=COLORS["layers"], icon="view-reveal-symbolic"),
+        _tap("X-ray", ("Toggle X-ray", ALT, "KEY_Z"), color=COLORS["light"], icon="view-reveal-symbolic"),
+    ], icon="camera-video-symbolic")
+    animation = _group("Animation", [
+        _look(_turn("Keyframe", ("Next keyframe", "KEY_DOWN"), ("Previous keyframe", "KEY_UP"),
+                    ("Insert keyframe", "KEY_I"), color=COLORS["light"], treshold=45), TIMELINE),
+        _look(_turn("Time jump", ("Jump forward", CTRL, "KEY_RIGHT"), ("Jump back", CTRL, "KEY_LEFT"),
+                    color=COLORS["time"], treshold=45), TIMELINE),
+        _look(_turn("Start / End", ("Last frame", SHIFT, "KEY_RIGHT"), ("First frame", SHIFT, "KEY_LEFT"),
+                    ("Play backwards", CTRL, SHIFT, "KEY_SPACE"), color=COLORS["time"], treshold=90), TIMELINE),
+        _tap("Delete keyframe", ("Delete keyframe", ALT, "KEY_I"), color=COLORS["record"], icon="starred-symbolic"),
+        _tap("Marker", ("Add marker (timeline)", "KEY_M"), color=COLORS["history"], icon="bookmark-new-symbolic"),
+    ], icon="starred-symbolic")
+    return [
+        _look(frame_step(), TIMELINE),
+        view,
+        animation,
+        _look(_turn("Brush size", ("Larger brush", "KEY_RIGHTBRACE"), ("Smaller brush", "KEY_LEFTBRACE"),
+                    color=COLORS["brush"], treshold=20), CANVAS),
+        undo_redo(),
+    ]
+
+
+# Kdenlive 25 (src/mainwindow_actions.cpp): Alt+Left/Right snap points,
+# Ctrl+Left/Right markers, G adds or removes a timeline marker, Shift+R cuts
+# the clip at the playhead, V / B insert / overwrite the zone, Z lifts,
+# Shift+X extracts, Home / End go to the clip's start and end.
+def kdenlive_advanced_segments() -> list[Segment]:
+    playback = _group("Playback", [
+        _look(shuttle(), TIMELINE),
+        _look(_turn("Clip start / end", ("Clip end", "KEY_END"), ("Clip start", "KEY_HOME"),
+                    color=COLORS["time"], treshold=90), TIMELINE),
+        _tap("Play zone", ("Play the zone", CTRL, "KEY_SPACE"), color=COLORS["media"],
+             icon="media-playback-start-symbolic"),
+    ], icon="media-playback-start-symbolic")
+    edit = _group("Edit", [
+        _tap("Insert zone", ("Insert the zone", "KEY_V"), color=COLORS["navigate"], icon="insert-object-symbolic"),
+        _tap("Overwrite zone", ("Overwrite with the zone", "KEY_B"), color=COLORS["record"], icon="insert-object-symbolic"),
+        _tap("Lift", ("Lift the zone", "KEY_Z"), color=COLORS["history"], icon="go-up-symbolic"),
+        _tap("Extract", ("Extract the zone", SHIFT, "KEY_X"), color=COLORS["cut"], icon="edit-cut-symbolic"),
+        undo_redo(),
+    ], icon="edit-cut-symbolic")
+    return [
+        _look(frame_step(), TIMELINE),
+        _look(_turn("Edit points", ("Next snap point", ALT, "KEY_RIGHT"), ("Previous snap point", ALT, "KEY_LEFT"),
+                    ("Cut clip", SHIFT, "KEY_R"), color=COLORS["cut"], treshold=45), TIMELINE),
+        _look(_turn("Markers", ("Next marker", CTRL, "KEY_RIGHT"), ("Previous marker", CTRL, "KEY_LEFT"),
+                    ("Add / remove marker", "KEY_G"), color=COLORS["history"], treshold=60), TIMELINE),
+        _look(_turn("Timeline zoom", ("Zoom in", CTRL, "KEY_EQUAL"), ("Zoom out", CTRL, "KEY_MINUS"),
+                    color=COLORS["zoom"]), TIMELINE),
+        playback,
+        edit,
+        volume(),
+    ]
+
+
+# DaVinci Resolve 19/20, Edit page: Up / Down previous / next edit,
+# Shift+Up / Shift+Down previous / next marker, M adds a marker, , and .
+# nudge the clip a frame, Ctrl+\ splits, Shift+Z fits the timeline.
+def resolve_advanced_segments() -> list[Segment]:
+    playback = _group("Playback", [
+        _look(shuttle(), TIMELINE),
+        _tap("Mark in", ("Mark in", "KEY_I"), color=COLORS["navigate"], icon="go-next-symbolic"),
+        _tap("Mark out", ("Mark out", "KEY_O"), color=COLORS["navigate"], icon="go-next-symbolic"),
+    ], icon="media-playback-start-symbolic")
+    return [
+        _look(frame_step(), TIMELINE),
+        _look(_turn("Edit points", ("Next edit", "KEY_DOWN"), ("Previous edit", "KEY_UP"),
+                    ("Split clip", CTRL, "KEY_BACKSLASH"), color=COLORS["cut"], treshold=45), TIMELINE),
+        _look(_turn("Markers", ("Next marker", SHIFT, "KEY_DOWN"), ("Previous marker", SHIFT, "KEY_UP"),
+                    ("Add marker", "KEY_M"), color=COLORS["history"], treshold=60), TIMELINE),
+        _look(_turn("Nudge clip", ("Nudge right", "KEY_DOT"), ("Nudge left", "KEY_COMMA"),
+                    color=COLORS["brush"], treshold=45), TIMELINE),
+        _look(resolve_timeline_zoom(), TIMELINE),
+        playback,
+        undo_redo(),
+        volume(),
+    ]
+
+
+# Shotcut: I / O set in and out, J/K/L shuttle, S splits at the playhead.
+def shotcut_advanced_segments() -> list[Segment]:
+    marks = _group("In / Out", [
+        _tap("Set in", ("Set in point", "KEY_I"), color=COLORS["navigate"], icon="go-next-symbolic"),
+        _tap("Set out", ("Set out point", "KEY_O"), color=COLORS["navigate"], icon="go-next-symbolic"),
+    ], icon="go-next-symbolic")
+    frame, shuttle_, edit_points, zoom, undo = shotcut_profile_segments()
+    return [_look(frame, TIMELINE), _look(shuttle_, TIMELINE), _look(edit_points, TIMELINE), _look(zoom, TIMELINE),
+            marks, undo, volume()]
+
+
+# Audacity 3: Home / End skip to start and end, R records, Ctrl+2 zooms to
+# normal, Ctrl+T trims outside the selection, Ctrl+L silences, Ctrl+J joins.
+def audacity_advanced_segments() -> list[Segment]:
+    editing = _group("Edit audio", [
+        _tap("Split", ("Split", CTRL, "KEY_I"), color=COLORS["cut"], icon="edit-cut-symbolic"),
+        _tap("Join", ("Join", CTRL, "KEY_J"), color=COLORS["cut"], icon="edit-cut-symbolic"),
+        _tap("Trim", ("Trim outside the selection", CTRL, "KEY_T"), color=COLORS["cut"], icon="edit-cut-symbolic"),
+        _tap("Silence", ("Silence the selection", CTRL, "KEY_L"), color=COLORS["audio"], icon="audio-volume-muted-symbolic"),
+        _tap("Duplicate", ("Duplicate", CTRL, "KEY_D"), color=COLORS["history"], icon="edit-copy-symbolic"),
+    ], icon="edit-cut-symbolic")
+    return [
+        _turn("Cursor", ("Jump right", "KEY_DOT"), ("Jump left", "KEY_COMMA"),
+              ("Play / Stop", "KEY_SPACE"), color=COLORS["time"], treshold=20),
+        _turn("Zoom", ("Zoom in", CTRL, "KEY_1"), ("Zoom out", CTRL, "KEY_3"),
+              ("Zoom normal", CTRL, "KEY_2"), color=COLORS["zoom"]),
+        _turn("Start / End", ("Skip to end", "KEY_END"), ("Skip to start", "KEY_HOME"),
+              ("Record", "KEY_R"), color=COLORS["record"], treshold=90),
+        _turn("Clips", ("Next clip", ALT, "KEY_DOT"), ("Previous clip", ALT, "KEY_COMMA"),
+              ("Split", CTRL, "KEY_I"), color=COLORS["cut"], treshold=60),
+        editing,
+        undo_redo([CTRL, "KEY_Y"]),
+        volume(),
+    ]
+
+
+# Krita 5.2 (krita/krita.action): [ / ] brush size, I / O opacity, K / L
+# darker / lighter colour, X swaps and D resets the colours, E the eraser,
+# / the previous preset, , / . favourite presets, PgUp / PgDown layers,
+# Insert a new paint layer, Ctrl+J duplicates, Ctrl+E merges down.
+def krita_advanced_segments() -> list[Segment]:
+    brush = _group("Brush", [
+        _look(_turn("Brush colour", ("Lighter colour", "KEY_L"), ("Darker colour", "KEY_K"),
+                    ("Swap colours", "KEY_X"), color=COLORS["light"], treshold=20), CANVAS),
+        _look(_turn("Presets", ("Next favourite preset", "KEY_COMMA"), ("Previous favourite preset", "KEY_DOT"),
+                    ("Last used preset", "KEY_SLASH"), color=COLORS["brush"], treshold=60), CANVAS),
+        _tap("Eraser", ("Toggle the eraser", "KEY_E"), color=COLORS["history"], icon="edit-clear-symbolic"),
+        _tap("Reset colours", ("Black and white", "KEY_D"), color=COLORS["navigate"], icon="color-select-symbolic"),
+    ], icon="document-edit-symbolic")
+    layers = _group("Layers", [
+        _turn("Select layer", ("Layer above", "KEY_PAGEUP"), ("Layer below", "KEY_PAGEDOWN"),
+              color=COLORS["layers"], treshold=60),
+        _turn("Move layer", ("Move up", CTRL, "KEY_PAGEUP"), ("Move down", CTRL, "KEY_PAGEDOWN"),
+              color=COLORS["layers"], treshold=60),
+        _tap("New layer", ("New paint layer", "KEY_INSERT"), color=COLORS["navigate"], icon="list-add-symbolic"),
+        _tap("Duplicate layer", ("Duplicate layer", CTRL, "KEY_J"), color=COLORS["history"], icon="edit-copy-symbolic"),
+        _tap("Merge down", ("Merge with the layer below", CTRL, "KEY_E"), color=COLORS["cut"], icon="go-down-symbolic"),
+    ], icon="view-list-symbolic")
+    view = krita_profile_segments()
+    return [
+        _look(brush_size(), CANVAS),
+        _look(view[1], CANVAS),  # Opacity
+        _look(view[2], VIEW),  # Zoom
+        _look(view[3], VIEW),  # Rotate canvas
+        brush,
+        layers,
+        undo_redo(),
+    ]
+
+
+# GIMP 3: Shift+Ctrl+N new layer, Shift+Ctrl+D duplicates, Ctrl+H anchors,
+# X swaps and D resets the colours.
+def gimp_advanced_segments() -> list[Segment]:
+    basic = gimp_profile_segments()
+    layers = _group("Layers", [
+        _rename(basic[3], "Select layer"),
+        _tap("New layer", ("New layer", CTRL, SHIFT, "KEY_N"), color=COLORS["navigate"], icon="list-add-symbolic"),
+        _tap("Duplicate layer", ("Duplicate layer", CTRL, SHIFT, "KEY_D"), color=COLORS["history"], icon="edit-copy-symbolic"),
+        _tap("Anchor", ("Anchor the floating layer", CTRL, "KEY_H"), color=COLORS["cut"], icon="go-down-symbolic"),
+    ], icon="view-list-symbolic")
+    colours = _group("Colours", [
+        _tap("Swap colours", ("Swap colours", "KEY_X"), color=COLORS["light"], icon="color-select-symbolic"),
+        _tap("Reset colours", ("Black and white", "KEY_D"), color=COLORS["navigate"], icon="color-select-symbolic"),
+    ], icon="color-select-symbolic")
+    return [
+        _look(basic[0], CANVAS),  # Brush size
+        _look(basic[1], CANVAS),  # Opacity
+        _look(basic[2], VIEW),  # Zoom
+        layers,
+        colours,
+        basic[4],  # Undo / Redo
+        clipboard_group(),
+    ]
+
+
+# Inkscape 1.x: H / V flip, Ctrl+D duplicates, Ctrl+G groups, Shift+Ctrl+G
+# ungroups, Home / End raise to the top and lower to the bottom.
+def inkscape_advanced_segments() -> list[Segment]:
+    basic = inkscape_profile_segments()
+    objects = _group("Objects", [
+        _tap("Duplicate", ("Duplicate", CTRL, "KEY_D"), color=COLORS["history"], icon="edit-copy-symbolic"),
+        _tap("Group", ("Group", CTRL, "KEY_G"), color=COLORS["layers"], icon="view-list-symbolic"),
+        _tap("Ungroup", ("Ungroup", CTRL, SHIFT, "KEY_G"), color=COLORS["layers"], icon="view-list-symbolic"),
+        _tap("Flip horizontal", ("Flip horizontally", "KEY_H"), color=COLORS["navigate"], icon="object-flip-horizontal-symbolic"),
+        _tap("Flip vertical", ("Flip vertically", "KEY_V"), color=COLORS["navigate"], icon="object-flip-vertical-symbolic"),
+        _turn("Top / Bottom", ("Raise to top", "KEY_HOME"), ("Lower to bottom", "KEY_END"),
+              color=COLORS["layers"], treshold=90),
+    ], icon="view-list-symbolic")
+    return [
+        _look(basic[0], VIEW),  # Zoom
+        _look(basic[1], CANVAS),  # Rotate
+        _look(basic[2], CANVAS),  # Scale
+        basic[3],  # Arrange
+        objects,
+        basic[4],  # Undo / Redo
+        clipboard_group(),
+    ]
+
+
+# darktable 5: in the lighttable Ctrl+C / Ctrl+V copy and paste the history
+# stack and Ctrl+D duplicates the image; F11 is full screen.
+def darktable_advanced_segments() -> list[Segment]:
+    basic = darktable_profile_segments()
+    develop = _group("Edits", [
+        _tap("Copy edits", ("Copy the history stack", CTRL, "KEY_C"), color=COLORS["history"], icon="edit-copy-symbolic"),
+        _tap("Paste edits", ("Paste the history stack", CTRL, "KEY_V"), color=COLORS["history"], icon="edit-paste-symbolic"),
+        _tap("Duplicate image", ("Duplicate the image", CTRL, "KEY_D"), color=COLORS["layers"], icon="image-x-generic-symbolic"),
+        basic[4],  # Undo / Redo
+    ], icon="edit-copy-symbolic")
+    culling = _group("Culling", [basic[2], basic[3]], icon="starred-symbolic")  # Rating, colour labels
+    return [
+        _look(basic[0], VIEW),  # Zoom
+        _look(basic[1], VIEW),  # Photo
+        culling,
+        develop,
+        fullscreen(),
+    ]
+
+
+def obs_advanced_segments() -> list[Segment]:
+    basic = obs_profile_segments()
+    output = _group("Output", [basic[1], basic[2], basic[4]], icon="media-record-symbolic")  # Stream, Pause, Replay
+    return [basic[0], basic[3], output, volume(), mute(), media_group()]
+
+
+def browser_segments() -> list[Segment]:
+    return [vertical_scroll(), zoom_wheel(), tabs(), browser_history(), volume()]
+
+
+def browser_advanced_segments() -> list[Segment]:
+    tab_group = _group("Tabs", [
+        _rename(tabs(), "Switch tabs"),
+        _tap("New tab", ("New tab", CTRL, "KEY_T"), color=COLORS["tabs"], icon="tab-new-symbolic"),
+        _tap("Close tab", ("Close tab", CTRL, "KEY_W"), color=COLORS["record"], icon="window-close-symbolic"),
+        _tap("Reopen tab", ("Reopen the closed tab", CTRL, SHIFT, "KEY_T"), color=COLORS["history"], icon="edit-undo-symbolic"),
+    ], icon="view-paged-symbolic")
+    return [vertical_scroll(), zoom_wheel(), browser_history(), tab_group,
+            _group("Page", [pages(), find(), fullscreen(), horizontal_scroll()], icon="view-paged-symbolic"),
+            media_group()]
+
+
+def libreoffice_segments() -> list[Segment]:
+    return [vertical_scroll(), zoom_wheel(), font_size(), undo_redo([CTRL, "KEY_Y"])]
+
+
+def libreoffice_advanced_segments() -> list[Segment]:
+    text = _group("Text", [
+        font_size(),
+        _tap("Bold", ("Bold", CTRL, "KEY_B"), color=COLORS["zoom"], icon="format-text-bold-symbolic"),
+        _tap("Italic", ("Italic", CTRL, "KEY_I"), color=COLORS["zoom"], icon="format-text-italic-symbolic"),
+        _tap("Underline", ("Underline", CTRL, "KEY_U"), color=COLORS["zoom"], icon="format-text-underline-symbolic"),
+        _tap("Align left", ("Align left", CTRL, "KEY_L"), color=COLORS["navigate"], icon="format-justify-left-symbolic"),
+        _tap("Centre", ("Centre", CTRL, "KEY_E"), color=COLORS["navigate"], icon="format-justify-center-symbolic"),
+    ], icon="font-x-generic-symbolic")
+    return [vertical_scroll(), pages(), zoom_wheel(), text, undo_redo([CTRL, "KEY_Y"]), clipboard_group(), save()]
+
+
+def code_editor_segments() -> list[Segment]:
+    return [vertical_scroll(), _reset_with(zoom_keys(), "Reset zoom", CTRL, "KEY_KP0"),
+            _rename(tabs(), "Editor tabs"), undo_redo(), horizontal_scroll()]
+
+
+# Visual Studio Code / VSCodium on Linux: Ctrl+Alt+- / Ctrl+Shift+- go back
+# and forward, Alt+Up/Down move the line, Ctrl+] / Ctrl+[ indent, Ctrl+/
+# comments, Ctrl+P opens a file, Ctrl+Shift+P the command palette.
+def code_editor_advanced_segments() -> list[Segment]:
+    editing = _group("Edit code", [
+        _turn("Move line", ("Line down", ALT, "KEY_DOWN"), ("Line up", ALT, "KEY_UP"),
+              color=COLORS["history"], treshold=45),
+        _turn("Indent", ("Indent", CTRL, "KEY_RIGHTBRACE"), ("Outdent", CTRL, "KEY_LEFTBRACE"),
+              color=COLORS["navigate"], treshold=60),
+        _tap("Comment", ("Toggle comment", CTRL, "KEY_SLASH"), color=COLORS["zoom"], icon="font-x-generic-symbolic"),
+        _tap("Find", ("Find", CTRL, "KEY_F"), color=COLORS["zoom"], icon="edit-find-symbolic"),
+        save(),
+    ], icon="document-edit-symbolic")
+    go = _group("Go to", [
+        _turn("Back / Forward", ("Forward", CTRL, SHIFT, "KEY_MINUS"), ("Back", CTRL, ALT, "KEY_MINUS"),
+              color=COLORS["history"], treshold=60),
+        _tap("Open file", ("Quick open", CTRL, "KEY_P"), color=COLORS["navigate"], icon="document-open-symbolic"),
+        _tap("Commands", ("Command palette", CTRL, SHIFT, "KEY_P"), color=COLORS["tabs"], icon="system-search-symbolic"),
+        pages(),
+    ], icon="go-next-symbolic")
+    return code_editor_segments()[:4] + [editing, go, clipboard_group()]
+
+
+def spotify_segments() -> list[Segment]:
+    return [tracks(), volume(), seek([SHIFT, "KEY_RIGHT"], [SHIFT, "KEY_LEFT"])]
+
+
+def spotify_advanced_segments() -> list[Segment]:
+    return spotify_segments() + [mute(), _group("System", [brightness(), mic_mute(), overview()],
+                                                icon="preferences-system-symbolic")]
+
+
+def video_player_segments() -> list[Segment]:
+    return [seek(), volume(), tracks()]
+
+
+# F is full screen in VLC, mpv, Celluloid, Totem and Haruna.
+def video_player_advanced_segments() -> list[Segment]:
+    return video_player_segments() + [
+        _tap("Full screen", ("Full screen", "KEY_F"), color=COLORS["tabs"], icon="view-fullscreen-symbolic"),
+        mute(), brightness(),
+    ]
+
+
+# Files (GNOME Files, Dolphin, Nemo, Thunar): Alt+Left/Right history,
+# Alt+Up the parent folder, Ctrl+H hidden files, Ctrl+PgUp/PgDown tabs.
+def file_manager_segments() -> list[Segment]:
+    return [
+        vertical_scroll(),
+        _turn("Back / Forward", ("Forward", ALT, "KEY_RIGHT"), ("Back", ALT, "KEY_LEFT"),
+              ("Parent folder", ALT, "KEY_UP"), color=COLORS["history"], treshold=60),
+        zoom_wheel(),
+        tabs(),
+        _tap("Hidden files", ("Show hidden files", CTRL, "KEY_H"), color=COLORS["light"], icon="view-reveal-symbolic"),
+    ]
+
+
+def file_manager_advanced_segments() -> list[Segment]:
+    return file_manager_segments() + [
+        up_down(),
+        _group("Files", [copy(), cut(), paste(), select_all(),
+                         _tap("New tab", ("New tab", CTRL, "KEY_T"), color=COLORS["tabs"], icon="tab-new-symbolic")],
+               icon="folder-symbolic"),
+    ]
+
+
 @dataclass(frozen=True)
 class AppPack:
     name: str
     hints: tuple[str, ...]
+    # The basic variant: a short menu with the most used functions.
     factory: Callable[[], list[Segment]]
     # Desktop ID used when the profile is added without the app installed.
     app_id: str = ""
     category: str = "Other"
     note: str = ""
+    # The advanced variant: more functions, in groups.
+    advanced: Callable[[], list[Segment]] | None = None
+    # The dial's look for the whole advanced profile (Profile.overlay).
+    advanced_look: tuple[tuple[str, object], ...] = ()
 
+    def segments(self, advanced: bool = False) -> list[Segment]:
+        return (self.advanced if advanced and self.advanced else self.factory)()
+
+
+# The menu of a timeline editor shows at the top, away from the timeline.
+TIMELINE_MENU = (("position", "top"),)
 
 # Creator applications first: the ProArt spirit of the laptop.
 APP_PACKS: tuple[AppPack, ...] = (
-    AppPack("GIMP", ("gimp",), gimp_profile_segments, "org.gimp.GIMP.desktop", "Photo & graphics"),
-    AppPack("Krita", ("krita",), krita_profile_segments, "org.kde.krita.desktop", "Photo & graphics"),
-    AppPack("Inkscape", ("inkscape",), inkscape_profile_segments, "org.inkscape.Inkscape.desktop", "Photo & graphics"),
-    AppPack("darktable", ("darktable",), darktable_profile_segments, "org.darktable.darktable.desktop", "Photo & graphics"),
-    AppPack("Blender", ("blender",), blender_profile_segments, "org.blender.Blender.desktop", "3D"),
-    AppPack("Kdenlive", ("kdenlive",), kdenlive_profile_segments, "org.kde.kdenlive.desktop", "Video"),
+    AppPack("GIMP", ("gimp",), gimp_profile_segments, "org.gimp.GIMP.desktop", "Photo & graphics",
+            advanced=gimp_advanced_segments),
+    AppPack("Krita", ("krita",), krita_profile_segments, "org.kde.krita.desktop", "Photo & graphics",
+            advanced=krita_advanced_segments),
+    AppPack("Inkscape", ("inkscape",), inkscape_profile_segments, "org.inkscape.Inkscape.desktop", "Photo & graphics",
+            advanced=inkscape_advanced_segments),
+    AppPack("darktable", ("darktable",), darktable_profile_segments, "org.darktable.darktable.desktop", "Photo & graphics",
+            advanced=darktable_advanced_segments),
+    AppPack("Blender", ("blender",), blender_profile_segments, "org.blender.Blender.desktop", "3D",
+            advanced=blender_advanced_segments),
+    AppPack("Kdenlive", ("kdenlive",), kdenlive_profile_segments, "org.kde.kdenlive.desktop", "Video",
+            advanced=kdenlive_advanced_segments, advanced_look=TIMELINE_MENU),
     AppPack("DaVinci Resolve", ("resolve", "davinci"), resolve_profile_segments,
-            "com.blackmagicdesign.resolve.desktop", "Video"),
-    AppPack("Shotcut", ("shotcut",), shotcut_profile_segments, "org.shotcut.Shotcut.desktop", "Video"),
-    AppPack("Audacity", ("audacity",), audacity_profile_segments, "org.audacityteam.Audacity.desktop", "Audio"),
+            "com.blackmagicdesign.resolve.desktop", "Video",
+            advanced=resolve_advanced_segments, advanced_look=TIMELINE_MENU),
+    AppPack("Shotcut", ("shotcut",), shotcut_profile_segments, "org.shotcut.Shotcut.desktop", "Video",
+            advanced=shotcut_advanced_segments, advanced_look=TIMELINE_MENU),
+    AppPack("Audacity", ("audacity",), audacity_profile_segments, "org.audacityteam.Audacity.desktop", "Audio",
+            advanced=audacity_advanced_segments, advanced_look=TIMELINE_MENU),
     AppPack("OBS Studio", ("obsproject", "obs-studio"), obs_profile_segments, "com.obsproject.Studio.desktop",
-            "Audio", "Assign Ctrl+Shift+F8 to F12 in OBS: Settings, Hotkeys"),
+            "Audio", "Assign Ctrl+Shift+F8 to F12 in OBS: Settings, Hotkeys", advanced=obs_advanced_segments),
     AppPack("Browser", ("firefox", "chrom", "brave", "vivaldi", "microsoft-edge", "epiphany", "librewolf", "zen_browser", "zen-browser"),
-            lambda: [vertical_scroll(), zoom_wheel(), tabs(), browser_history(), volume()],
-            "firefox.desktop", "Everyday"),
-    AppPack("LibreOffice", ("libreoffice",),
-            lambda: [vertical_scroll(), zoom_wheel(), font_size(), undo_redo([CTRL, "KEY_Y"])],
-            "libreoffice-writer.desktop", "Everyday"),
-    AppPack("Code editor", ("code", "codium", "zed", "gnome.textedit", "kate"),
-            lambda: [vertical_scroll(), _reset_with(zoom_keys(), "Reset zoom", CTRL, "KEY_KP0"),
-                     _rename(tabs(), "Editor tabs"), undo_redo(), horizontal_scroll()],
-            "code.desktop", "Everyday"),
-    AppPack("Spotify", ("spotify",),
-            lambda: [tracks(), volume(), seek([SHIFT, "KEY_RIGHT"], [SHIFT, "KEY_LEFT"])],
-            "spotify.desktop", "Everyday"),
+            browser_segments, "firefox.desktop", "Everyday", advanced=browser_advanced_segments),
+    AppPack("LibreOffice", ("libreoffice",), libreoffice_segments, "libreoffice-writer.desktop", "Everyday",
+            advanced=libreoffice_advanced_segments),
+    AppPack("Code editor", ("code", "codium", "zed", "gnome.textedit", "kate"), code_editor_segments,
+            "code.desktop", "Everyday", "The advanced variant uses the keys of VS Code and VSCodium",
+            advanced=code_editor_advanced_segments),
+    AppPack("Spotify", ("spotify",), spotify_segments, "spotify.desktop", "Everyday",
+            advanced=spotify_advanced_segments),
     AppPack("Video player", ("vlc", "mpv", "celluloid", "totem", "showtime", "haruna", "smplayer"),
-            lambda: [seek(), volume(), tracks()], "vlc.desktop", "Everyday"),
+            video_player_segments, "vlc.desktop", "Everyday", advanced=video_player_advanced_segments),
+    AppPack("Files", ("nautilus", "dolphin", "nemo", "thunar"), file_manager_segments,
+            "org.gnome.Nautilus.desktop", "Everyday", advanced=file_manager_advanced_segments),
 )
 
 
@@ -624,12 +1140,31 @@ def pack_for_app(app_id: str | None) -> AppPack | None:
     return None
 
 
-def profile_for_app(name: str, app_id: str) -> Profile:
+def profile_for_app(name: str, app_id: str, advanced: bool = False) -> Profile:
     """Create an application profile, pre-programmed when a pack matches."""
     pack = pack_for_app(app_id)
-    return Profile(name=name, app_id=app_id, segments=pack.factory() if pack else [])
+    if pack is None:
+        return Profile(name=name, app_id=app_id)
+    return _pack_profile(pack, name, app_id, advanced)
 
 
-def profile_for_pack(pack: AppPack) -> Profile:
+def profile_for_pack(pack: AppPack, advanced: bool = False) -> Profile:
     """Profile for a pack without the application installed."""
-    return Profile(name=pack.name, app_id=pack.app_id, segments=pack.factory())
+    return _pack_profile(pack, pack.name, pack.app_id, advanced)
+
+
+def _pack_profile(pack: AppPack, name: str, app_id: str, advanced: bool) -> Profile:
+    advanced = advanced and pack.advanced is not None
+    return Profile(name=name, app_id=app_id, segments=pack.segments(advanced),
+                   overlay=dict(pack.advanced_look) if advanced else {})
+
+
+def variant_summary(pack: AppPack, advanced: bool = False) -> str:
+    """"6 functions" or "7 sectors, 3 groups with 14 functions" for a pack variant."""
+    segments = pack.segments(advanced)
+    groups = [segment for segment in segments if segment.is_group]
+    if not groups:
+        return f"{len(segments)} functions"
+    inside = sum(len(group.items) for group in groups)
+    return (f"{len(segments)} sectors, {len(groups)} group{'s' if len(groups) > 1 else ''} "
+            f"with {inside} more functions")
