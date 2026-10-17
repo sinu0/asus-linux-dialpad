@@ -24,6 +24,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk, Gtk4LayerShell  # noqa: E402
 from config import identity  # noqa: E402
 from config.schema import CONFIG_DIR, CONFIG_FILE  # noqa: E402
 from config.skins import SKINS_DIR, load_skins, resolve_skin  # noqa: E402
+from desktop import pointer as desktop_pointer  # noqa: E402
 from desktop.color_scheme import ColorScheme  # noqa: E402
 from overlay import gtk_icons, look, painter  # noqa: E402
 from overlay.visibility import Visibility  # noqa: E402
@@ -267,6 +268,11 @@ class DialFrontend:
         self._reload_source = 0
         self._monitors_changed = 0
         self._placed_on = None
+        # (monitor, [x, y] from its corner) when a fully hidden dial with
+        # position "pointer" was shown; kept while it is visible.
+        self._pointer = None
+        # The output was chosen for the pointer, not by the compositor.
+        self._pinned_to_pointer = False
         self._look_key = ""
         self._pill_key = ""
         self._skin_id = ""
@@ -411,7 +417,7 @@ class DialFrontend:
         self.dial_actor = FadingWindow(self._dial)
         self.pill_actor = FadingWindow(self._pill)
         self.visibility = Visibility(self.dial_actor, self.pill_actor, GLibTimers(), self._look, lambda: self.state,
-                                     lambda: self.appearance["hide_delay_ms"])
+                                     lambda: self.appearance["hide_delay_ms"], self._follow_pointer)
 
     def _on_realize(self, window) -> None:
         window.get_surface().connect("enter-monitor", self._on_enter_monitor)
@@ -439,11 +445,46 @@ class DialFrontend:
             pinned = self._monitor_by_connector(self._output)
             if pinned is not None:
                 return pinned
-        monitors = Gdk.Display.get_default().get_monitors()
-        items = [monitors.get_item(index) for index in range(monitors.get_n_items())]
+        items = self._monitors()
         if self._placed_on in items:
             return self._placed_on
         return items[0] if items else None
+
+    def _monitors(self) -> list:
+        monitors = Gdk.Display.get_default().get_monitors()
+        return [monitors.get_item(index) for index in range(monitors.get_n_items())]
+
+    def _follow_pointer(self) -> None:
+        """A fully hidden dial with position "pointer" comes back next to
+        the pointer, on its output, where the compositor tells where it is
+        (desktop/pointer.py); elsewhere it goes to "lower". Fading in or out
+        counts as shown, so a visible dial never moves."""
+        if self.dial_actor.visible or self.pill_actor.visible:
+            return
+        found = None
+        if self._look()["position"] == "pointer":
+            at = desktop_pointer.position()
+            for monitor in self._monitors() if at else ():
+                area = monitor.get_geometry()
+                if area.x <= at[0] < area.x + area.width and area.y <= at[1] < area.y + area.height:
+                    found = (monitor, [at[0] - area.x, at[1] - area.y])
+                    break
+        if found and self._output and found[0] is not self._monitor_by_connector(self._output):
+            found = None  # --output pins the dial to another output
+        if found and not self._output:
+            for window in (self._dial, self._pill):
+                Gtk4LayerShell.set_monitor(window, found[0])
+            self._pinned_to_pointer = True
+        elif self._pinned_to_pointer:
+            # Back to the compositor's choice.
+            for window in (self._dial, self._pill):
+                Gtk4LayerShell.set_monitor(window, None)
+            self._pinned_to_pointer = False
+        if found or self._pointer:
+            self._pointer = found
+            if found:
+                self._placed_on = found[0]
+            self._apply_geometry()
 
     @staticmethod
     def _logical(monitor) -> dict:
@@ -456,6 +497,10 @@ class DialFrontend:
     def view(self) -> dict:
         return look.make_view(self.state, self.details, self.appearance, self.skin)
 
+    def _dial_pointer(self, monitor):
+        """The pointer on this monitor when the dial appeared, or None."""
+        return self._pointer[1] if self._pointer and self._pointer[0] is monitor else None
+
     def _apply_geometry(self) -> None:
         monitor = self._monitor()
         if monitor is None:
@@ -464,7 +509,8 @@ class DialFrontend:
         scale = self.appearance["scale"]
         current = self._look()
         self._look_key = json.dumps(current)
-        placed = look.overlay_placement(self._logical(monitor), scale, current["position"], current["custom"])
+        placed = look.overlay_placement(self._logical(monitor), scale, current["position"], current["custom"],
+                                        self._dial_pointer(monitor), current["pointerSide"], current["pointerGap"])
         # The window is only as large as the dial, so fading it composites
         # the dial and not the whole screen.
         self._dial.get_child().set_size_request(placed["width"], placed["height"])
@@ -486,9 +532,10 @@ class DialFrontend:
         palette = self.skin["palette"]
         content = look.pill_content(self.view())
         geometry = self._logical(monitor)
+        pointer = self._dial_pointer(monitor)
         # The driver signals every few degrees; restyle only on a change.
         key = json.dumps([content, scale, palette["surfaceTop"], palette["rim"], palette["text"], self._look_key,
-                          geometry], default=str)
+                          geometry, pointer], default=str)
         if key == self._pill_key:
             return
         self._pill_key = key
@@ -517,7 +564,7 @@ class DialFrontend:
         self._pill_value.set_visible(bool(content["value"]))
         width = self._pill_box.measure(Gtk.Orientation.HORIZONTAL, -1)[1]
         height = self._pill_box.measure(Gtk.Orientation.VERTICAL, width)[1]
-        placed = look.pill_placement(geometry, scale, current, width, height)
+        placed = look.pill_placement(geometry, scale, current, width, height, pointer)
         Gtk4LayerShell.set_margin(self._pill, Gtk4LayerShell.Edge.LEFT, placed["x"])
         Gtk4LayerShell.set_margin(self._pill, Gtk4LayerShell.Edge.TOP, placed["y"])
 

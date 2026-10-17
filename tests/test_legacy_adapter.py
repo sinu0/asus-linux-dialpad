@@ -14,6 +14,7 @@ from config.schema import (  # noqa: E402
     _decoder,
     _default_config,
     _encoder,
+    overlay_rule,
 )
 
 
@@ -181,6 +182,20 @@ class DialLookTest(unittest.TestCase):
         overlay = _decoder(data, DialPadConfig).overlay
         self.assertEqual((overlay.position, overlay.custom_x, overlay.visibility, overlay.fade_opacity),
                          ("custom", 0.0, "full", 100))
+
+    def test_near_the_pointer(self):
+        data = _encoder(_default_config())
+        self.assertEqual((data["overlay"]["pointer_side"], data["overlay"]["pointer_gap"]), ("below-right", 24))
+        data["overlay"].update({"position": "pointer", "pointer_side": "above", "pointer_gap": 1000})
+        overlay = _decoder(data, DialPadConfig).overlay
+        self.assertEqual((overlay.position, overlay.pointer_side, overlay.pointer_gap), ("pointer", "above", 400))
+        data["overlay"].update({"pointer_side": "sideways", "pointer_gap": "far"})
+        overlay = _decoder(data, DialPadConfig).overlay
+        self.assertEqual((overlay.pointer_side, overlay.pointer_gap), ("below-right", 24))
+        rule = {"position": "pointer", "pointer_side": "left", "pointer_gap": 12.7}
+        self.assertEqual(overlay_rule(rule), {"position": "pointer", "pointer_side": "left", "pointer_gap": 12})
+        self.assertEqual(overlay_rule({"pointer_side": ["left"], "pointer_gap": True}), {})
+        self.assertEqual(overlay_rule({"pointer_gap": -5}), {"pointer_gap": 0})
 
 
 if __name__ == "__main__":

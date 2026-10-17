@@ -48,6 +48,8 @@ const DEFAULT_APPEARANCE = {
     custom_y: 0.5,
     visibility: 'full',
     fade_opacity: 35,
+    pointer_side: 'below-right',
+    pointer_gap: 24,
 };
 
 export default class DialPadExtension extends Extension {
@@ -56,8 +58,10 @@ export default class DialPadExtension extends Extension {
         this._detailsSignalId = 0;
         this._focusHandlerId = 0;
         this._monitorsId = 0;
-        // The monitor the dial is on; kept until it is fully hidden.
+        // The monitor the dial is on and the pointer on it ([x, y] from its
+        // corner) when the dial appeared; kept until it is fully hidden.
         this._monitor = null;
+        this._pointer = null;
         this._configMonitors = [];
         this._configReloadId = 0;
         this._interfaceSettings = null;
@@ -308,6 +312,7 @@ export default class DialPadExtension extends Extension {
         Main.layoutManager.uiGroup.add_child(this._pill);
         this._monitorsId = Main.layoutManager.connect('monitors-changed', () => {
             this._monitor = null;
+            this._pointer = null;
             this._applyGeometry();
         });
         GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
@@ -333,6 +338,7 @@ export default class DialPadExtension extends Extension {
         this._pillKey = '';
         this._shownActor = null;
         this._monitor = null;
+        this._pointer = null;
         this._layers?.destroy();
         this._layers = null;
         this._iconLayer = null;
@@ -348,13 +354,26 @@ export default class DialPadExtension extends Extension {
         return monitors.includes(this._monitor) ? this._monitor : Main.layoutManager.primaryMonitor;
     }
 
-    // A dial that is fully hidden comes back on the monitor with the pointer.
+    // The pointer on the dial's monitor, or null where it is unknown (the
+    // dial was not shown since the monitors changed).
+    _dialPointer() {
+        return this._monitor && this._monitor === this._dialMonitor() ? this._pointer : null;
+    }
+
+    // A dial that is fully hidden comes back on the monitor with the
+    // pointer, and with position "pointer" next to it. Fading in or out
+    // counts as shown: the pointer is not read again then, so the dial
+    // never moves under the finger, also when a profile changes its look.
     _followPointer() {
         if (this._overlay?.visible || this._pill?.visible)
             return;
         const monitor = Main.layoutManager.currentMonitor ?? Main.layoutManager.primaryMonitor;
-        const moved = monitor !== this._dialMonitor();
+        const [x, y] = global.get_pointer();
+        const pointer = monitor ? [x - monitor.x, y - monitor.y] : null;
+        const moved = monitor !== this._dialMonitor() ||
+            (this._look().position === 'pointer' && String(pointer) !== String(this._dialPointer()));
         this._monitor = monitor;
+        this._pointer = pointer;
         if (moved)
             this._applyGeometry();
     }
@@ -368,7 +387,8 @@ export default class DialPadExtension extends Extension {
         const scale = this._appearance.scale;
         const look = this._look();
         this._lookKey = JSON.stringify(look);
-        const { x, y, width, height } = overlayPlacement(monitor, scale, look.position, look.custom);
+        const { x, y, width, height } = overlayPlacement(monitor, scale, look.position, look.custom,
+            this._dialPointer(), look.pointerSide, look.pointerGap);
         // The overlay is only as large as the dial, so fading it composites
         // the dial and not the whole screen.
         this._overlay.set_size(width, height);
@@ -395,8 +415,9 @@ export default class DialPadExtension extends Extension {
         const palette = this._skin.palette;
         const content = pillContent(this._view());
         // The driver signals every few degrees; restyle only on a change.
+        const pointer = this._dialPointer();
         const key = JSON.stringify([content, scale, palette.surfaceTop, palette.rim, palette.text, this._lookKey,
-            monitor.x, monitor.y, monitor.width, monitor.height]);
+            monitor.x, monitor.y, monitor.width, monitor.height, pointer]);
         if (key === this._pillKey)
             return;
         this._pillKey = key;
@@ -416,7 +437,7 @@ export default class DialPadExtension extends Extension {
         this._pillValue.set_style(`color: ${rgba(content.color)}; font-weight: bold; font-size: ${fontSize}px;`);
         const [, width] = pill.get_preferred_width(-1);
         const [, height] = pill.get_preferred_height(width);
-        const { x, y } = pillPlacement(monitor, scale, this._look(), width, height);
+        const { x, y } = pillPlacement(monitor, scale, this._look(), width, height, pointer);
         pill.set_position(monitor.x + x, monitor.y + y);
     }
 

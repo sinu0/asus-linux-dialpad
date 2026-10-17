@@ -23,8 +23,18 @@ EXTENSION_JS = ROOT / "gnome" / "extension" / "extension.js"
 
 MONITORS = [(1920, 1080), (1440, 900), (2560, 1600), (1280, 720), (3440, 1440), (800, 600), (1707, 1067)]
 SCALES = [0.6, 0.85, 1.0, 1.25, 1.6]
-POSITIONS = ["center", "lower", "bottom", "top", "custom", "side", None]
+POSITIONS = ["center", "lower", "bottom", "top", "custom", "pointer", "side", None]
 CUSTOM = [[0, 0], [0.5, 0.5], [1, 1], [0.25, 0.75], [0.123, 0.987]]
+SIDES = ["below-right", "below-left", "above-right", "above-left", "right", "left", "above", "below", "nope"]
+GAPS = [0, 24, 37.5, 400]
+# Pointers as fractions of the monitor: corners, edges, centre and odd spots.
+POINTER_SPOTS = [(0, 0), (1, 0), (0, 1), (0.9995, 0.9995), (0.5, 0.5), (0.5, 0), (0, 0.5), (1, 0.5), (0.5, 1),
+                 (0.31, 0.77), (0.123, 0.456)]
+
+
+def spot(w, h, fx, fy):
+    """A pointer on a monitor: whole pixels, or fractional ones for odd spots."""
+    return [w * fx, h * fy] if (fx, fy) == (0.123, 0.456) else [round(w * fx), round(h * fy)]
 
 LOOKS = [
     {},
@@ -33,10 +43,16 @@ LOOKS = [
     {"position": "side", "custom_x": 7, "visibility": "loud", "fade_opacity": -1},
     {"position": "top", "custom_x": True, "custom_y": "0.3", "visibility": "pill", "fade_opacity": 100},
     {"custom_y": 0, "fade_opacity": 0, "visibility": ["pill"]},
+    {"position": "pointer", "pointer_side": "left", "pointer_gap": 0, "visibility": "pill"},
+    {"position": "pointer", "pointer_side": "above", "pointer_gap": 400},
+    {"position": "pointer", "pointer_side": "sideways", "pointer_gap": 401, "visibility": "pill"},
+    {"pointer_side": ["left"], "pointer_gap": "24", "visibility": "pill"},
+    {"pointer_side": "above-left", "pointer_gap": True},
 ]
 APPEARANCES = [
     {"position": "lower", "custom_x": 0.5, "custom_y": 0.5, "visibility": "full", "fade_opacity": 35},
     {"position": "bottom", "custom_x": 0.2, "custom_y": 0.8, "visibility": "pill", "fade_opacity": 70},
+    {"position": "pointer", "pointer_side": "right", "pointer_gap": 60, "visibility": "pill"},
     {},
 ]
 
@@ -86,11 +102,11 @@ import { effectiveLook, iconLayout, overlayPlacement, parseColor, pillContent, p
          pointerPlacement, isSelectedMode, segmentState, iconNameFor } from '%s';
 const input = JSON.parse(new TextDecoder().decode(GLib.file_get_contents(ARGV[0])[1]));
 const out = {};
-out.placements = input.placements.map(([w, h, scale, position, custom]) =>
-    overlayPlacement({ width: w, height: h }, scale, position, custom));
+out.placements = input.placements.map(([w, h, scale, position, custom, ...near]) =>
+    overlayPlacement({ width: w, height: h }, scale, position, custom, ...near));
 out.looks = input.looks.map(([appearance, look]) => effectiveLook(appearance, look));
-out.pills = input.pills.map(([w, h, scale, look, pw, ph]) =>
-    pillPlacement({ width: w, height: h }, scale, look, pw, ph));
+out.pills = input.pills.map(([w, h, scale, look, pw, ph, pointer]) =>
+    pillPlacement({ width: w, height: h }, scale, look, pw, ph, pointer));
 out.views = input.views.map(view => ({
     pill: pillContent(view),
     icons: iconLayout(view),
@@ -124,12 +140,20 @@ class LookTwinsTest(unittest.TestCase):
             "placements": [
                 [w, h, scale, position, custom]
                 for (w, h), scale, position, custom in itertools.product(MONITORS, SCALES, POSITIONS, CUSTOM)
+            ] + [
+                [w, h, scale, position, None, spot(w, h, *at), side, gap]
+                for (w, h), scale, position, at, side, gap in itertools.product(
+                    MONITORS, SCALES, ["pointer", "lower"], POINTER_SPOTS, SIDES, GAPS)
+            ] + [
+                # Without a pointer "pointer" is "lower".
+                [w, h, scale, "pointer", None, None, "left", 24] for (w, h), scale in itertools.product(MONITORS, SCALES)
             ],
             "looks": [[appearance, rule] for appearance in APPEARANCES for rule in LOOKS],
             "pills": [
-                [w, h, scale, look.effective_look(appearance, rule), pw, ph]
-                for (w, h), scale, appearance, rule, (pw, ph) in itertools.product(
-                    MONITORS[:3], SCALES[::2], APPEARANCES, LOOKS, [(200, 40), (151, 37), (2000, 50)])
+                [w, h, scale, look.effective_look(appearance, rule), pw, ph, pointer and spot(w, h, *pointer)]
+                for (w, h), scale, appearance, rule, (pw, ph), pointer in itertools.product(
+                    MONITORS[:3], SCALES[::2], APPEARANCES, LOOKS, [(200, 40), (151, 37), (2000, 50)],
+                    [None, (0, 0), (0.5, 0.5), (1, 1), (0.31, 0.77)])
             ],
             "views": views(),
             "colors": ["#e7b98d", "E7B98D", " #102030 ", "#12345", "#1234567", None, 7, "#gggggg"],
@@ -147,9 +171,10 @@ class LookTwinsTest(unittest.TestCase):
 
     def test_overlay_placement(self):
         for args, expected in zip(self.input["placements"], self.js["placements"]):
-            w, h, scale, position, custom = args
+            w, h, scale, position, custom, *near = args
             with self.subTest(args=args):
-                self.assertEqual(look.overlay_placement({"width": w, "height": h}, scale, position, custom), expected)
+                self.assertEqual(look.overlay_placement({"width": w, "height": h}, scale, position, custom, *near),
+                                 expected)
 
     def test_effective_look(self):
         for (appearance, rule), expected in zip(self.input["looks"], self.js["looks"]):
@@ -158,9 +183,9 @@ class LookTwinsTest(unittest.TestCase):
 
     def test_pill_placement(self):
         for args, expected in zip(self.input["pills"], self.js["pills"]):
-            w, h, scale, rule, pw, ph = args
+            w, h, scale, rule, pw, ph, pointer = args
             with self.subTest(args=args):
-                self.assertEqual(look.pill_placement({"width": w, "height": h}, scale, rule, pw, ph), expected)
+                self.assertEqual(look.pill_placement({"width": w, "height": h}, scale, rule, pw, ph, pointer), expected)
 
     def test_views(self):
         for view, expected in zip(self.input["views"], self.js["views"]):
@@ -205,6 +230,25 @@ class ConstantsTest(unittest.TestCase):
         constants = js_constants(EXTENSION_JS)
         for name in ("FADE_IN_MS", "FADE_OUT_MS", "FADE_AFTER_MS", "FADE_SLOW_MS", "PILL_ICON_SIZE"):
             self.assertEqual(getattr(look, name), constants[name], name)
+
+    def test_positions_and_pointer_sides(self):
+        from config import schema
+
+        text = DIAL_JS.read_text()
+
+        def js_list(name):
+            return json.loads(re.search(rf"const {name} = (\[.*?\]);", text).group(1).replace("'", '"'))
+
+        self.assertEqual(js_list("LOOK_POSITIONS"), list(look.LOOK_POSITIONS))
+        self.assertEqual(list(schema.OVERLAY_POSITIONS), list(look.LOOK_POSITIONS))
+        self.assertEqual(js_list("POINTER_SIDES"), list(look.POINTER_SIDES))
+        self.assertEqual(list(schema.POINTER_SIDES), list(look.POINTER_SIDES))
+        constants = js_constants(DIAL_JS)
+        self.assertEqual((constants["POINTER_GAP"], constants["POINTER_GAP_MAX"]),
+                         (look.POINTER_GAP, look.POINTER_GAP_MAX))
+        self.assertEqual(schema.POINTER_GAP_MAX, look.POINTER_GAP_MAX)
+        self.assertEqual((schema.OverlayConfig().pointer_side, schema.OverlayConfig().pointer_gap),
+                         (look.POINTER_SIDES[0], look.POINTER_GAP))
 
     def test_extension_defaults(self):
         text = EXTENSION_JS.read_text()

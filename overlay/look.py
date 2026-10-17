@@ -1,9 +1,9 @@
 """What the on-screen dial shows and where, without any toolkit.
 
 Python twins of the logic in gnome/extension/dial.js (overlayPlacement,
-effectiveLook, pillContent, pillPlacement, iconLayout, pointerPlacement…)
-and of the state handling in gnome/extension/extension.js (appearance from
-config.json, OverlayState and OverlayDetails). The dials outside GNOME Shell
+besidePointer, effectiveLook, pillContent, pillPlacement, iconLayout,
+pointerPlacement…) and of the state handling in gnome/extension/extension.js
+(appearance from config.json, OverlayState and OverlayDetails). The dials outside GNOME Shell
 (overlay/layer_shell.py) use them, so every desktop places and fades the
 dial alike. tests/test_overlay_look.py runs the JavaScript originals in gjs
 and compares; keep both in sync.
@@ -59,10 +59,19 @@ DEFAULT_APPEARANCE = {
     "custom_y": 0.5,
     "visibility": "full",
     "fade_opacity": 35,
+    "pointer_side": "below-right",
+    "pointer_gap": 24,
 }
 
-LOOK_POSITIONS = ("center", "lower", "bottom", "top", "custom")
+LOOK_POSITIONS = ("center", "lower", "bottom", "top", "custom", "pointer")
 LOOK_VISIBILITIES = ("full", "fade", "pill")
+# Position "pointer": the dial's side of the pointer and its distance in
+# logical pixels (not multiplied by the scale).
+POINTER_SIDES = ("below-right", "below-left", "above-right", "above-left", "right", "left", "above", "below")
+POINTER_GAP = 24
+POINTER_GAP_MAX = 400
+# [vertical, horizontal] of each side: 1 below or right, -1 above or left.
+_POINTER_DIRECTIONS = ((1, 1), (1, -1), (-1, 1), (-1, -1), (0, 1), (0, -1), (-1, 0), (1, 0))
 
 
 # --- JavaScript arithmetic --------------------------------------------------
@@ -137,9 +146,43 @@ def skin_id(appearance: dict, prefers_dark: bool) -> str:
     return str(chosen or DEFAULT_SKIN)
 
 
-def overlay_placement(monitor, scale, position, custom=None) -> dict:
+def beside_pointer(monitor, pointer, side, gap, width, height, middle) -> dict:
+    """besidePointer(): a box next to the pointer ([x, y] on the monitor),
+    on the given side or the first one with room, kept on the monitor."""
+    px, py = pointer
+    v, h = _POINTER_DIRECTIONS[POINTER_SIDES.index(side) if side in POINTER_SIDES else 0]
+    if v and h:
+        candidates = ((v, h), (v, -h), (-v, h), (-v, -h))
+    elif v:
+        candidates = ((v, 0), (-v, 0), (0, 1), (0, -1))
+    else:
+        candidates = ((0, h), (0, -h), (1, 0), (-1, 0))
+    mw, mh = monitor["width"], monitor["height"]
+
+    def clamp(value, maximum):
+        return max(0, min(maximum, js_round(value)))
+
+    best = None
+    for cv, ch in candidates:
+        wanted_x = px + gap if ch > 0 else px - gap - width if ch < 0 else px - width / 2
+        wanted_y = py + gap if cv > 0 else py - gap - height if cv < 0 else py - middle
+        # Room on the side's own axes; the other one may be pushed in.
+        fits = ((not ch or (wanted_x >= 0 and wanted_x + width <= mw))
+                and (not cv or (wanted_y >= 0 and wanted_y + height <= mh)))
+        x = clamp(wanted_x, mw - width)
+        y = clamp(wanted_y, mh - height)
+        # How far the pointer is outside the box, up to the gap.
+        away = min(gap, max(x - px, px - x - width, y - py, py - y - height))
+        if best is None or away > best[2] or (away == best[2] and fits and not best[3]):
+            best = (x, y, away, fits)
+    return {"x": best[0], "y": best[1]}
+
+
+def overlay_placement(monitor, scale, position, custom=None, pointer=None,
+                      side=POINTER_SIDES[0], gap=POINTER_GAP) -> dict:
     """overlayPlacement(): where the dial goes on a monitor ({"width",
-    "height"} in logical pixels), relative to the monitor's corner."""
+    "height"} in logical pixels), relative to the monitor's corner;
+    pointer: [x, y] on the monitor for position "pointer"."""
     width = js_round(DIAL_D * scale)
     height = js_round((DIAL_D + HINT_H) * scale)
     mw, mh = monitor["width"], monitor["height"]
@@ -147,6 +190,9 @@ def overlay_placement(monitor, scale, position, custom=None) -> dict:
     def clamp(value, maximum):
         return max(0, min(maximum, js_round(value)))
 
+    if position == "pointer" and pointer:
+        placed = beside_pointer(monitor, pointer, side, gap, width, height, width / 2)
+        return {**placed, "width": width, "height": height}
     if position == "custom" and custom:
         return {
             "x": clamp(mw * custom[0] - width / 2, mw - width),
@@ -193,11 +239,17 @@ def effective_look(appearance, look) -> dict:
         "custom": [pick("custom_x", fraction, 0.5), pick("custom_y", fraction, 0.5)],
         "visibility": pick("visibility", member(LOOK_VISIBILITIES), "full"),
         "fadeOpacity": pick("fade_opacity", lambda value: _is_number(value) and 0 <= value <= 100, 35) / 100,
+        "pointerSide": pick("pointer_side", member(POINTER_SIDES), POINTER_SIDES[0]),
+        "pointerGap": pick("pointer_gap", lambda value: _is_number(value) and 0 <= value <= POINTER_GAP_MAX,
+                           POINTER_GAP),
     }
 
 
-def pill_placement(monitor, scale, look, width, height) -> dict:
-    """pillPlacement(): the pill sits where the dial's centre would be."""
+def pill_placement(monitor, scale, look, width, height, pointer=None) -> dict:
+    """pillPlacement(): the pill sits where the dial's centre would be, or
+    on the dial's side of the pointer."""
+    if look["position"] == "pointer" and pointer:
+        return beside_pointer(monitor, pointer, look["pointerSide"], look["pointerGap"], width, height, height / 2)
     cx, cy = monitor["width"] * look["custom"][0], monitor["height"] * look["custom"][1]
     if look["position"] != "custom":
         dial = overlay_placement(monitor, scale, look["position"])
