@@ -1,13 +1,68 @@
 """The installers copy files one by one; a module or extension file missing
-there only fails on the next start or login."""
+there only fails on the next start or login. Libraries come from
+distribution packages only (install_packages.sh); a library imported
+without a package there only fails on the user's laptop."""
 
 import ast
 import re
+import sys
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 EXTENSION = ROOT / "gnome" / "extension"
+PACKAGES_SCRIPT = ROOT / "install_packages.sh"
+
+# Package managers whose names are tested in containers (CI or by hand).
+MANAGERS = ("apt", "dnf", "pacman", "zypper")
+
+# Every library a shipped module imports: its group in install_packages.sh
+# and the package per manager (None: not packaged there, the import is
+# optional).
+LIBRARIES = {
+    "libevdev": ("required", {"apt": "python3-libevdev", "dnf": "python3-libevdev", "pacman": "python-libevdev", "zypper": "python3-libevdev"}),
+    "gi": ("required", {"apt": "python3-gi", "dnf": "python3-gobject", "pacman": "python-gobject", "zypper": "python3-gobject"}),
+    "cairo": ("required", {"apt": "python3-gi-cairo", "dnf": "python3-cairo", "pacman": "python-cairo", "zypper": "python3-gobject-cairo"}),
+    "pyatspi": ("optional", {"apt": "python3-pyatspi", "dnf": "python3-pyatspi", "pacman": "python-atspi", "zypper": "python3-atspi"}),
+    "periphery": ("optional", {"apt": "python3-periphery", "dnf": None, "pacman": None, "zypper": None}),
+    "pywayland": ("wayland", {"apt": "python3-pywayland", "dnf": "python3-pywayland", "pacman": "python-pywayland", "zypper": "python3-pywayland"}),
+    "Xlib": ("x11libs", {"apt": "python3-xlib", "dnf": "python3-xlib", "pacman": "python-xlib", "zypper": "python3-python-xlib"}),
+    "xcffib": ("x11libs", {"apt": "python3-xcffib", "dnf": "python3-xcffib", "pacman": "python-xcffib", "zypper": "python3-xcffib"}),
+    "systemd": ("systemd", {"apt": "python3-systemd", "dnf": "python3-systemd", "pacman": "python-systemd", "zypper": "python3-systemd"}),
+    "PySide6": ("ui", {"apt": "python3-pyside6.qtwidgets", "dnf": "python3-pyside6", "pacman": "pyside6", "zypper": "python3-pyside6"}),
+}
+
+# GObject introspection namespaces (gi.require_version) and their packages.
+TYPELIBS = {
+    "GLib": {"apt": "python3-gi", "dnf": "python3-gobject", "pacman": "python-gobject", "zypper": "python3-gobject"},
+    "Gio": {"apt": "python3-gi", "dnf": "python3-gobject", "pacman": "python-gobject", "zypper": "python3-gobject"},
+    "Gtk": {"apt": "gir1.2-gtk-4.0", "dnf": "gtk4", "pacman": "gtk4", "zypper": "typelib-1_0-Gtk-4_0"},
+    "Gdk": {"apt": "gir1.2-gtk-4.0", "dnf": "gtk4", "pacman": "gtk4", "zypper": "typelib-1_0-Gtk-4_0"},
+    "GdkPixbuf": {"apt": "gir1.2-gtk-4.0", "dnf": "gtk4", "pacman": "gtk4", "zypper": "typelib-1_0-Gtk-4_0"},
+    "Adw": {"apt": "gir1.2-adw-1", "dnf": "libadwaita", "pacman": "libadwaita", "zypper": "typelib-1_0-Adw-1"},
+    "Rsvg": {"apt": "gir1.2-rsvg-2.0", "dnf": "librsvg2", "pacman": "librsvg", "zypper": "typelib-1_0-Rsvg-2_0"},
+}
+
+# Imported on this branch but replaced on others (Gio D-Bus, Gio.FileMonitor,
+# a ctypes module on libxkbcommon). Remove once they are merged.
+BEING_REPLACED = {"dbus", "pyinotify", "xkbcommon"}
+
+
+def shipped_modules():
+    """Python files install.sh copies to the program directory."""
+    files = list(ROOT.glob("*.py"))
+    for package in ("config", "config_app", "desktop", "overlay", "layouts"):
+        files += (ROOT / package).glob("*.py")
+    return files
+
+
+def package_groups():
+    """{(manager, group): [names]} from PACKAGES_<manager>_<group>="..." lines."""
+    text = PACKAGES_SCRIPT.read_text()
+    groups = {}
+    for manager, group, names in re.findall(r'^PACKAGES_([a-z]+)_([a-z0-9]+)="([^"]*)"', text, re.M):
+        groups[(manager, group)] = names.split()
+    return groups
 
 
 class InstallTest(unittest.TestCase):
@@ -60,6 +115,97 @@ class InstallTest(unittest.TestCase):
         for path in sorted((ROOT / "config_app").glob("*.py")):
             with self.subTest(module=path.name):
                 self.assertIn(f"config_app/{path.name}", text)
+
+
+class DistributionPackagesTest(unittest.TestCase):
+    def test_no_python_environment_or_pip(self):
+        # The program runs with /usr/bin/python3 and distribution packages;
+        # only install_migrate.sh may name the old environment, to remove it.
+        scripts = sorted(ROOT.glob("*.sh")) + sorted(ROOT.glob("*.service"))
+        for script in scripts:
+            text = script.read_text()
+            with self.subTest(script=script.name):
+                self.assertNotRegex(text, r"\bpip3?\s+install|venv_pip|virtualenv|-m venv|requirements[\w.]*\.txt")
+                if script.name != "install_migrate.sh":
+                    self.assertNotRegex(text, r"/\.env\b")
+        self.assertEqual(sorted(ROOT.glob("requirements*.txt")), [])
+
+    def test_no_compiler_or_headers(self):
+        for (manager, group), names in sorted(package_groups().items()):
+            for name in names:
+                with self.subTest(manager=manager, group=group, package=name):
+                    self.assertNotRegex(name, r"gcc|clang|pkg-?conf|-devel$|-dev$|virtualenv|\bpip\b")
+
+    def test_services_run_the_system_python(self):
+        paths = (ROOT / "install_paths.sh").read_text()
+        self.assertIn('PYTHON="/usr/bin/python3"', paths)
+        self.assertIn("$PYTHON", (ROOT / "install_service.sh").read_text())
+        for template in sorted(ROOT.glob("*.service")):
+            with self.subTest(service=template.name):
+                self.assertRegex(template.read_text(), r"(?m)^ExecStart=\$PYTHON \$INSTALL_DIR_PATH/dialpad(_ui)?\.py\b")
+
+    def test_every_manager_has_every_group(self):
+        groups = package_groups()
+        managers = sorted({manager for manager, _ in groups})
+        names = sorted({group for _, group in groups})
+        self.assertEqual(names, sorted(["required", "x11", "plasma", "optional", "wayland", "x11libs", "systemd", "ui"]))
+        for manager in managers:
+            for group in names:
+                with self.subTest(manager=manager, group=group):
+                    self.assertIn((manager, group), groups)
+
+    def test_every_imported_library_has_a_package(self):
+        local = {path.stem for path in ROOT.glob("*.py")} | {"config", "config_app", "desktop", "overlay", "layouts"}
+        imported = {}
+        for path in shipped_modules():
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.Import):
+                    modules = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                    modules = [node.module]
+                else:
+                    continue
+                for module in modules:
+                    top = module.split(".")[0]
+                    if top not in sys.stdlib_module_names and top not in local and top != "__future__":
+                        imported.setdefault(top, set()).add(path.name)
+        for module, users in sorted(imported.items()):
+            with self.subTest(module=module, used_by=sorted(users)):
+                self.assertTrue(module in LIBRARIES or module in BEING_REPLACED,
+                                f"{module} has no distribution package in install_packages.sh (tests/test_install.py LIBRARIES)")
+        groups = package_groups()
+        for module, (group, names) in sorted(LIBRARIES.items()):
+            for manager in MANAGERS:
+                with self.subTest(module=module, manager=manager):
+                    self.assertIn(manager, names)
+                    if names[manager] is not None:
+                        self.assertIn(names[manager], groups[(manager, group)])
+
+    def test_every_typelib_has_a_package(self):
+        namespaces = set()
+        for path in shipped_modules():
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "require_version" and node.args:
+                    namespaces.add(node.args[0].value)
+        groups = package_groups()
+        for namespace in sorted(namespaces):
+            with self.subTest(namespace=namespace):
+                self.assertIn(namespace, TYPELIBS)
+                for manager in MANAGERS:
+                    # Rsvg is optional (overlay/gtk_icons.py works without it).
+                    installed = groups[(manager, "required")] + groups[(manager, "optional")]
+                    self.assertIn(TYPELIBS[namespace][manager], installed)
+
+    def test_native_libraries_and_tools(self):
+        # libxkbcommon (keyboard layouts), i2ctransfer, curl and xmllint
+        # (layout lookup), envsubst (service files).
+        groups = package_groups()
+        for manager in MANAGERS:
+            required = " ".join(groups[(manager, "required")])
+            with self.subTest(manager=manager):
+                for name in ("libxkbcommon", "i2c-tools", "curl", "libxml2"):
+                    self.assertIn(name, required)
+                self.assertRegex(required, r"gettext|envsubst")
 
 
 if __name__ == "__main__":

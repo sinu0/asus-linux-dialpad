@@ -7,15 +7,19 @@
 #
 # A container has no DialPad, kernel modules or user services, so install.sh
 # runs with INSTALL_IN_CONTAINER=1 (see install_common.sh); everything that
-# differs between distributions is tested: package names, the Python
-# environment built by pip, the installed files, the user service file and
-# the libraries the driver and the settings app import.
+# differs between distributions is tested: package names, that only
+# distribution packages are used (no compiler installed, no Python
+# environment; an old one is removed), the installed files, the user service
+# file running the system Python, and the libraries the driver and the
+# settings app import with /usr/bin/python3.
 
 set -euo pipefail
 
 SRC=$(realpath "${1:?usage: install_in_container.sh <clone of asus-turnpad>}")
 TESTER=tester
 APP=/opt/asus-turnpad
+PY=/usr/bin/python3
+COMPILERS="gcc cc c++ clang"
 
 echo "== prepare $(. /etc/os-release && echo "$PRETTY_NAME")"
 if command -v apt-get >/dev/null; then
@@ -43,34 +47,75 @@ as_tester() {
         bash -c "cd ~/turnpad && $1"
 }
 
+echo "== an install from before distribution packages"
+# Its Python environment and a service that ran it; install.sh removes both
+# (the legacy window's service is not placed again on GNOME).
+mkdir -p "$APP/.env/bin" "$HOME_DIR/.config/systemd/user"
+touch "$APP/.env/bin/python3"
+printf '[Service]\nExecStart=%s/.env/bin/python3 %s/dialpad_ui.py\n' "$APP" "$APP" \
+    > "$HOME_DIR/.config/systemd/user/asus-turnpad-ui.service"
+chown -R "$TESTER:" "$HOME_DIR/.config"
+COMPILERS_BEFORE=$(for c in $COMPILERS; do command -v "$c" || true; done)
+
 echo "== install.sh"
 as_tester "bash install.sh" > /tmp/install.log 2>&1 || { tail -40 /tmp/install.log; echo "install.sh failed"; exit 1; }
 grep -q "Installation finished successfully" /tmp/install.log || { tail -40 /tmp/install.log; exit 1; }
+grep "Optional package" /tmp/install.log || true
+
+echo "== distribution packages only"
+COMPILERS_AFTER=$(for c in $COMPILERS; do command -v "$c" || true; done)
+test "$COMPILERS_BEFORE" = "$COMPILERS_AFTER" || { echo "install.sh installed a compiler: $COMPILERS_AFTER"; exit 1; }
+for path in "$APP/.env" "$HOME_DIR/.config/systemd/user/asus-turnpad-ui.service"; do
+    test ! -e "$path" || { echo "left from the old install: $path"; exit 1; }
+done
+! grep -E "pip install|virtualenv" /tmp/install.log || { echo "install.sh ran pip"; exit 1; }
 
 echo "== files"
 for path in "$APP/dialpad.py" "$APP/layout_detect.py" "$APP/config_app/main.py" "$APP/gnome/extension/skins.json" \
-    "$APP/.env/bin/python3" "$HOME_DIR/.config/systemd/user/asus-turnpad.service" \
+    "$HOME_DIR/.config/systemd/user/asus-turnpad.service" \
     "$HOME_DIR/.local/share/applications/io.github.sinu0.AsusTurnpad.desktop" \
     /etc/udev/rules.d/70-asus-turnpad-i2c-dev.rules /etc/modules-load.d/asus-turnpad.conf; do
     test -e "$path" || { echo "missing: $path"; exit 1; }
 done
-grep -q "ExecStart=$APP/.env/bin/python3 $APP/dialpad.py proartp16 $HOME_DIR/.config/asus-turnpad/" \
-    "$HOME_DIR/.config/systemd/user/asus-turnpad.service"
+grep -q "ExecStart=$PY $APP/dialpad.py proartp16 $HOME_DIR/.config/asus-turnpad/" \
+    "$HOME_DIR/.config/systemd/user/asus-turnpad.service" \
+    || { grep ExecStart "$HOME_DIR/.config/systemd/user/asus-turnpad.service"; echo "the service does not run $PY"; exit 1; }
 id -nG "$TESTER" | tr ' ' '\n' | grep -qx input
 
-echo "== the driver's libraries in its Python environment"
-"$APP/.env/bin/python3" - <<'EOF'
-import sys
-sys.path.insert(0, "/opt/asus-turnpad")
-import libevdev, pyinotify, xkbcommon.xkb, pywayland.client, dbus, systemd.journal, periphery
-from pyinotify import ThreadedNotifier
-import backlight, dial_gesture, dialpad_dbus, launch, layout_detect
-import config.schema, config.legacy_adapter
-print("driver imports ok")
+echo "== the driver's libraries with $PY"
+"$PY" - <<'EOF'
+import ast, importlib, pathlib, sys
+app = pathlib.Path("/opt/asus-turnpad")
+sys.path.insert(0, str(app))
+# What dialpad.py imports outside try blocks is required.
+tree = ast.parse((app / "dialpad.py").read_text())
+required = set()
+for node in tree.body:
+    if isinstance(node, ast.Import):
+        required |= {alias.name for alias in node.names}
+    elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+        required.add(node.module)
+for name in sorted(required):
+    importlib.import_module(name)
+# The project's own modules (dialpad.py and the legacy window run on import).
+for path in sorted(app.glob("*.py")):
+    if path.stem not in ("dialpad", "dialpad_ui"):
+        importlib.import_module(path.stem)
+import config.schema, config.legacy_adapter, config.runtime, desktop.active_window
+from gi.repository import Gio, GLib
+print("driver imports ok:", ", ".join(sorted(required)))
+optional = []
+for name in ("pywayland.client", "systemd.journal", "periphery", "pyatspi"):
+    try:
+        importlib.import_module(name)
+        optional.append(name)
+    except Exception:
+        optional.append(name + " (not importable)")
+print("optional:", ", ".join(optional))
 EOF
 
-echo "== the settings app's libraries (it runs with the system python3)"
-python3 - <<'EOF'
+echo "== the settings app's libraries with $PY"
+"$PY" - <<'EOF'
 import sys
 sys.path.insert(0, "/opt/asus-turnpad")
 import gi
