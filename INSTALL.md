@@ -34,7 +34,8 @@ The driver works on every desktop. The dial on the screen comes from a different
 | --- | --- | --- | --- |
 | GNOME 45–51 | GNOME Shell extension | none extra | On a ProArt PX13 (GNOME 51) |
 | sway | Layer-shell dial, user service `asus-turnpad-overlay.service` | `gtk4-layer-shell` (Arch, Fedora), `gir1.2-gtk4layershell-1.0` (Debian 13, Ubuntu after 24.04), `typelib-1_0-Gtk4LayerShell-1_0` (openSUSE) | CI, every push: headless sway, screenshots compared with the GNOME dial, at 100 % and 200 % |
-| KDE Plasma 6, Hyprland, niri, COSMIC | Layer-shell dial, as for sway | as for sway | Not tested |
+| KDE Plasma 6 | Layer-shell dial, as for sway | as for sway | By hand: the same test on headless KWin 6.8 at 100 % and 200 % (KWin needs a GPU render node, which the CI machines do not have) |
+| Hyprland, niri, COSMIC | Layer-shell dial, as for sway | as for sway | Not tested |
 | X11 sessions | The legacy window (`dialpad_ui.py`, PySide6) | PySide6 | Not tested |
 
 Ubuntu 24.04 does not package gtk4-layer-shell: there the installer leaves the dial out on non-GNOME desktops and the driver works without it. The layer-shell dial starts with the graphical session (`graphical-session.target`), which Plasma, COSMIC, niri (`niri-session`) and Hyprland with uwsm start for you. When sway or Hyprland is started without such a session, start the dial from its config instead:

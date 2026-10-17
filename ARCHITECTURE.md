@@ -36,7 +36,7 @@ Turnpad is a set of separately running parts that talk over the session D-Bus an
 
 ## Adding a desktop environment
 
-Turnpad supports GNOME (Shell extension) and the Wayland compositors with layer-shell: KDE Plasma 6, Hyprland, sway, niri and COSMIC (`overlay/layer_shell.py`; sway is tested in CI, the others are not). A new desktop starts with a [desktop support request](https://github.com/sinu0/asus-turnpad/issues/new?template=desktop-support.yml), ideally from someone who can test on it.
+Turnpad supports GNOME (Shell extension) and the Wayland compositors with layer-shell: KDE Plasma 6, Hyprland, sway, niri and COSMIC (`overlay/layer_shell.py`; sway is tested in CI, KWin by hand (it needs a GPU render node), the others are not). A new desktop starts with a [desktop support request](https://github.com/sinu0/asus-turnpad/issues/new?template=desktop-support.yml), ideally from someone who can test on it.
 
 Three integration points, all optional. The driver already works everywhere evdev and uinput do.
 
@@ -80,7 +80,7 @@ It reproduces the extension piece by piece, so both desktops show the same dial:
 | `paintBackground()`, `paintContent()`, `paintPointer()` and the icon actors | `paint_background()`, `paint_content()`, `paint_pointer()` in `overlay/painter.py` |
 | `layers.js` | `DialLayers` in `overlay/frontend.py`: each layer keeps its picture as a Cairo image until its key changes |
 
-`tests/test_overlay_look.py` runs the `dial.js` functions in gjs and compares them with `look.py`; `tests/test_live_painter.py` compares the painting with `dial.js` pixel by pixel. `tests/layer_shell_in_container.sh` runs the frontend on headless sway in a container with a fake driver on a private bus and compares screenshots with `dial.js` (also at output scale 2), clicks and types through the dial and checks hiding, the pill and the fade.
+`tests/test_overlay_look.py` runs the `dial.js` functions in gjs and compares them with `look.py`; `tests/test_live_painter.py` compares the painting with `dial.js` pixel by pixel. `tests/layer_shell_in_container.sh` runs the frontend on headless sway in a container with a fake driver on a private bus and compares screenshots with `dial.js` (also at output scale 2), clicks and types through the dial and checks hiding, the pill and the fade. `kwin` instead of `sway` runs it on headless KWin (`kwin_wayland --virtual`; screenshots through `org.kde.KWin.ScreenShot2`, clicks and keys through fake input, `tests/kwin_fake_input.py`); KWin 6.8 needs a DRM render node even headless, so it runs by hand with `podman run --device /dev/dri/renderD128`, not in CI.
 
 ### 3. Installer
 

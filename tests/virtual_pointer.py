@@ -18,7 +18,7 @@ WAYLAND = "/usr/share/wayland/wayland.xml"
 BTN_LEFT = 0x110
 
 
-def bindings() -> str:
+def bindings(protocol: str = PROTOCOL) -> str:
     """Python bindings for the protocol (and wayland.xml, which it uses),
     made by pywayland's scanner as the package "protocols"."""
     from pywayland.scanner import Protocol
@@ -27,7 +27,7 @@ def bindings() -> str:
     package = directory / "protocols"
     package.mkdir()
     (package / "__init__.py").write_text("")
-    protocols = [Protocol.parse_file(path) for path in (PROTOCOL, WAYLAND)]
+    protocols = [Protocol.parse_file(path) for path in (protocol, WAYLAND)]
     imports = {interface.name: protocol.name for protocol in protocols for interface in protocol.interface}
     for protocol in protocols:
         protocol.output(str(package), imports)
