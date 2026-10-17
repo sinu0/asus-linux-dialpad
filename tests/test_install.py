@@ -44,7 +44,6 @@ TYPELIBS = {
 }
 
 
-
 def shipped_modules():
     """Python files install.sh copies to the program directory."""
     files = list(ROOT.glob("*.py"))
