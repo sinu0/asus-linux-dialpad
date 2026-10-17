@@ -45,6 +45,7 @@ import queue
 import launch
 import layout_detect
 from dir_watch import DirectoryWatcher
+from desktop import keyboard_layout
 from backlight import KeyboardBacklight, commands_for_level
 from config.identity import SLUG, socket_path
 from desktop.active_window import ActiveWindow, Context as ActiveWindowContext
@@ -366,18 +367,19 @@ if xdg_session_type == "x11":
         log.error(f"Failed to connect to X11 display: {e}")
         sys.exit(1)
 else:
+    display_wayland_var = os.environ.get('WAYLAND_DISPLAY')
+    # Without pywayland the keymap is compiled from the desktop's layout
+    # settings (load_keymap_from_rule_names).
     if not PYWAYLAND_AVAILABLE:
-        log.error("Wayland library is not available. Please install pywayland.")
-        sys.exit(1)
-
-    try:
-        display_wayland_var = os.environ.get('WAYLAND_DISPLAY')
-        display_wayland = Display(display_wayland_var)
-        display_wayland.connect()
-        log.info("Wayland session detected and connected.")
-    except Exception as e:
-        log.error(f"Failed to connect to Wayland display: {e}")
-        sys.exit(1)
+        log.info("pywayland is not installed; the keyboard layout comes from the desktop settings")
+    else:
+        try:
+            display_wayland = Display(display_wayland_var)
+            display_wayland.connect()
+            log.info("Wayland session detected and connected.")
+        except Exception as e:
+            display_wayland = None
+            log.warning(f"Failed to connect to Wayland display: {e}; the keyboard layout comes from the desktop settings")
 
 dialpad: bool = False
 
@@ -2479,7 +2481,7 @@ def mod_name_to_specific_keysym_name(mod_name):
                     if key.startswith("XK") and Xlib.XK.__dict__[key] == keysym:
                         return key[3:]
         return mod_to_specific_keysym_name[mod_name]
-    elif display_wayland and keyboard_state:
+    elif keyboard_state:
 
         keymap = keyboard_state.get_keymap()
         num_mods = keymap.num_mods()
@@ -2794,7 +2796,10 @@ def check_gnome_layout():
             mru_layout_index = sources_evaluated.index(mru_sources_evaluated[0])
             mru_layout = mru_sources_evaluated[0][1].split("+")[0]
 
-            if display_wayland_var:
+            if display_wayland_var or keyboard_state:
+                if keymap_rule_names_sources is not None and keymap_rule_names_sources != sources:
+                    # the keymap is ours (no pywayland): the layouts changed
+                    load_keymap_from_rule_names()
                 if keyboard_state and gnome_current_layout_index is not mru_layout_index:
 
                     gnome_current_layout_index =  mru_layout_index
@@ -3064,8 +3069,35 @@ def load_keymap_listener_wayland():
         while not stop_threads and display_wayland.dispatch(block=True) != -1:
             pass
     except:
+        if not keymap_loaded:
+            log.exception("Wayland load keymap listener error, the keyboard layout comes from the desktop settings")
+            load_keymap_from_rule_names()
+            return
         log.exception("Wayland load keymap listener error. Exiting")
         os.kill(os.getpid(), signal.SIGUSR1)
+
+# set when the keymap is compiled from layout names instead of read from the compositor
+keymap_rule_names_sources = None
+
+def load_keymap_from_rule_names():
+    """Wayland without pywayland: compile the keymap from the layouts the
+    desktop is set to (GNOME input sources, localectl, XKB_DEFAULT_*)."""
+    global keyboard_state, keymap_rule_names_sources
+
+    keymap_rule_names_sources = gsettingsGet('org.gnome.desktop.input-sources', 'sources')
+    names, source = keyboard_layout.rule_names()
+    context = xkb.Context(no_environment_names=True)
+    try:
+        keymap = context.keymap_new_from_names(**names)
+    except xkb.XKBKeymapCreationFailure:
+        log.warning("Keyboard layout %s from %s does not compile, using %s", names, source, keyboard_layout.FALLBACK)
+        names, source = dict(keyboard_layout.FALLBACK), "default"
+        keymap = context.keymap_new_from_names(**names)
+    log.info("Keyboard layout %s from %s", names, source)
+
+    keyboard_state = keymap.state_new()
+
+    wl_load_keymap_state()
 
 def load_keymap_listener_x11():
     global stop_threads, display, listening_touchpad_events_started
@@ -3150,6 +3182,8 @@ try:
         t.daemon = True
         threads.append(t)
         t.start()
+    elif xdg_session_type != "x11":
+        load_keymap_from_rule_names()
 
     if xdg_session_type == "x11" and display and X11_LIBS_AVAILABLE:
 
