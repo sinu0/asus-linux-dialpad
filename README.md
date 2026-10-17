@@ -16,6 +16,7 @@ What Turnpad adds to the original driver:
 - **Groups**: a sector that opens a straight list of more functions beside the dial; turn to move along it, tap the centre to choose. More functions fit without smaller sectors.
 - **GNOME Shell overlay**: native radial dial with value gauge, rotation hints and finger position; size, position (anywhere on the screen) and visibility configurable: always visible, fading while you turn, or a small label instead of the dial — for all apps, per profile or per function.
 - **Guided calibration** that measures the dial on any DialPad touchpad — see [PORTING.md](PORTING.md).
+- **Touchpads without a DialPad**: the driver can emulate one on any touchpad (*Driver → Emulate the DialPad*); while it is on, the whole touchpad is the dial, switched with the touchpad's corner or a keyboard shortcut — see [PORTING.md](PORTING.md#touchpads-without-a-dialpad).
 
 ### Install
 

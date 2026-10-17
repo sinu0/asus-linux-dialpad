@@ -58,7 +58,7 @@ from config.schema import (
     save_config,
     shell_commands,
 )
-from config.identity import APP_ID, APP_NAME, DBUS_INTERFACE, DBUS_NAME, DBUS_PATH
+from config.identity import APP_ID, APP_NAME, DBUS_INTERFACE, DBUS_NAME, DBUS_PATH, DRIVER_SERVICE
 from config.migrate import layout_geometry, migrate_old_format
 from config.skins import (
     DIAL_SHAPES,
@@ -102,6 +102,8 @@ STYLE_FILE = Path(__file__).with_name("style.css")
 DEFAULT_ACCENT = "#e7b98d"
 # The PX13 touchpad range; replaced by the driver's report when available.
 DEFAULT_TOUCHPAD = (4010, 2443)
+# Switches the dial on or off; for a keyboard shortcut.
+TOGGLE_COMMAND = f"gdbus call --session --dest {DBUS_NAME} --object-path {DBUS_PATH} --method {DBUS_INTERFACE}.Toggle"
 
 TRIGGERS = (
     ("macro_cw", "Turn clockwise", "object-rotate-right-symbolic",
@@ -3359,6 +3361,11 @@ class Application(Adw.Application):
             self._toasts.add_toast(toast)
 
     def _start_calibration(self):
+        if self.config.emulation.enabled:
+            self._calibration_row.set_title("Not needed for the emulated dial")
+            self._calibration_row.set_subtitle("It uses the whole touchpad; its centre size is on the Driver page")
+            return
+
         def started(connection, result):
             try:
                 if connection is None:
@@ -3526,6 +3533,7 @@ class Application(Adw.Application):
             ("profile", "Active profile"),
             ("function", "Selected function"),
             ("environment", "Environment"),
+            ("touchpad", "Touchpad"),
         ):
             row = Adw.ActionRow(title=title, subtitle="Unknown")
             status.add(row)
@@ -3535,6 +3543,7 @@ class Application(Adw.Application):
         refresh = _icon_button("view-refresh-symbolic", "Refresh", self._refresh_diagnostics)
         status.set_header_suffix(refresh)
         content.append(status)
+        content.append(self._emulation_group())
 
         tools = Adw.PreferencesGroup(title="Tools")
         reload_row = Adw.ActionRow(title="Reload configuration", subtitle="The driver normally reloads after every change")
@@ -3554,6 +3563,100 @@ class Application(Adw.Application):
         tools.add(folder_row)
         content.append(tools)
         return self._scrolled_content(content)
+
+    def _emulation_group(self):
+        """Emulated dial for touchpads without a DialPad, and the toggle shortcut."""
+        emulation = self.config.emulation
+        group = Adw.PreferencesGroup(
+            title="Touchpad",
+            description=(
+                "Without a DialPad (no printed dial, no light) the driver can emulate it: "
+                "while the dial is on, the whole touchpad is the dial and the pointer stands still."
+            ),
+        )
+        options = []
+
+        def emulate_changed(active):
+            for row in options:
+                row.set_sensitive(active)
+            if emulation.enabled != active:
+                emulation.enabled = active
+                # The driver picks its touchpad at start.
+                self._restart_driver()
+
+        group.add(_switch_row(
+            "Emulate the DialPad", "Restarts the driver; works on any touchpad",
+            emulation.enabled, emulate_changed,
+        ))
+        options.append(_switch_row(
+            "Switch with the top-right corner",
+            "Hold the corner as long as the hold time on the Behaviour page; off: only the shortcut",
+            emulation.corner, lambda active: self._set_config("emulation", "corner", active),
+        ))
+        options.append(_spin_row(
+            "Centre button size", "Percent of the touchpad's height",
+            emulation.center_size, 10, 60, 5, 0,
+            lambda value: self._set_config("emulation", "center_size", int(value)),
+        ))
+        for row in options:
+            row.set_sensitive(emulation.enabled)
+            group.add(row)
+
+        shortcut = Adw.ActionRow(
+            title="Keyboard shortcut",
+            subtitle="Switches the dial on or off: add a custom shortcut with the copied command",
+        )
+
+        def copy_command():
+            self._window.get_display().get_clipboard().set(TOGGLE_COMMAND)
+            self._toast("Command copied; paste it into a custom shortcut")
+
+        shortcut.add_suffix(_icon_button("edit-copy-symbolic", "Copy the command", copy_command))
+        shortcut.add_suffix(_icon_button(
+            "preferences-desktop-keyboard-shortcuts-symbolic", "Open the keyboard settings",
+            lambda: self._spawn(["gnome-control-center", "keyboard"], "GNOME Settings is not available"),
+        ))
+        group.add(shortcut)
+        return group
+
+    def _spawn(self, argv, failed, finished=None):
+        """Run a program without waiting; ``finished(ok)`` when it ends."""
+        try:
+            process = Gio.Subprocess.new(argv, Gio.SubprocessFlags.STDERR_SILENCE)
+        except GLib.Error:
+            self._toast(failed)
+            return
+
+        def done(process, result):
+            try:
+                ok = process.wait_check_finish(result)
+            except GLib.Error:
+                ok = False
+            if finished is not None:
+                finished(ok)
+
+        process.wait_check_async(None, done)
+
+    def _restart_driver(self):
+        if self._save_source:
+            GLib.source_remove(self._save_source)
+            self._save_source = 0
+        save_config(self.config)
+
+        def finished(ok):
+            if not ok:
+                self._toast(f"Restart {DRIVER_SERVICE} to apply the change")
+                return
+            self._toast("Driver restarted")
+            GLib.timeout_add(1500, lambda: self._refresh_diagnostics() or GLib.SOURCE_REMOVE)
+
+        failed = f"Restart {DRIVER_SERVICE} to apply the change"
+        # Without a DialPad touchpad the driver kept failing until now; a
+        # unit past its start limit only starts again after reset-failed.
+        self._spawn(
+            ["systemctl", "--user", "reset-failed", DRIVER_SERVICE], failed,
+            lambda _ok: self._spawn(["systemctl", "--user", "restart", DRIVER_SERVICE], failed, finished),
+        )
 
     def _reload_driver(self):
         if self._save_source:
@@ -3594,7 +3697,7 @@ class Application(Adw.Application):
             status = {key: self._unpack_dbus_value(value) for key, value in status.items()}
         except (GLib.Error, RuntimeError) as error:
             rows["service"].set_subtitle(f"Unavailable: {getattr(error, 'message', error)}")
-            for key in ("enabled", "application", "profile", "function", "environment"):
+            for key in ("enabled", "application", "profile", "function", "environment", "touchpad"):
                 rows[key].set_subtitle("Unknown")
             return
 
@@ -3608,6 +3711,9 @@ class Application(Adw.Application):
         )
         rows["environment"].set_subtitle(
             f"{status.get('session_type') or 'unknown session'} · {status.get('layout') or 'unknown layout'}"
+        )
+        rows["touchpad"].set_subtitle(
+            f"{status.get('touchpad') or 'unknown'} · {'emulated dial' if status.get('emulation') else 'DialPad'}"
         )
         max_x, max_y = int(status.get("touchpad_max_x") or 0), int(status.get("touchpad_max_y") or 0)
         if max_x > 0 and max_y > 0:

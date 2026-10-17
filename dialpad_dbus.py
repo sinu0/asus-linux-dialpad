@@ -91,6 +91,11 @@ class _DialPadObject(dbus.service.Object):
     def StartCalibration(self) -> dbus.Boolean:
         return dbus.Boolean(self._service._start_calibration())
 
+    @dbus.service.method(INTERFACE_NAME, in_signature="", out_signature="b")
+    def Toggle(self) -> dbus.Boolean:
+        """Switch the dial on or off, as holding the corner icon does."""
+        return dbus.Boolean(self._service._call_bool_callback(self._service._on_toggle, "Toggle"))
+
 
 class DialPadDBusService:
     """Owns the DialPad session service and its private GLib main-loop thread."""
@@ -102,8 +107,10 @@ class DialPadDBusService:
         on_start_calibration: Callable[[], Any],
         status_provider: Callable[[], Mapping[str, Any]],
         on_cancel_calibration: Callable[[], Any] | None = None,
+        on_toggle: Callable[[], Any] | None = None,
     ) -> None:
         self._on_cancel_calibration = on_cancel_calibration
+        self._on_toggle = on_toggle
         self._on_active_application = on_active_application
         self._on_reload_config = on_reload_config
         self._on_start_calibration = on_start_calibration

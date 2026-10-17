@@ -41,6 +41,16 @@ def choose_layout(rows, product_name, touchpads, available):
     )
 
 
+def is_touchpad(name):
+    """Whether an input device name is a touchpad of any make.
+
+    The DialPad emulation runs on touchpads the driver does not recognise
+    by their ASUS name (Synaptics, ELAN, Apple and others).
+    """
+    name = (name or "").lower()
+    return "touchpad" in name or "trackpad" in name
+
+
 def touchpad_ids(devices_text):
     """(vendor, product) of every touchpad listed in /proc/bus/input/devices."""
     ids = []

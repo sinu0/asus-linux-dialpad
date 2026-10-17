@@ -29,6 +29,30 @@ If the corner LED does not light up, the touchpad probably needs the other
 I2C address: the driver uses `0x38` for `ASUF1416`, `ASUF1205` and
 `ASUF1204` and `0x15` otherwise (see `device_addr` in `dialpad.py`).
 
+## Touchpads without a DialPad
+
+Any other touchpad (Synaptics, ELAN, Apple and others, also on laptops of
+other makes) can emulate the DialPad: open *Turnpad → Driver* and switch on
+**Emulate the DialPad**; the app restarts the driver. Then:
+
+- **Switching on and off:** hold the top-right corner of the touchpad (about
+  1.5 cm, the hold time and co-activator keys of the *Behaviour* page apply),
+  or use a keyboard shortcut: *Keyboard shortcut → copy* puts the command in
+  the clipboard; add it as a custom shortcut in GNOME Settings (*Keyboard →
+  View and Customise Shortcuts → Custom Shortcuts*). The corner can be
+  switched off so that only the shortcut switches. After the inactivity time
+  of the *Behaviour* page the dial switches off by itself.
+- **While the dial is on** the whole touchpad is the dial: the pointer stands
+  still, a touch near the middle is the centre button (its size is set on the
+  *Driver* page), anywhere else is the ring. The on-screen dial shows where
+  you are, so keep its visibility at *Always visible* or *Fade*.
+- Nothing is sent to the touchpad (there is no light and nothing to unlock),
+  and calibration is not needed.
+
+`install.sh` continues on a touchpad without a DialPad. The driver starts
+with the emulated dial switched off, and gives the pointer back when it
+stops.
+
 ## Sharing a working model
 
 Please open an issue with:

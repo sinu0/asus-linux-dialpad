@@ -69,6 +69,19 @@ class BacklightConfig:
 
 
 @dataclass
+class EmulationConfig:
+    # Touchpads without a DialPad (no printed ring, no light): while the dial
+    # is on, the whole touchpad is the dial and the pointer stands still.
+    # The driver reads this at start; the settings app restarts it.
+    enabled: bool = False
+    # Holding the top-right corner switches the dial on and off (it can
+    # always be switched with the D-Bus method Toggle, e.g. a shortcut).
+    corner: bool = True
+    # Centre button, percent of the touchpad's shorter side.
+    center_size: int = 30
+
+
+@dataclass
 class OverlayConfig:
     """Appearance of the GNOME Shell dial; read directly by the extension."""
 
@@ -218,6 +231,7 @@ class DialPadConfig:
     gesture: GestureConfig = field(default_factory=GestureConfig)
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     backlight: BacklightConfig = field(default_factory=BacklightConfig)
+    emulation: EmulationConfig = field(default_factory=EmulationConfig)
     profiles: list[Profile] = field(default_factory=list)
 
 
@@ -300,9 +314,10 @@ def _encoder(obj):
             "gesture": _encoder(obj.gesture),
             "overlay": _encoder(obj.overlay),
             "backlight": _encoder(obj.backlight),
+            "emulation": _encoder(obj.emulation),
             "profiles": [_encoder(p) for p in obj.profiles],
         }
-    if isinstance(obj, (TouchGeometry, ActivationConfig, GestureConfig, OverlayConfig, BacklightConfig)):
+    if isinstance(obj, (TouchGeometry, ActivationConfig, GestureConfig, OverlayConfig, BacklightConfig, EmulationConfig)):
         return {item.name: getattr(obj, item.name) for item in fields(obj)}
     if isinstance(obj, Profile):
         result: dict = {
@@ -373,6 +388,7 @@ def _decoder(d: dict, cls: type):
             gesture=_decoder(d.get("gesture", {}), GestureConfig),
             overlay=_decoder(d.get("overlay", {}), OverlayConfig),
             backlight=_decoder(d.get("backlight", {}), BacklightConfig),
+            emulation=_decoder(d.get("emulation", {}), EmulationConfig),
             profiles=[_decoder(p, Profile) for p in d.get("profiles", [])],
         )
     if cls is TouchGeometry:
@@ -401,6 +417,12 @@ def _decoder(d: dict, cls: type):
         return BacklightConfig(
             follow_keyboard=bool(d.get("follow_keyboard", True)),
             level=int(_clamp(d.get("level", 4), 0, 8, 4)),
+        )
+    if cls is EmulationConfig:
+        return EmulationConfig(
+            enabled=bool(d.get("enabled", False)),
+            corner=bool(d.get("corner", True)),
+            center_size=int(_clamp(d.get("center_size", 30), 10, 60, 30)),
         )
     if cls is Profile:
         mode = d.get("mode", "multi")

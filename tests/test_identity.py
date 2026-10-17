@@ -39,6 +39,7 @@ class IdentityTest(unittest.TestCase):
         self.assertEqual(shell_value("SLUG"), identity.SLUG)
         self.assertEqual(shell_value("APP_ID"), identity.APP_ID)
         self.assertEqual(shell_value("GNOME_EXTENSION_UUID"), identity.GNOME_EXTENSION_UUID)
+        self.assertEqual(shell_value("DRIVER_SERVICE"), identity.DRIVER_SERVICE)
         self.assertEqual(shell_value("INSTALL_DIR_PATH"), identity.INSTALL_DIR)
         self.assertTrue(shell_value("CONFIG_FILE_DIR_PATH").endswith(f"/{identity.CONFIG_DIR_NAME}"))
 
@@ -70,7 +71,7 @@ class IdentityTest(unittest.TestCase):
         self.assertIn(f"{identity.PACKAGE_DIR}/dialpad.py auto %E/{identity.CONFIG_DIR_NAME}/", service)
         setup = read(f"packaging/{identity.SLUG}-setup")
         self.assertIn(f'GNOME_EXTENSION_UUID="{identity.GNOME_EXTENSION_UUID}"', setup)
-        self.assertIn(f'SERVICE="{identity.SLUG}.service"', setup)
+        self.assertIn(f'SERVICE="{identity.DRIVER_SERVICE}"', setup)
         self.assertIn(identity.INSTALL_DIR, setup)
         self.assertIn(f"[ -d {identity.PACKAGE_DIR} ]", read("install.sh"))
 

@@ -57,6 +57,7 @@ from dial_gesture import (
     DEFAULT_HYSTERESIS,
     SCROLL_TRIGGER_DEGREES,
     RotationTracker,
+    emulated_dial,
     scroll_acceleration_multiplier,
     select_dial_touch,
     slice_index,
@@ -158,8 +159,17 @@ def process_pending_driver_updates():
 def on_dbus_start_calibration():
     global pending_calibration
 
+    # An emulated dial has no printed ring to trace.
+    if emulation:
+        return False
     with driver_state_lock:
         pending_calibration = "start"
+    return True
+
+def on_dbus_toggle():
+    # The action thread switches, so a shortcut never waits for the touchpad
+    # grab or the pointer setting.
+    enqueue_action(lambda: toggle_top_right_icon(dialpad))
     return True
 
 def on_dbus_cancel_calibration():
@@ -245,6 +255,8 @@ def get_dbus_status():
         "touchpad_max_x": int(globals().get("max_x") or 0),
         "touchpad_max_y": int(globals().get("max_y") or 0),
         "calibrating": calibration is not None,
+        "emulation": bool(emulation),
+        "touchpad": touchpad_name or "",
     }
 
 def init_dbus():
@@ -260,6 +272,7 @@ def init_dbus():
             on_start_calibration=on_dbus_start_calibration,
             status_provider=get_dbus_status,
             on_cancel_calibration=on_dbus_cancel_calibration,
+            on_toggle=on_dbus_toggle,
         )
     except Exception:
         log.exception("Failed to create the DialPad D-Bus service")
@@ -477,9 +490,16 @@ def apply_gui_settings():
     activation = gui_config.activation
     gesture = gui_config.gesture
 
+    if gui_config.emulation.enabled != emulation:
+        log.info("DialPad emulation %s after the driver restarts", "starts" if gui_config.emulation.enabled else "ends")
+
+    if emulation:
+        # The emulated dial follows the touchpad, not a calibrated geometry.
+        if "max_x" in globals():
+            apply_emulated_geometry()
     # A configuration created for another laptop model (for example an
     # imported file) must not move the dial away from this touchpad's ring.
-    if gui_config.device_name and model and gui_config.device_name != model:
+    elif gui_config.device_name and model and gui_config.device_name != model:
         log.warning(
             "config.json geometry is for layout %s, the driver runs %s; using the layout geometry",
             gui_config.device_name, model,
@@ -515,6 +535,17 @@ def apply_gui_settings():
 
 load_gui_shortcuts()
 
+# DialPad emulation (config.json "emulation") for touchpads without a DialPad:
+# any touchpad, no commands to its hardware (no light, nothing to unlock), the
+# whole touchpad is the dial while it is on. Read once; the settings app
+# restarts the driver when it changes.
+emulation = bool(gui_config is not None and gui_config.emulation.enabled)
+emulation_corner = True
+# Touchpads whose axes differ in resolution: x distances times this.
+x_scale = 1.0
+if emulation:
+    log.info("DialPad emulation: the whole touchpad is the dial while it is on")
+
 # Figure out devices from devices file
 touchpad: Optional[str] = None
 touchpad_name: Optional[str] = None
@@ -545,7 +576,11 @@ while try_times > 0:
             # https://github.com/asus-linux-drivers/asus-numberpad-driver/issues/161
             # https://github.com/asus-linux-drivers/asus-numberpad-driver/issues/198
             # https://github.com/asus-linux-drivers/asus-stylus-driver/issues/17
-            if (touchpad_detected == 0 and ("Name=\"ASUE" in line or "Name=\"ELAN" in line or "Name=\"ASUP" in line or "Name=\"ASUF" in line or "Name=\"ASCE" in line or "Name=\"ASCF" in line or "Name=\"ASCP" in line) and "Touchpad" in line and not "9009" in line and not "9008" in line):
+            if touchpad_detected == 0 and emulation and line.startswith("N: Name=") and layout_detect.is_touchpad(line) and "DialPad" not in line:
+                touchpad_detected = 1
+                log.info('Detecting touchpad for the emulated dial from string: \"%s\"', line.strip())
+                touchpad_name = line.split("\"")[1]
+            elif (touchpad_detected == 0 and not emulation and ("Name=\"ASUE" in line or "Name=\"ELAN" in line or "Name=\"ASUP" in line or "Name=\"ASUF" in line or "Name=\"ASCE" in line or "Name=\"ASCF" in line or "Name=\"ASCP" in line) and "Touchpad" in line and not "9009" in line and not "9008" in line):
                 touchpad_detected = 1
                 log.info('Detecting touchpad from string: \"%s\"', line.strip())
                 touchpad_name = line.split("\"")[1]
@@ -603,8 +638,11 @@ while try_times > 0:
                 # keyboard is optional, no sys.exit(1)!
             if touchpad_detected != 2:
                 log.error("Can't find touchpad (code: %s)", touchpad_detected)
+                if not emulation:
+                    log.error("No touchpad with a DialPad found; other touchpads need Driver > Emulate the DialPad in the settings app")
                 sys.exit(1)
-            if touchpad_detected == 2 and not device_id.isnumeric():
+            # The emulation never talks to the touchpad over I2C.
+            if touchpad_detected == 2 and not emulation and not device_id.isnumeric():
                 log.error("Can't find device id")
                 sys.exit(1)
     else:
@@ -612,41 +650,45 @@ while try_times > 0:
 
     sleep(try_sleep)
 
-# Is the hidraw node of the touchpad usable? (preferred, I2C is a fallback)
-if hidraw_path:
-    try:
-        with open(hidraw_path, "rb+", buffering=0):
-            pass
-        log.info("DialPad backlight will be switched via %s", hidraw_path)
-    except Exception as e:
-        log.info("Can not open %s: %s, I2C will be used", hidraw_path, e)
-        hidraw_path = None
+# The emulation sends nothing to the touchpad: no hidraw, no I2C bus.
+if emulation:
+    hidraw_path = None
+else:
+    # Is the hidraw node of the touchpad usable? (preferred, I2C is a fallback)
+    if hidraw_path:
+        try:
+            with open(hidraw_path, "rb+", buffering=0):
+                pass
+            log.info("DialPad backlight will be switched via %s", hidraw_path)
+        except Exception as e:
+            log.info("Can not open %s: %s, I2C will be used", hidraw_path, e)
+            hidraw_path = None
 
-# Open a handle to "/dev/i2c-x", representing the I2C bus
-path = f"/dev/i2c-{device_id}"
-try:
-    # Prefer python-periphery if it works
-    i2c = I2C(path)
-    i2c.close()
-    log.debug("Successfully opened I2C bus via python-periphery at %s", path)
-except Exception as e:
-    log.debug("periphery.I2C failed to open %s: %s, trying raw open()", path, e)
+    # Open a handle to "/dev/i2c-x", representing the I2C bus
+    path = f"/dev/i2c-{device_id}"
     try:
-        # Fallback: try to open the device file directly
-        with open(path, "rb+", buffering=0) as f:
-            pass
-        log.debug("Successfully opened I2C bus via raw open() at %s", path)
-    except Exception as e2:
-        if hidraw_path:
-            log.debug("Can not open the I2C bus connection (id: %s): %s, only hidraw will be used", device_id, e2)
-        else:
-            log.error(
-                "Can not open the I2C bus connection (id: %s) at %s: %s",
-                device_id,
-                path,
-                e2,
-            )
-            sys.exit(1)
+        # Prefer python-periphery if it works
+        i2c = I2C(path)
+        i2c.close()
+        log.debug("Successfully opened I2C bus via python-periphery at %s", path)
+    except Exception as e:
+        log.debug("periphery.I2C failed to open %s: %s, trying raw open()", path, e)
+        try:
+            # Fallback: try to open the device file directly
+            with open(path, "rb+", buffering=0) as f:
+                pass
+            log.debug("Successfully opened I2C bus via raw open() at %s", path)
+        except Exception as e2:
+            if hidraw_path:
+                log.debug("Can not open the I2C bus connection (id: %s): %s, only hidraw will be used", device_id, e2)
+            else:
+                log.error(
+                    "Can not open the I2C bus connection (id: %s) at %s: %s",
+                    device_id,
+                    path,
+                    e2,
+                )
+                sys.exit(1)
 
 # Config
 CONFIG_FILE_NAME = "dialpad_dev"
@@ -686,6 +728,30 @@ abs_y = d_t.absinfo[EV_ABS.ABS_Y]
 min_x, max_x = abs_x.minimum, abs_x.maximum
 min_y, max_y = abs_y.minimum, abs_y.maximum
 log.info('Touchpad min-max: x %d-%d, y %d-%d', min_x, max_x, min_y, max_y)
+
+def apply_emulated_geometry():
+    """Ring, centre button and corner of the emulated dial, from the touchpad's size."""
+    global circle_diameter, center_button_diameter, circle_center_x, circle_center_y
+    global top_right_icon_width, top_right_icon_height, emulation_corner, x_scale
+
+    settings = gui_config.emulation if gui_config is not None else None
+    emulation_corner = settings.corner if settings is not None else True
+    dial = emulated_dial(
+        min_x, max_x, min_y, max_y,
+        settings.center_size if settings is not None else 30,
+        abs_x.resolution or 0, abs_y.resolution or 0,
+    )
+    circle_diameter = dial["circle_diameter"]
+    center_button_diameter = dial["center_button_diameter"]
+    circle_center_x = dial["circle_center_x"]
+    circle_center_y = dial["circle_center_y"]
+    top_right_icon_width = dial["top_right_icon_width"]
+    top_right_icon_height = dial["top_right_icon_height"]
+    x_scale = dial["x_scale"]
+    log.info("Emulated dial: %s, corner activation %s", dial, "on" if emulation_corner else "off")
+
+if emulation:
+    apply_emulated_geometry()
 
 last_event_time = 0
 
@@ -912,6 +978,9 @@ def send_value_to_touchpad_via_hidraw(value):
     return False
 
 def send_value_to_touchpad(value):
+    # A touchpad without a DialPad gets no DialPad commands.
+    if emulation:
+        return True
     if send_value_to_touchpad_via_hidraw(value):
         return True
 
@@ -1027,7 +1096,8 @@ def initialize_virtual_device():
     try:
         # create the virtual device
         dev = Device()
-        dev.name = touchpad_name.split(" ")[0] + " " + touchpad_name.split(" ")[1] + " DialPad"
+        # Other makes' touchpads may have a one-word name.
+        dev.name = " ".join(touchpad_name.split(" ")[:2]) + " DialPad"
 
         # aggregate all shortcuts to enable
         shortcuts_to_enable = {}
@@ -1455,6 +1525,9 @@ def activate_dialpad():
 
     dialpad = True
 
+    if emulation:
+        set_emulated_dial_owns_touchpad(True)
+
     # Brightness reads the keyboard backlight over D-Bus: not on the touch thread.
     enqueue_action(apply_backlight)
 
@@ -1478,8 +1551,28 @@ def deactivate_dialpad():
 
     dialpad = False
 
+    if emulation:
+        set_emulated_dial_owns_touchpad(False)
+
     if overlay_enabled():
         send_to_socket({CONFIG_ENABLED: dialpad})
+
+def set_emulated_dial_owns_touchpad(owns):
+    """While the emulated dial is on, the whole touchpad is the dial.
+
+    The grab keeps every touch from the compositor at once; libinput is
+    also switched off, so when it gets the touchpad back it starts from the
+    fingers really on it, not from the ones it saw before the grab.
+    """
+    try:
+        if owns:
+            d_t.grab()
+        else:
+            d_t.ungrab()
+    except Exception:
+        log.warning("Could not %s the touchpad", "grab" if owns else "release", exc_info=True)
+    # gsettings, qdbus or xinput run as programs: not on the touch thread.
+    enqueue_action(lambda: set_touchpad_prop_send_events(0 if owns else 1))
 
 # Function to enable/disable the DialPad
 def toggle_top_right_icon(current_state_is_enabled):
@@ -2154,6 +2247,8 @@ def listen_touchpad_events():
     center_activated = False
     treshold = None
     first_touch_outside = None
+    # Emulation: a touch that starts on the corner only switches the dial.
+    corner_touch = False
     settle_counter = 0
     prev_finger_down = False
     rotation = RotationTracker(angle_hysteresis, DEBOUNCE_MS)
@@ -2172,17 +2267,28 @@ def listen_touchpad_events():
                     top_right_icon_bounds = {
                         "x_min": max_x - top_right_icon_width,
                         "x_max": max_x,
-                        "y_min": 0,
-                        "y_max": top_right_icon_height
+                        # min_y: other makes' touchpads may not start at 0.
+                        "y_min": min_y,
+                        "y_max": min_y + top_right_icon_height
                     }
+
+                    # The emulated dial can do without the corner (a shortcut
+                    # switches it); it then owns the whole touchpad while on.
+                    corner_enabled = emulation_corner or not emulation
+
+                    def on_corner(x, y):
+                        return corner_enabled and (
+                            top_right_icon_bounds["x_min"] <= x <= top_right_icon_bounds["x_max"] and
+                            top_right_icon_bounds["y_min"] <= y <= top_right_icon_bounds["y_max"])
 
                     # Frame completed — process gesture logic once per frame
                     def dial_claims(x, y):
                         if calibration is not None:
                             return True
-                        if (top_right_icon_bounds["x_min"] <= x <= top_right_icon_bounds["x_max"] and
-                                top_right_icon_bounds["y_min"] <= y <= top_right_icon_bounds["y_max"]):
+                        if on_corner(x, y):
                             return True
+                        if emulation:
+                            return bool(dialpad)
                         return bool(dialpad) and math.hypot(x - circle_center_x, y - circle_center_y) <= circle_radius
 
                     picked = select_dial_touch(slots, dial_touch_id, dial_claims)
@@ -2207,6 +2313,7 @@ def listen_touchpad_events():
                         icon_activated = False
                         last_slice = None
                         rotation.reset()
+                        corner_touch = emulation and on_corner(touch_x, touch_y)
                         log.debug("Finger detected.")
 
                     if finger_down:
@@ -2223,8 +2330,7 @@ def listen_touchpad_events():
 
                     if touch_x is not None and touch_y is not None and finger_down:
                         # Phase 1: top-right icon activation
-                        if (top_right_icon_bounds["x_min"] <= touch_x <= top_right_icon_bounds["x_max"] and
-                                top_right_icon_bounds["y_min"] <= touch_y <= top_right_icon_bounds["y_max"]):
+                        if on_corner(touch_x, touch_y):
                             if not within_top_right_icon:
                                 log.debug("Touch entered top-right icon bounds.")
                             within_top_right_icon = True
@@ -2245,16 +2351,24 @@ def listen_touchpad_events():
                             icon_activated = False
 
                         # Calculate distance and angle for circle-based detection
-                        dx = touch_x - circle_center_x
+                        dx = (touch_x - circle_center_x) * x_scale
                         dy = touch_y - circle_center_y
                         distance = math.sqrt(dx**2 + dy**2)
                         angle = touch_angle(dx, dy)
 
-                        if distance <= circle_radius and dialpad:
+                        # The emulated dial has no ring edge: the whole
+                        # touchpad is the ring, except a touch on the corner.
+                        if emulation:
+                            on_dial = dialpad and not corner_touch
+                        else:
+                            on_dial = distance <= circle_radius and dialpad
+
+                        if on_dial:
 
                             first_touch_outside = True
 
-                            if not tap_disabled:
+                            # The emulated dial keeps the pointer off while on.
+                            if not tap_disabled and not emulation:
                                 set_touchpad_prop_send_events(0)
                                 tap_disabled = True
 
@@ -3006,6 +3120,10 @@ def cleanup():
             deactivate_dialpad()
             log.info("DialPad deactivated")
 
+        # The action thread may not get to it before the driver exits.
+        if emulation:
+            set_touchpad_prop_send_events(1)
+
         # then clean up
         stop_threads=True
         try:
@@ -3305,6 +3423,17 @@ try:
     # wait until is keymap loaded
     while not keymap_loaded:
         sleep(0.5)
+
+    if emulation:
+        # The emulated dial takes the whole touchpad: never start with it on,
+        # and give the pointer back if the driver stopped while it was on.
+        config_lock.acquire()
+        read_config_file()
+        config_set(CONFIG_ENABLED, False, already_has_lock=True)
+        config_lock.release()
+        set_touchpad_prop_send_events(1)
+        # A stopped service must not leave the touchpad switched off.
+        signal.signal(signal.SIGTERM, lambda _signal, _frame: sys.exit(0))
 
     # Load config values
     load_all_config_values()

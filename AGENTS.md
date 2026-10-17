@@ -42,6 +42,7 @@
   - `README.md` shows only the main pictures and the example skin; all others are in `GALLERY.md`.
   - `tools/` – `render_overlay_preview.js` (gjs, paints `preview/overlay-*.png` with `dial.js`), `screenshot_settings.py` (opens the app on a demo config, saves `preview/settings-*.png`; never writes the user's config), `update_previews.py` (runs both, keeps unchanged pictures) and `git-hooks/pre-push`.
   - `install_gnome_extension.sh` – sourced by `install.sh`.
+  - **DialPad emulation** (config section `emulation`: `enabled`, `corner`, `center_size`; settings app *Driver* page) for touchpads without a DialPad: read once at driver start (the app runs `systemctl --user reset-failed` + `restart`), any touchpad (`layout_detect.is_touchpad()`), no hidraw/I2C and `send_value_to_touchpad()` sends nothing. Geometry from `dial_gesture.emulated_dial()` (ring = whole touchpad, centre = `center_size` % of the shorter side, 15 mm corner, `x_scale` for unequal axis resolutions). While on, `set_emulated_dial_owns_touchpad()` grabs the evdev device and disables send-events (on the action thread), so libinput resyncs when it gets it back; every touch is the dial except one that starts on the corner. The driver starts with it off, re-enables send-events at start and on SIGTERM (emulation only), refuses calibration. Tests: `tests/test_emulation.py`.
 
 ## Developer commands
 
@@ -81,7 +82,7 @@
 | Signal | `OverlayState` – signature `bsasasidsbbb` (enabled, title, titles, icons, value, value_angle_start, unit, center_pressed, value_show_only_progress, touching) – keep it fixed for older extensions |
 | Signal | `OverlayDetails(s)` – JSON: profile, mode (`multi`/`single`), colors[] (menu order), color, hints {cw, ccw, center}, hold_returns, pointer (degrees, -1 = none), look (profile, group, then function overrides of `config.schema.OVERLAY_RULE_KEYS`; `{}` = config defaults), icon (the selected function's configured icon), parent (group of the selected function, `""` = none; hold goes back to its list), submenu (`null`, or the open group's list: title, index (its menu sector), items[], icons[], colors[], selected). While a list is open `OverlayState` carries the menu titles and the highlighted function as title, so older extensions show the menu. Emitted before `OverlayState` in the same idle callback. Driver sends it via `send_to_socket({"details": {...}})`; details-only payloads emit no `OverlayState`. |
 | Signal | `CalibrationProgress(s)` – JSON from `CalibrationSession.state()` plus layout, touchpad_max_x/y and the latest `point` |
-| Methods | `SetActiveApplication(s)`, `GetStatus()`, `GetOverlayDetails() -> s`, `ReloadConfig()`, `StartCalibration() -> b`, `CancelCalibration() -> b` |
+| Methods | `SetActiveApplication(s)`, `GetStatus()` (also `emulation`, `touchpad`), `GetOverlayDetails() -> s`, `ReloadConfig()`, `StartCalibration() -> b` (false with emulation), `CancelCalibration() -> b`, `Toggle() -> b` (switch the dial on/off on the action thread, for keyboard shortcuts) |
 
 ## Config migration behavior
 

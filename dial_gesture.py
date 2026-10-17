@@ -297,3 +297,46 @@ def select_dial_touch(slots, locked_id, claims):
     if not claimed:
         return None
     return max(claimed, key=lambda touch: touch[0])
+
+
+# Touchpads without a DialPad: the corner that switches the emulated dial on
+# and off, in millimetres, or this share of the touchpad when it reports no
+# resolution.
+EMULATED_CORNER_MM = 15
+EMULATED_CORNER_SHARE = 0.12
+EMULATED_CENTER_PERCENT = (10, 60)
+
+
+def emulated_dial(min_x, max_x, min_y, max_y, center_percent, resolution_x=0, resolution_y=0):
+    """Dial geometry for a touchpad without a printed DialPad.
+
+    The ring is centred on the touchpad and reaches its corners, so every
+    touch lies on the dial; the centre button is ``center_percent`` of the
+    shorter side. Touchpads whose axes have different resolutions get
+    ``x_scale`` (multiply x distances by it), so a round finger movement
+    turns at an even speed. Distances are in y units.
+
+    Returns the driver's layout values: circle_diameter,
+    center_button_diameter, circle_center_x/y, the activation corner
+    top_right_icon_width/height (x and y units) and x_scale.
+    """
+    x_scale = resolution_y / resolution_x if resolution_x > 0 and resolution_y > 0 else 1.0
+    width = max(1, max_x - min_x)
+    height = max(1, max_y - min_y)
+    low, high = EMULATED_CENTER_PERCENT
+    percent = max(low, min(float(center_percent), high))
+    if resolution_x > 0 and resolution_y > 0:
+        corner_width = EMULATED_CORNER_MM * resolution_x
+        corner_height = EMULATED_CORNER_MM * resolution_y
+    else:
+        corner_width = width * EMULATED_CORNER_SHARE
+        corner_height = height * EMULATED_CORNER_SHARE * 1.5
+    return {
+        "circle_diameter": round(math.hypot(width * x_scale, height)),
+        "center_button_diameter": round(min(width * x_scale, height) * percent / 100),
+        "circle_center_x": round(min_x + width / 2),
+        "circle_center_y": round(min_y + height / 2),
+        "top_right_icon_width": round(min(corner_width, width / 3)),
+        "top_right_icon_height": round(min(corner_height, height / 3)),
+        "x_scale": x_scale,
+    }
