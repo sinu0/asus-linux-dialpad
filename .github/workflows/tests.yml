@@ -119,3 +119,31 @@ jobs:
 
       - name: Install, check and uninstall
         run: bash tests/install_in_container.sh "$GITHUB_WORKSPACE"
+
+  # The layer-shell dial (overlay/layer_shell.py) on headless sway with a
+  # fake driver: screenshots compared with dial.js, click-through, keyboard
+  # focus, hiding, pill and fade (tests/layer_shell_in_container.sh), at
+  # output scale 1 and 2 (HiDPI).
+  layer-shell-dial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: archlinux:latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: sway, scale 1
+        run: bash tests/layer_shell_in_container.sh "$GITHUB_WORKSPACE" sway /tmp/ls/sway-1
+
+      - name: sway, scale 2
+        if: success() || failure()
+        env:
+          TURNPAD_SKIP_PACKAGES: "1"
+        run: bash tests/layer_shell_in_container.sh "$GITHUB_WORKSPACE" sway /tmp/ls/sway-2 2
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: layer-shell-dial
+          path: /tmp/ls/
+          if-no-files-found: ignore

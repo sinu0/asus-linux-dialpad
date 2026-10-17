@@ -81,7 +81,8 @@ done
 # From a sway session: the layer-shell dial needs gtk4-layer-shell (recommended, left out above).
 sudo -u "$TESTER" -H env XDG_CURRENT_DESKTOP=sway XDG_SESSION_TYPE=wayland asus-turnpad-setup > /tmp/setup-sway.log 2>&1
 grep -q "needs gtk4-layer-shell" /tmp/setup-sway.log || { cat /tmp/setup-sway.log; echo "setup did not ask for gtk4-layer-shell"; exit 1; }
-if apt-cache show gir1.2-gtk4layershell-1.0 >/dev/null 2>&1; then
+# Ubuntu 24.04 only knows the name (from the Recommends), without a candidate.
+if apt-cache policy gir1.2-gtk4layershell-1.0 | grep -q "Candidate: [0-9]"; then
     apt-get install -y -qq gir1.2-gtk4layershell-1.0 >/dev/null
     # Now it enables the dial's service (only warns: no user service manager here).
     sudo -u "$TESTER" -H env XDG_CURRENT_DESKTOP=sway XDG_SESSION_TYPE=wayland asus-turnpad-setup > /tmp/setup-sway.log 2>&1
