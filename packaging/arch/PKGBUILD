@@ -15,21 +15,18 @@ license=('GPL-2.0-only')
 depends=(
     'python'
     'python-libevdev'
-    'python-pyinotify'
-    'python-pyasyncore'
-    'python-xkbcommon'
-    'python-pywayland'
-    'python-dbus'
-    'python-systemd'
     'python-gobject'
     'python-cairo'
     'gtk4'
     'libadwaita'
     'librsvg'
+    'libxkbcommon'
     'i2c-tools'
 )
 optdepends=(
     'gnome-shell: on-screen dial (GNOME Shell 45 or newer)'
+    'python-pywayland: keyboard layout straight from the Wayland compositor'
+    'python-systemd: logs in the journal'
     'python-xlib: X11 sessions'
     'python-xcffib: X11 sessions'
 )
