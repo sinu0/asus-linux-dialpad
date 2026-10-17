@@ -1,4 +1,9 @@
 __pycache__
 *~
 dialpad_dev
-/result
+
+# makepkg in packaging/arch
+packaging/arch/src/
+packaging/arch/pkg/
+packaging/arch/asus-turnpad/
+packaging/arch/*.pkg.tar.*

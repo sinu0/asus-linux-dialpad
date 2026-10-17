@@ -2410,7 +2410,7 @@ class Application(Adw.Application):
         )
         self._skin_gallery = Gtk.FlowBox(
             selection_mode=Gtk.SelectionMode.NONE, homogeneous=True,
-            column_spacing=12, row_spacing=12, min_children_per_line=2, max_children_per_line=5,
+            column_spacing=12, row_spacing=12, min_children_per_line=2, max_children_per_line=3,
         )
         self._skin_gallery.add_css_class("proart-skin-gallery")
         group.add(self._skin_gallery)
@@ -2507,21 +2507,31 @@ class Application(Adw.Application):
                 card.add_css_class("selected")
             resolved = self._skin(skin_id)
             preview = self._skin_preview_area(lambda resolved=resolved: self._sample_view(resolved), 116)
-            card.append(preview)
-
-            footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-            label = Gtk.Label(label=skin_name(self._skins, skin_id), xalign=0, hexpand=True)
-            label.set_ellipsize(3)
-            if not is_builtin(skin_id):
-                label.set_tooltip_text(f"Your skin · {SKINS_DIR / (skin_id + '.json')}")
-            footer.append(label)
+            # The badges sit on the preview: in the footer they widened the
+            # card they moved to, and with it every card (the gallery is
+            # homogeneous), so a click changed the number of columns.
+            preview_overlay = Gtk.Overlay(child=preview)
+            badges = Gtk.Box(spacing=4, halign=Gtk.Align.START, valign=Gtk.Align.START)
             if overlay.follow_system_style:
                 for attribute, badge_text in (("skin_light", "Light"), ("skin", "Dark")):
                     if getattr(overlay, attribute) == skin_id:
                         badge = Gtk.Label(label=badge_text)
                         badge.add_css_class("proart-badge")
-                        badge.set_valign(Gtk.Align.CENTER)
-                        footer.append(badge)
+                        badges.append(badge)
+            preview_overlay.add_overlay(badges)
+            badges.set_can_target(False)
+            card.append(preview_overlay)
+
+            footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+            name = skin_name(self._skins, skin_id)
+            label = Gtk.Label(label=name, xalign=0, hexpand=True)
+            label.set_ellipsize(3)
+            # A long name must not widen the card either; it shortens instead.
+            label.set_max_width_chars(12)
+            label.set_tooltip_text(
+                name if is_builtin(skin_id) else f"{name} · your skin · {SKINS_DIR / (skin_id + '.json')}"
+            )
+            footer.append(label)
             edit = Gtk.Button.new_from_icon_name("document-edit-symbolic")
             edit.add_css_class("flat")
             edit.add_css_class("circular")
