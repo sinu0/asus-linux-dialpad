@@ -34,6 +34,7 @@ SIZES = {
     "4K": (3840, 2128),
 }
 PAGES = ("actions", "profiles", "look", "device", "calibration", "diagnostics")
+CALIBRATION_RESULT = {"circle_diameter": 1012, "center_button_diameter": 388, "center_x": 3341, "center_y": 640}
 # Long enough for a resize or a new page to be laid out and mapped.
 SETTLE_MS = 120
 
@@ -118,6 +119,12 @@ def steps(app, result, size_names):
             unfold(window)
             yield
             result.extend(f"{size_name}, {page} page: {fault}" for fault in overflowing(window))
+        # A finished guided calibration waiting for Keep or Revert.
+        app._view_stack.set_visible_child_name("calibration")
+        app._apply_calibration(CALIBRATION_RESULT, "proartp16")
+        yield
+        result.extend(f"{size_name}, calibration review: {fault}" for fault in overflowing(window))
+        app._finish_calibration_review(keep=False)
         app._view_stack.set_visible_child_name("actions")
         for dialog_name in dialogs(app, profile):
             unfold(window)

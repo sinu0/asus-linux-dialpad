@@ -10,8 +10,12 @@ the corner LED. Both can be handled without code changes:
    listed in `laptop_touchpad_dialpad_layouts.csv`.
 2. **Calibrate.** Open *Turnpad → Calibration → Guided calibration*,
    press *Start*, trace the printed outer ring once with one finger, lift it,
-   then trace the edge of the centre button. The measured geometry is saved
-   to `~/.config/asus-turnpad/config.json` together with the layout name.
+   then trace the edge of the centre button. The measured geometry is used
+   right away so you can try the dial; press *Keep* to save it to
+   `~/.config/asus-turnpad/config.json` together with the layout name, or
+   *Revert* to go back (closing the app without choosing also reverts).
+   *Reset geometry* at the bottom of the page restores the values of the
+   layout file.
 3. **Corner icon.** If holding the illuminated corner does not toggle the
    DialPad, adjust the activation area (width / height, top-right corner) on
    the same page.

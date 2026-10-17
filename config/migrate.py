@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import configparser
 import importlib
 import json
@@ -288,6 +289,43 @@ def _parse_old_app_config(app_config: dict, app_id: str | None) -> Profile:
             segments[0].macro_center.extend(center_macros)
 
     return Profile(name=profile_name, app_id=app_id, segments=segments)
+
+
+_LAYOUT_GEOMETRY = {
+    "width": "top_right_icon_width",
+    "height": "top_right_icon_height",
+    "circle_diameter": "circle_diameter",
+    "center_button_diameter": "center_button_diameter",
+    "center_x": "circle_center_x",
+    "center_y": "circle_center_y",
+}
+
+
+def layout_geometry(layout_name: str, layouts_dir: str | os.PathLike = "") -> TouchGeometry | None:
+    """Geometry a layout file ships with, or ``None`` when it cannot be read.
+
+    The file is parsed, not imported: layouts import ``libevdev``, which the
+    settings app does not need.
+    """
+    if not layout_name or "/" in layout_name or layout_name.startswith("."):
+        return None
+    directory = Path(layouts_dir) if layouts_dir else Path(__file__).resolve().parents[1] / "layouts"
+    try:
+        tree = ast.parse((directory / f"{layout_name}.py").read_text())
+    except (OSError, SyntaxError, ValueError):
+        return None
+    constants = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            try:
+                value = ast.literal_eval(node.value)
+            except (ValueError, TypeError, SyntaxError):
+                continue
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                constants[node.targets[0].id] = int(value)
+    if not all(name in constants for name in _LAYOUT_GEOMETRY.values()):
+        return None
+    return TouchGeometry(**{field: constants[name] for field, name in _LAYOUT_GEOMETRY.items()})
 
 
 def migrate_old_format(

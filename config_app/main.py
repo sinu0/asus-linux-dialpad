@@ -58,7 +58,7 @@ from config.schema import (
     shell_commands,
 )
 from config.identity import APP_ID, APP_NAME, DBUS_INTERFACE, DBUS_NAME, DBUS_PATH
-from config.migrate import migrate_old_format
+from config.migrate import layout_geometry, migrate_old_format
 from config.skins import (
     DIAL_SHAPES,
     DIR_KEY,
@@ -277,6 +277,11 @@ class Application(Adw.Application):
         self._calibration_cancel = None
         self._calibration_points = []
         self._calibration_signal = 0
+        self._calibration_keep = None
+        self._calibration_revert = None
+        # Geometry before a guided measurement, kept until the user keeps or
+        # reverts the result: (TouchGeometry, device_name).
+        self._calibration_backup = None
 
     # --- lifecycle --------------------------------------------------------
 
@@ -370,11 +375,21 @@ class Application(Adw.Application):
         return "proartp16"
 
     def do_shutdown(self):
+        # A measurement nobody kept is not accepted: the driver goes back too.
+        if self._calibration_backup is not None and self.config is not None:
+            geometry, self.config.device_name = self._calibration_backup
+            self.config.geometry = copy.copy(geometry)
+            self._calibration_backup = None
+            self._schedule_save()
         if self._save_source:
             GLib.source_remove(self._save_source)
-            self._save_source = 0
-            if self.config is not None:
-                save_config(self.config)
+            self._save_config()
+            # Send the reload before the process ends.
+            if self._session_bus is not None:
+                try:
+                    self._session_bus.flush_sync(None)
+                except GLib.Error:
+                    pass
         Adw.Application.do_shutdown(self)
 
     def _toast(self, text):
@@ -3030,8 +3045,18 @@ class Application(Adw.Application):
         self._calibration_cancel.set_valign(Gtk.Align.CENTER)
         self._calibration_cancel.set_visible(False)
         self._calibration_cancel.connect("clicked", lambda _button: self._call_driver("CancelCalibration"))
-        self._calibration_row.add_suffix(self._calibration_cancel)
-        self._calibration_row.add_suffix(self._calibration_start)
+        self._calibration_revert = Gtk.Button(label="Revert")
+        self._calibration_revert.set_valign(Gtk.Align.CENTER)
+        self._calibration_revert.set_visible(False)
+        self._calibration_revert.connect("clicked", lambda _button: self._finish_calibration_review(keep=False))
+        self._calibration_keep = Gtk.Button(label="Keep")
+        self._calibration_keep.add_css_class("suggested-action")
+        self._calibration_keep.set_valign(Gtk.Align.CENTER)
+        self._calibration_keep.set_visible(False)
+        self._calibration_keep.connect("clicked", lambda _button: self._finish_calibration_review(keep=True))
+        for button in (self._calibration_cancel, self._calibration_start,
+                       self._calibration_revert, self._calibration_keep):
+            self._calibration_row.add_suffix(button)
         guided.add(self._calibration_row)
         content.append(guided)
 
@@ -3072,12 +3097,59 @@ class Application(Adw.Application):
         content.append(geometry)
 
         icon = Adw.PreferencesGroup(title="Corner activation icon", description="Area in the top-right corner, touchpad units")
-        icon.add(_spin_row("Width", None, self.config.geometry.width, 1, 2000, 5, 0,
-                           lambda value: self._set_config("geometry", "width", int(value))))
-        icon.add(_spin_row("Height", None, self.config.geometry.height, 1, 2000, 5, 0,
-                           lambda value: self._set_config("geometry", "height", int(value))))
+        for title, attribute in (("Width", "width"), ("Height", "height")):
+            row = _spin_row(
+                title, None, getattr(self.config.geometry, attribute), 1, 2000, 5, 0,
+                lambda value, attribute=attribute: self._set_config("geometry", attribute, int(value)),
+            )
+            self._geometry_rows[attribute] = row
+            icon.add(row)
         content.append(icon)
+
+        reset = Adw.PreferencesGroup()
+        reset_row = Adw.ActionRow(
+            title="Reset geometry",
+            subtitle="Ring, centre button and corner icon as the driver's layout file defines them",
+        )
+        reset_row.add_prefix(Gtk.Image.new_from_icon_name("edit-undo-symbolic"))
+        reset_button = Gtk.Button(label="Reset")
+        reset_button.add_css_class("destructive-action")
+        reset_button.set_valign(Gtk.Align.CENTER)
+        reset_button.connect("clicked", lambda _button: self._reset_geometry())
+        reset_row.add_suffix(reset_button)
+        reset.add(reset_row)
+        content.append(reset)
         return self._scrolled_content(content)
+
+    def _restore_geometry(self, geometry, device_name):
+        """Put a whole geometry into the config and the rows, then save."""
+        self.config.geometry = copy.copy(geometry)
+        self.config.device_name = device_name
+        for attribute, row in self._geometry_rows.items():
+            row.set_value(getattr(geometry, attribute))
+        self._calibration_points = []
+        if self._calibration_preview is not None:
+            self._calibration_preview.queue_draw()
+        self._schedule_save()
+
+    def _reset_geometry(self):
+        layout = self._detect_layout()
+        geometry = layout_geometry(layout, PROJECT_ROOT / "layouts")
+        if geometry is None:
+            self._toast(f"Layout {layout} has no geometry to reset to")
+            return
+        if self._calibration_backup is not None:
+            self._finish_calibration_review(keep=True, quiet=True)
+        previous = (copy.copy(self.config.geometry), self.config.device_name)
+        self._restore_geometry(geometry, layout)
+        self._calibration_row.set_title("Ready")
+        self._calibration_row.set_subtitle("The DialPad pauses while calibrating")
+
+        toast = Adw.Toast.new(f"Geometry reset to layout {layout}")
+        toast.set_button_label("Undo")
+        toast.connect("button-clicked", lambda _toast: self._restore_geometry(*previous))
+        if self._toasts is not None:
+            self._toasts.add_toast(toast)
 
     def _start_calibration(self):
         def started(connection, result):
@@ -3110,8 +3182,7 @@ class Application(Adw.Application):
             self._calibration_points = []
 
         active = bool(state.get("active"))
-        self._calibration_start.set_visible(not active)
-        self._calibration_cancel.set_visible(active)
+        self._show_calibration_buttons("cancel" if active else "start")
         step = f"Step {min(state.get('step_index', 0) + 1, state.get('steps', 2))} of {state.get('steps', 2)}"
         if active:
             self._calibration_row.set_title(f"{step}: {state.get('message', '')}")
@@ -3124,24 +3195,46 @@ class Application(Adw.Application):
         if self._calibration_preview is not None:
             self._calibration_preview.queue_draw()
 
+    def _show_calibration_buttons(self, which):
+        """Show the buttons of one calibration stage: start, cancel or review."""
+        self._calibration_start.set_visible(which == "start")
+        self._calibration_cancel.set_visible(which == "cancel")
+        self._calibration_keep.set_visible(which == "review")
+        self._calibration_revert.set_visible(which == "review")
+
     def _apply_calibration(self, result, layout):
-        geometry = self.config.geometry
+        """Use the measured geometry live and ask whether to keep it."""
+        if self._calibration_backup is None:
+            self._calibration_backup = (copy.copy(self.config.geometry), self.config.device_name)
+        geometry = copy.copy(self.config.geometry)
         for attribute in ("circle_diameter", "center_button_diameter", "center_x", "center_y"):
-            value = int(result[attribute])
-            setattr(geometry, attribute, value)
-            row = self._geometry_rows.get(attribute)
-            if row is not None:
-                row.set_value(value)
-        if layout:
-            self.config.device_name = layout
-        self._calibration_points = []
-        self._calibration_row.set_title("Calibrated")
-        self._calibration_row.set_subtitle(
-            f"Ring {result['circle_diameter']}, centre {result['center_button_diameter']} "
+            setattr(geometry, attribute, int(result[attribute]))
+        self._restore_geometry(geometry, layout or self.config.device_name)
+        self._show_calibration_buttons("review")
+        self._calibration_row.set_title(
+            f"Measured: ring {result['circle_diameter']}, centre {result['center_button_diameter']} "
             f"at {result['center_x']} × {result['center_y']}"
         )
-        self._schedule_save()
-        self._toast("Dial geometry measured and saved")
+        self._calibration_row.set_subtitle(
+            "Already in use — try the dial with a finger, then keep it or go back to the previous geometry (dashed)"
+        )
+
+    def _finish_calibration_review(self, keep, quiet=False):
+        backup, self._calibration_backup = self._calibration_backup, None
+        self._show_calibration_buttons("start")
+        if backup is None:
+            return
+        if keep:
+            self._calibration_row.set_title("Calibrated")
+            self._calibration_row.set_subtitle("Press Start to measure again")
+            if not quiet:
+                self._toast("New dial geometry kept")
+        else:
+            self._restore_geometry(*backup)
+            self._calibration_row.set_title("Previous geometry restored")
+            self._calibration_row.set_subtitle("Press Start to measure again")
+            if not quiet:
+                self._toast("Calibration discarded")
 
     def _draw_calibration(self, _area, cr, width, height):
         max_x, max_y = self._touchpad_size
@@ -3187,6 +3280,19 @@ class Application(Adw.Application):
         cr.move_to(cx, cy - 6)
         cr.line_to(cx, cy + 6)
         cr.stroke()
+
+        if self._calibration_backup is not None:
+            previous = self._calibration_backup[0]
+            px = left + previous.center_x * scale
+            py = top + previous.center_y * scale
+            cr.set_dash([5, 4])
+            cr.set_line_width(1.5)
+            cr.set_source_rgba(0.73, 0.70, 0.67, 0.8)
+            for diameter in (previous.circle_diameter, previous.center_button_diameter):
+                cr.new_sub_path()
+                cr.arc(px, py, diameter / 2 * scale, 0, 2 * math.pi)
+            cr.stroke()
+            cr.set_dash([])
 
         if self._calibration_points:
             cr.set_source_rgba(0.42, 0.71, 1.0, 0.95)

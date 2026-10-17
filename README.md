@@ -13,7 +13,7 @@ What the fork adds:
 
 - **Settings app** (GTK4/libadwaita): per-application profiles, a function library, pre-programmed packs (browsers, GIMP, Krita, Inkscape, Blender, Kdenlive, DaVinci Resolve, LibreOffice, code editors, Spotify, video players), function colours and order, import/export.
 - **ASUS Dial behaviour**: radial menu or single-function mode, per-app sensitivity and scroll speed, remembered last function, tap centre for the function's action, hold centre for the menu, horizontal scroll and Ctrl+wheel zoom.
-- **GNOME Shell overlay**: native radial dial with value gauge, rotation hints and finger position; size and position configurable.
+- **GNOME Shell overlay**: native radial dial with value gauge, rotation hints and finger position; size, position (anywhere on the screen) and visibility configurable: always visible, fading while you turn, or a small label instead of the dial — for all apps, per profile or per function.
 - **Guided calibration** that measures the dial on any DialPad touchpad — see [PORTING.md](PORTING.md).
 
 ### Install
@@ -94,6 +94,9 @@ Everything is set up in the **Turnpad** app (applications menu); changes apply i
 **On-screen dial**
 
 - GNOME Shell 45–51: native overlay with colours, level gauge, rotation hints and finger position; size, position and accent colour are configurable
+- Position: centre, slightly below centre, top, bottom, or a custom place picked on a screen miniature
+- Visibility: *Always visible*; *Fade while turning* (full when the finger lands, after a second it fades to a chosen opacity, 0 % hides it) so the dial does not cover what you are changing; or *Small label instead of the dial* (only the function name and value)
+- Position and visibility are defaults on the Skins page; every profile and every function can override them (folded *On-screen dial* row), e.g. a small label for brush size in Krita but the full dial in the menu
 - Skins: Dark glass, Midnight (OLED black), Frost (light), ProArt bronze and Classic segments, optionally following the system light/dark style; the skin editor creates your own with a live preview, and its "Copy prompt for AI" / "Paste JSON" pair lets any AI assistant design one ([SKINS.md](SKINS.md))
 - Other desktops: the original PySide overlay (own `.svg` icons; double-click to unlock its position and move it)
 
@@ -369,11 +372,11 @@ Use the **Turnpad** app for every setting:
 
 | App page | What it configures |
 | --- | --- |
-| **Dial Controls** | Functions of the selected profile (add from the library, order, colour, icon, show/hide, actions for turning and tapping, live value), dial mode, sensitivity, scroll speed, remembering the last function, building a profile with an AI assistant |
-| **Apps & Profiles** | Default and application profiles, pre-programmed packs, duplicate/rename/remove, import and export |
-| **Skins** | Skin gallery and editor, separate skins for light and dark style, on-screen dial size, position, visibility time, hints, finger position, progress arc and accent colour |
+| **Dial Controls** | Functions of the selected profile (add from the library, order, colour, icon, show/hide, actions for turning and tapping, live value, on-screen dial position and visibility), dial mode, sensitivity, scroll speed, remembering the last function, building a profile with an AI assistant |
+| **Apps & Profiles** | Default and application profiles, pre-programmed packs, duplicate/rename/remove, import and export, on-screen dial position and visibility per profile |
+| **Skins** | Skin gallery and editor, separate skins for light and dark style, on-screen dial size, position (also a custom place), visibility (always, fade while turning to a chosen opacity, small label), visibility time, hints, finger position, progress arc and accent colour |
 | **Behaviour** | Corner icon hold time, co-activator keys, switching off after inactivity, DialPad light (follows the keyboard backlight including off, or a fixed level 0–8 where 0 keeps it off), default rotation step, jitter filter, centre hold time, minimum menu sectors |
-| **Calibration** | Guided calibration (trace the ring and the centre button) or manual dial geometry and corner icon area |
+| **Calibration** | Guided calibration (trace the ring and the centre button, then keep or revert the result), manual dial geometry and corner icon area, reset to the layout's geometry |
 | **Driver** | Driver status, active profile and function, reload, configuration folder |
 
 **Building a profile with an AI assistant.** At the bottom of Dial Controls, *Copy prompt for AI* copies a description of the profile format together with the current profile. Paste it into ChatGPT, Claude or any other assistant, add what you want (“Inkscape: zoom, rotate canvas, layers, undo”), copy the whole answer and choose *Paste from AI*. The app reads the JSON out of the answer, accepts short key names such as `Ctrl`, explains what is wrong if something is not usable, lists every shell command before you accept, and then replaces the profile or adds it as a new one.

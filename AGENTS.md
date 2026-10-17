@@ -102,7 +102,8 @@
 ## Guided calibration and other models
 
 - `dial_gesture.CalibrationSession` (pure, tested) fits the outer ring and the centre button from finger traces (`fit_circle`, `angular_coverage`). The driver routes whole touch frames to it while `calibration` is set and skips activation and dial actions; send-events are disabled meanwhile.
-- The settings app applies the result and stores `device_name` = layout; `apply_gui_settings()` ignores JSON geometry whose `device_name` differs from the running layout.
+- The settings app applies the result live and asks *Keep* / *Revert* (`_calibration_backup` holds the geometry before; closing the app without choosing reverts in `do_shutdown`). It stores `device_name` = layout; `apply_gui_settings()` ignores JSON geometry whose `device_name` differs from the running layout.
+- *Reset geometry* restores the running layout's values via `config.migrate.layout_geometry()`, which parses the layout file with `ast` (layouts import `libevdev`); the toast offers Undo.
 - First-run migration detects the layout via `GetStatus()` or the `dialpad.py` process arguments — never hard-code `proartp16`.
 - `details` payloads never go to the Unix socket (the PySide overlay `dialpad_ui.py` reads newline-delimited JSON and applies only the keys present).
 - See `PORTING.md` for the user-facing steps.

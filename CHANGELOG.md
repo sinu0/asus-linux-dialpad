@@ -17,6 +17,8 @@
 - Skins choose the dial's shape (circle, square, octagon, knurled or wavy edge, or an outline drawn in the editor by dragging points on a polar grid), the shape and size of the function tiles and a background picture; the skin editor got clear entry points and an opacity slider per colour
 - Brightness of the DialPad light: follows the keyboard backlight (its brightness key dims or switches off the DialPad light too) or a fixed level 0–8, where 0 keeps the light off
 - Unattended installer (`bash install.sh`; `--interactive` for the original questions)
+- On-screen dial position and visibility for all apps, per profile and per function: a custom place on the screen, fading while turning (to a chosen opacity) or a small label instead of the dial
+- Guided calibration asks to keep or revert the measured geometry (it is live meanwhile, so the dial can be tried); the Calibration page can reset the geometry to the layout's values
 
 ### Removed
 
