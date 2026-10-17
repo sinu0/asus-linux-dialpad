@@ -52,8 +52,10 @@ sed "s|@INSTALL_DIR@|$PACKAGE_DIR|g" "config_app/$APP_ID.desktop" > "$ROOT/usr/s
 chmod 644 "$ROOT/usr/share/applications/$APP_ID.desktop"
 install -Dm644 config_app/icon.svg "$ROOT/usr/share/icons/hicolor/scalable/apps/$APP_ID.svg"
 
-# System integration: user service, device access, kernel modules, groups.
+# System integration: user services, device access, kernel modules, groups.
 install -Dm644 "packaging/$SLUG.service" "$ROOT/usr/lib/systemd/user/$SLUG.service"
+# On-screen dial for layer-shell compositors (Wayland desktops but GNOME).
+install -Dm644 "packaging/$OVERLAY_SERVICE" "$ROOT/usr/lib/systemd/user/$OVERLAY_SERVICE"
 install -Dm644 "packaging/70-$SLUG.rules" "$ROOT/usr/lib/udev/rules.d/70-$SLUG.rules"
 install -Dm644 "packaging/$SLUG.modules-load" "$ROOT/usr/lib/modules-load.d/$SLUG.conf"
 install -Dm644 "packaging/$SLUG.sysusers" "$ROOT/usr/lib/sysusers.d/$SLUG.conf"

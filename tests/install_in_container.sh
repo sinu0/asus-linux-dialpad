@@ -11,7 +11,9 @@
 # distribution packages are used (no compiler installed, no Python
 # environment; an old one is removed), the installed files, the user service
 # file running the system Python, and the libraries the driver and the
-# settings app import with /usr/bin/python3.
+# settings app import with /usr/bin/python3. It installs for a GNOME session
+# first, then for sway: there the layer-shell dial's service replaces the
+# legacy window (where the distribution packages gtk4-layer-shell).
 
 set -euo pipefail
 
@@ -39,13 +41,15 @@ cp -a "$SRC" "$HOME_DIR/turnpad"
 rm -rf "$HOME_DIR/turnpad/.git"
 chown -R "$TESTER:" "$HOME_DIR/turnpad"
 
+DESKTOP=GNOME
 as_tester() {
-    # A GNOME Wayland session as install.sh sees it; the layout is given so
-    # the installer does not look the laptop up online.
+    # A Wayland session of $DESKTOP as install.sh sees it; the layout is
+    # given so the installer does not look the laptop up online.
     sudo -u "$TESTER" -H env INSTALL_IN_CONTAINER=1 LAYOUT_NAME=proartp16 \
-        XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=GNOME XDG_RUNTIME_DIR=/tmp \
+        XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP="$DESKTOP" XDG_RUNTIME_DIR=/tmp \
         bash -c "cd ~/turnpad && $1"
 }
+UNITS="$HOME_DIR/.config/systemd/user"
 
 echo "== an install from before distribution packages"
 # Its Python environment and a service that ran it; install.sh removes both
@@ -81,6 +85,8 @@ grep -q "ExecStart=$PY $APP/dialpad.py proartp16 $HOME_DIR/.config/asus-turnpad/
     "$HOME_DIR/.config/systemd/user/asus-turnpad.service" \
     || { grep ExecStart "$HOME_DIR/.config/systemd/user/asus-turnpad.service"; echo "the service does not run $PY"; exit 1; }
 id -nG "$TESTER" | tr ' ' '\n' | grep -qx input
+# GNOME has the Shell extension; no layer-shell dial.
+test ! -e "$UNITS/asus-turnpad-overlay.service" || { echo "layer-shell dial installed on GNOME"; exit 1; }
 
 echo "== the driver's libraries with $PY"
 "$PY" - <<'EOF'
@@ -140,4 +146,36 @@ for path in "$APP" "$HOME_DIR/.config/systemd/user/asus-turnpad.service" \
     test ! -e "$path" || { echo "left behind: $path"; exit 1; }
 done
 test -d "$HOME_DIR/.config/asus-turnpad" || { echo "settings were removed"; exit 1; }
+
+echo "== install.sh on sway: the layer-shell dial instead of the legacy window"
+DESKTOP=sway
+# The legacy window's Wayland service of an earlier install goes.
+mkdir -p "$UNITS"
+printf '[Service]\nExecStart=%s %s/dialpad_ui.py\nEnvironment="WAYLAND_DISPLAY=wayland-0"\n' "$PY" "$APP" \
+    > "$UNITS/asus-turnpad-ui.service"
+chown -R "$TESTER:" "$HOME_DIR/.config"
+as_tester "bash install.sh" > /tmp/install-sway.log 2>&1 || { tail -40 /tmp/install-sway.log; echo "install.sh failed"; exit 1; }
+grep -q "Installation finished successfully" /tmp/install-sway.log || { tail -40 /tmp/install-sway.log; exit 1; }
+test ! -e "$UNITS/asus-turnpad-ui.service" || { echo "the legacy window's service is installed on Wayland"; exit 1; }
+if "$PY" -c 'import gi; gi.require_version("Gtk4LayerShell", "1.0")' 2>/dev/null; then
+    grep -qx "ExecStart=$PY $APP/overlay/layer_shell.py" "$UNITS/asus-turnpad-overlay.service" \
+        || { cat "$UNITS/asus-turnpad-overlay.service" 2>/dev/null; echo "the dial's service is missing or wrong"; exit 1; }
+    grep -qx "RestartPreventExitStatus=3" "$UNITS/asus-turnpad-overlay.service"
+    # The dial's own imports with the installed program and the system Python
+    # (no Wayland display here: exit status 3 and a clear message).
+    status=0
+    sudo -u "$TESTER" -H env -u WAYLAND_DISPLAY "$PY" "$APP/overlay/layer_shell.py" 2>/tmp/dial.err || status=$?
+    test "$status" = 3 && grep -q "layer-shell" /tmp/dial.err || { cat /tmp/dial.err; echo "dial exit $status"; exit 1; }
+    "$PY" -c 'import sys; sys.path.insert(0, "/opt/asus-turnpad"); import overlay.frontend' \
+        || { echo "the dial's modules do not import"; exit 1; }
+    echo "layer-shell dial: service placed, modules import"
+else
+    test ! -e "$UNITS/asus-turnpad-overlay.service" || { echo "dial service placed without gtk4-layer-shell"; exit 1; }
+    grep -q "gtk4-layer-shell is not available" /tmp/install-sway.log
+    echo "gtk4-layer-shell is not packaged here: the dial is left out"
+fi
+as_tester "bash uninstall.sh" > /tmp/uninstall-sway.log 2>&1 || { tail -30 /tmp/uninstall-sway.log; echo "uninstall.sh failed"; exit 1; }
+for path in "$APP" "$UNITS/asus-turnpad.service" "$UNITS/asus-turnpad-overlay.service"; do
+    test ! -e "$path" || { echo "left behind: $path"; exit 1; }
+done
 echo "== install test passed"

@@ -180,7 +180,38 @@ class DistributionPackagesTest(unittest.TestCase):
         self.assertIn("$PYTHON", (ROOT / "install_service.sh").read_text())
         for template in sorted(ROOT.glob("*.service")):
             with self.subTest(service=template.name):
-                self.assertRegex(template.read_text(), r"(?m)^ExecStart=\$PYTHON \$INSTALL_DIR_PATH/dialpad(_ui)?\.py\b")
+                self.assertRegex(template.read_text(),
+                                 r"(?m)^ExecStart=\$PYTHON \$INSTALL_DIR_PATH/(dialpad(_ui)?|overlay/layer_shell)\.py\b")
+        for unit in sorted((ROOT / "packaging").glob("*.service")):
+            with self.subTest(service=unit.name):
+                self.assertRegex(unit.read_text(), r"(?m)^ExecStart=/usr/bin/python3 /usr/share/asus-turnpad/")
+
+    def test_layer_shell_dial_service(self):
+        # Exit status 3 = no layer-shell here (GNOME, X11): never restarted.
+        for unit in (ROOT / "asus-turnpad-overlay.service", ROOT / "packaging" / "asus-turnpad-overlay.service"):
+            text = unit.read_text()
+            with self.subTest(service=str(unit.relative_to(ROOT))):
+                self.assertRegex(text, r"(?m)^ExecStart=(\$PYTHON|/usr/bin/python3) \S+/overlay/layer_shell\.py$")
+                for line in ("PartOf=graphical-session.target", "Restart=on-failure", "RestartPreventExitStatus=3",
+                             "NoNewPrivileges=yes", "WantedBy=graphical-session.target"):
+                    self.assertIn(f"\n{line}\n", text)
+                self.assertRegex(text, r"(?m)^After=graphical-session\.target\b")
+
+    def test_overlay_per_desktop(self):
+        overlay = (ROOT / "install_overlay.sh").read_text()
+        self.assertIn("source install_gnome_extension.sh", overlay)
+        self.assertIn("source install_layer_shell_overlay.sh", overlay)
+        # The layer-shell dial comes after the services, whose functions it uses.
+        installer = (ROOT / "install.sh").read_text()
+        self.assertLess(installer.index("source install_service.sh"), installer.index("source install_overlay.sh"))
+        dial = (ROOT / "install_layer_shell_overlay.sh").read_text()
+        self.assertIn('install_unit "$OVERLAY_SERVICE" "$OVERLAY_SERVICE"', dial)
+        self.assertIn("install_optional $(packages layershell)", dial)
+        # The legacy window only on X11.
+        self.assertEqual(sorted(path.name for path in ROOT.glob("*-ui.*.service")), ["asus-turnpad-ui.x11.service"])
+        self.assertIn('install_unit "$SLUG-ui.x11.service" "$UI_SERVICE"', (ROOT / "install_service.sh").read_text())
+        uninstall = (ROOT / "uninstall.sh").read_text()
+        self.assertIn('"$OVERLAY_SERVICE"', uninstall)
 
     def test_every_manager_has_every_group(self):
         groups = package_groups()

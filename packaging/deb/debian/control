@@ -27,10 +27,12 @@ Recommends:
  python3-periphery,
  gir1.2-rsvg-2.0,
  gnome-shell,
+ gir1.2-gtk4layershell-1.0,
 Description: Touchpad dial for ASUS laptops with a DialPad
  Turnpad turns the DialPad of ASUS laptops into a dial: a radial menu of
  functions, profiles per application, actions on turning and tapping, and an
- on-screen dial for GNOME Shell 45 or newer.
+ on-screen dial for GNOME Shell 45 or newer and for Wayland compositors with
+ layer-shell (KDE Plasma 6, Hyprland, sway, niri, COSMIC).
  .
  After installing, each user who wants the dial runs asus-turnpad-setup once
  and logs out and back in.

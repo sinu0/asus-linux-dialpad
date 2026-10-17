@@ -41,6 +41,7 @@ class IdentityTest(unittest.TestCase):
         self.assertEqual(shell_value("GNOME_EXTENSION_UUID"), identity.GNOME_EXTENSION_UUID)
         self.assertEqual(shell_value("INSTALL_DIR_PATH"), identity.INSTALL_DIR)
         self.assertTrue(shell_value("CONFIG_FILE_DIR_PATH").endswith(f"/{identity.CONFIG_DIR_NAME}"))
+        self.assertEqual(shell_value("OVERLAY_SERVICE"), identity.OVERLAY_SERVICE)
 
     def test_no_script_overrides_the_paths(self):
         # Defaults live in install_paths.sh only, so they cannot drift apart.
@@ -74,6 +75,11 @@ class IdentityTest(unittest.TestCase):
         setup = read(f"packaging/{identity.SLUG}-setup")
         self.assertIn(f'GNOME_EXTENSION_UUID="{identity.GNOME_EXTENSION_UUID}"', setup)
         self.assertIn(f'SERVICE="{identity.SLUG}.service"', setup)
+        # The layer-shell dial's unit: the same name installed and packaged.
+        self.assertIn(f'OVERLAY_SERVICE="{identity.OVERLAY_SERVICE}"', setup)
+        self.assertTrue((ROOT / identity.OVERLAY_SERVICE).exists())
+        self.assertIn(f"{identity.PACKAGE_DIR}/overlay/layer_shell.py", read(f"packaging/{identity.OVERLAY_SERVICE}"))
+        self.assertIn('"packaging/$OVERLAY_SERVICE" "$ROOT/usr/lib/systemd/user/$OVERLAY_SERVICE"', files)
         self.assertIn(identity.INSTALL_DIR, setup)
         self.assertIn(f"[ -d {identity.PACKAGE_DIR} ]", read("install.sh"))
 
@@ -109,9 +115,10 @@ class IdentityTest(unittest.TestCase):
 
     def test_service_templates_for_every_session(self):
         for kind in ("wayland", "x11", "plasma-wayland"):
-            for name in (identity.SLUG, f"{identity.SLUG}-ui"):
-                with self.subTest(service=f"{name}.{kind}.service"):
-                    self.assertTrue((ROOT / f"{name}.{kind}.service").exists())
+            with self.subTest(service=f"{identity.SLUG}.{kind}.service"):
+                self.assertTrue((ROOT / f"{identity.SLUG}.{kind}.service").exists())
+        # The legacy window on X11; Wayland desktops have their own dial.
+        self.assertTrue((ROOT / f"{identity.SLUG}-ui.x11.service").exists())
 
 
 if __name__ == "__main__":

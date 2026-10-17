@@ -43,6 +43,7 @@ for path in \
     /usr/share/applications/io.github.sinu0.AsusTurnpad.desktop \
     /usr/share/icons/hicolor/scalable/apps/io.github.sinu0.AsusTurnpad.svg \
     /usr/lib/systemd/user/asus-turnpad.service \
+    /usr/lib/systemd/user/asus-turnpad-overlay.service \
     /usr/lib/udev/rules.d/70-asus-turnpad.rules \
     /usr/lib/modules-load.d/asus-turnpad.conf \
     /usr/lib/sysusers.d/asus-turnpad.conf \
@@ -50,6 +51,7 @@ for path in \
     test -e "$path" || { echo "missing: $path"; exit 1; }
 done
 grep -q "Exec=python3 $APP/config_app/main.py" /usr/share/applications/io.github.sinu0.AsusTurnpad.desktop
+grep -qx "ExecStart=/usr/bin/python3 $APP/overlay/layer_shell.py" /usr/lib/systemd/user/asus-turnpad-overlay.service
 getent group i2c >/dev/null && getent group uinput >/dev/null
 test -x "$APP/dialpad.py" && test -x /usr/bin/asus-turnpad-setup
 if find "$APP" -newer "$PACKAGE" -name '*.pyc' | grep -q .; then

@@ -44,6 +44,7 @@ for path in \
     /usr/share/applications/io.github.sinu0.AsusTurnpad.desktop \
     /usr/share/icons/hicolor/scalable/apps/io.github.sinu0.AsusTurnpad.svg \
     /usr/lib/systemd/user/asus-turnpad.service \
+    /usr/lib/systemd/user/asus-turnpad-overlay.service \
     /usr/lib/udev/rules.d/70-asus-turnpad.rules \
     /usr/lib/modules-load.d/asus-turnpad.conf \
     /usr/lib/sysusers.d/asus-turnpad.conf \
@@ -52,10 +53,12 @@ for path in \
     test -e "$path" || { echo "missing: $path"; exit 1; }
 done
 grep -q "Exec=python3 $APP/config_app/main.py" /usr/share/applications/io.github.sinu0.AsusTurnpad.desktop
+grep -qx "ExecStart=/usr/bin/python3 $APP/overlay/layer_shell.py" /usr/lib/systemd/user/asus-turnpad-overlay.service
 getent group i2c >/dev/null && getent group uinput >/dev/null
 test -x "$APP/dialpad.py" && test -x /usr/bin/asus-turnpad-setup
-# The user service must not be enabled for every user (asus-turnpad-setup does it per user).
+# The user services must not be enabled for every user (asus-turnpad-setup does it per user).
 test ! -e /etc/systemd/user/graphical-session.target.wants/asus-turnpad.service
+test ! -e /etc/systemd/user/graphical-session.target.wants/asus-turnpad-overlay.service
 
 echo "== the libraries the driver and the settings app import"
 find "$APP" -name '*.pyc' | sort > /tmp/pyc-installed
@@ -75,6 +78,18 @@ sudo -u "$TESTER" -H env XDG_CURRENT_DESKTOP=GNOME asus-turnpad-setup
 for group in input i2c uinput; do
     id -nG "$TESTER" | tr ' ' '\n' | grep -qx "$group" || { echo "$TESTER not in $group"; exit 1; }
 done
+# From a sway session: the layer-shell dial needs gtk4-layer-shell (recommended, left out above).
+sudo -u "$TESTER" -H env XDG_CURRENT_DESKTOP=sway XDG_SESSION_TYPE=wayland asus-turnpad-setup > /tmp/setup-sway.log 2>&1
+grep -q "needs gtk4-layer-shell" /tmp/setup-sway.log || { cat /tmp/setup-sway.log; echo "setup did not ask for gtk4-layer-shell"; exit 1; }
+if apt-cache show gir1.2-gtk4layershell-1.0 >/dev/null 2>&1; then
+    apt-get install -y -qq gir1.2-gtk4layershell-1.0 >/dev/null
+    # Now it enables the dial's service (only warns: no user service manager here).
+    sudo -u "$TESTER" -H env XDG_CURRENT_DESKTOP=sway XDG_SESSION_TYPE=wayland asus-turnpad-setup > /tmp/setup-sway.log 2>&1
+    grep -qE "asus-turnpad-overlay.service|On-screen dial enabled" /tmp/setup-sway.log || { cat /tmp/setup-sway.log; echo "setup did not enable the dial"; exit 1; }
+    apt-get remove -y -qq gir1.2-gtk4layershell-1.0 >/dev/null
+else
+    echo "gtk4-layer-shell is not packaged here: the dial is left out"
+fi
 
 echo "== remove"
 apt-get remove -y -qq asus-turnpad >/dev/null

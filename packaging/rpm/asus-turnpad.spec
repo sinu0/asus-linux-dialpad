@@ -34,11 +34,14 @@ Requires:       systemd
 Recommends:     python3-pywayland
 Recommends:     python3-systemd
 Recommends:     gnome-shell
+# The on-screen dial on Wayland desktops other than GNOME.
+Recommends:     gtk4-layer-shell
 
 %description
 Turnpad turns the DialPad of ASUS laptops into a dial: a radial menu of
 functions, profiles per application, actions on turning and tapping, and an
-on-screen dial for GNOME Shell 45 or newer.
+on-screen dial for GNOME Shell 45 or newer and for Wayland compositors with
+layer-shell (KDE Plasma 6, Hyprland, sway, niri, COSMIC).
 
 After installing, each user who wants the dial runs asus-turnpad-setup once
 and logs out and back in.
@@ -64,7 +67,7 @@ systemd-sysusers %{name}.conf >/dev/null 2>&1 || :
 %udev_rules_update
 udevadm trigger --subsystem-match=misc --subsystem-match=i2c-dev --subsystem-match=hidraw >/dev/null 2>&1 || :
 modprobe -a uinput i2c-dev >/dev/null 2>&1 || :
-%systemd_user_post %{name}.service
+%systemd_user_post %{name}.service %{name}-overlay.service
 if [ "$1" -eq 1 ]; then
     echo
     echo "==> Finish the setup once as your user (not root):"
@@ -76,9 +79,9 @@ else
 fi
 
 %preun
-%systemd_user_preun %{name}.service
+%systemd_user_preun %{name}.service %{name}-overlay.service
 if [ "$1" -eq 0 ]; then
-    echo "==> Users of Turnpad: run 'systemctl --user disable --now asus-turnpad' (settings in ~/.config/asus-turnpad stay)."
+    echo "==> Users of Turnpad: run 'systemctl --user disable --now asus-turnpad asus-turnpad-overlay' (settings in ~/.config/asus-turnpad stay)."
 fi
 
 %postun
@@ -94,6 +97,7 @@ fi
 %{_datadir}/applications/%{app_id}.desktop
 %{_datadir}/icons/hicolor/scalable/apps/%{app_id}.svg
 %{_userunitdir}/%{name}.service
+%{_userunitdir}/%{name}-overlay.service
 %{_udevrulesdir}/70-%{name}.rules
 %{_modulesloaddir}/%{name}.conf
 %{_sysusersdir}/%{name}.conf

@@ -12,7 +12,8 @@
 #   remove_legacy_venv      /opt/asus-turnpad/.env
 #   remove_legacy_install   services, extension, launcher, program, udev
 #                           rules and module lists under the old names; the
-#                           old Python environment and services that ran it
+#                           old Python environment and services that ran it;
+#                           the legacy window's service on Wayland
 
 source install_paths.sh
 
@@ -67,6 +68,16 @@ remove_legacy_install() {
             echo "Removed $unit (it ran $LEGACY_VENV_PATH)"
         fi
     done
+    # The legacy window's service for Wayland sessions (templates
+    # asus-turnpad-ui.wayland/plasma-wayland.service, removed); Wayland
+    # desktops now get the Shell extension or the layer-shell dial. Only the
+    # X11 one sets XAUTHORITY.
+    if grep -qF "dialpad_ui.py" "$SERVICE_INSTALL_DIR_PATH/$UI_SERVICE" 2>/dev/null &&
+       ! grep -qF "XAUTHORITY=" "$SERVICE_INSTALL_DIR_PATH/$UI_SERVICE"; then
+        systemctl --user disable --now "$UI_SERVICE" >/dev/null 2>&1
+        rm -f "$SERVICE_INSTALL_DIR_PATH/$UI_SERVICE"
+        echo "Removed $UI_SERVICE (the legacy window on Wayland)"
+    fi
     systemctl --user daemon-reload
 
     if command -v gnome-extensions >/dev/null 2>&1; then

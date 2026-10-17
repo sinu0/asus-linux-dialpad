@@ -16,8 +16,11 @@ SLUG="asus-turnpad"
 APP_ID="io.github.sinu0.AsusTurnpad"
 GNOME_EXTENSION_UUID="asus-turnpad@sinu0.github.io"
 
+# User services: the driver, the legacy dial window (X11) and the dial for
+# layer-shell compositors (Wayland desktops other than GNOME).
 DRIVER_SERVICE="$SLUG.service"
 UI_SERVICE="$SLUG-ui.service"
+OVERLAY_SERVICE="$SLUG-overlay.service"
 
 : "${INSTALL_DIR_PATH:=/opt/asus-turnpad}"
 : "${CONFIG_FILE_DIR_PATH:=${XDG_CONFIG_HOME:-$HOME/.config}/$SLUG}"

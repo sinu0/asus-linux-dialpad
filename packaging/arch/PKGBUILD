@@ -8,7 +8,7 @@ pkgname=asus-turnpad-git
 _pkgname=asus-turnpad
 pkgver=r0
 pkgrel=1
-pkgdesc="Touchpad dial for ASUS laptops with a DialPad: radial menu, per-app profiles, GNOME on-screen dial (based on asus-dialpad-driver)"
+pkgdesc="Touchpad dial for ASUS laptops with a DialPad: radial menu, per-app profiles, on-screen dial for GNOME and layer-shell compositors (based on asus-dialpad-driver)"
 arch=('any')
 url="https://github.com/sinu0/asus-turnpad"
 license=('GPL-2.0-only')
@@ -25,6 +25,7 @@ depends=(
 )
 optdepends=(
     'gnome-shell: on-screen dial (GNOME Shell 45 or newer)'
+    'gtk4-layer-shell: on-screen dial on KDE Plasma 6, Hyprland, sway, niri, COSMIC'
     'python-pywayland: keyboard layout straight from the Wayland compositor'
     'python-systemd: logs in the journal'
     'python-xlib: X11 sessions'
