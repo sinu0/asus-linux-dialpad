@@ -2,8 +2,8 @@
 
 # Distribution packages Turnpad needs. Everything comes from the package
 # manager and runs with the system Python ($PYTHON): no Python environment,
-# no pip, no compiler. Sourced by install.sh, install_service.sh and
-# install_user_interface.sh.
+# no pip, no compiler. Sourced by install.sh, install_service.sh,
+# install_user_interface.sh and install_layer_shell_overlay.sh.
 #
 #   detect_package_manager      sets PACKAGE_MANAGER (empty when unknown)
 #   packages <group>            package names of a group for this manager
@@ -14,8 +14,10 @@
 # Groups (PACKAGES_<names>_<group> below):
 #   required   driver: python-libevdev, PyGObject (Gio, GLib), libxkbcommon,
 #              i2c-tools; settings app: GTK 4, Libadwaita, pycairo, librsvg;
-#              installer: curl and xmllint (layout lookup), envsubst (services)
-#   x11        xinput (touchpad on/off follows the X11 device state)
+#              installer: curl and xmllint (layout lookup), envsubst (services).
+#              GLib's typelibs (GLibUnix for overlay/layer_shell.py) come
+#              with PyGObject everywhere.
+#   x11       xinput (touchpad on/off follows the X11 device state)
 #   plasma     qdbus (focused window on KDE Plasma)
 #   optional   pyatspi (focused window fallback), python-periphery (I2C
 #              fallback when i2ctransfer fails; Debian and Ubuntu only),
@@ -24,7 +26,10 @@
 #   wayland    pywayland (keyboard layout from the Wayland compositor)
 #   x11libs    python-xlib and xcffib (keyboard layout and keys on X11)
 #   systemd    python-systemd (logs to the journal), see install_service.sh
-#   ui         PySide6 for the legacy on-screen dial window (dialpad_ui.py)
+#   ui         PySide6 for the legacy on-screen dial window (dialpad_ui.py, X11)
+#   layershell gtk4-layer-shell and its typelib: the on-screen dial on Wayland
+#              desktops other than GNOME (overlay/layer_shell.py, see
+#              install_layer_shell_overlay.sh); Ubuntu 24.04 has none
 #
 # Names for apt, dnf and pacman are tested in CI (tests/install_in_container.sh,
 # packaging/arch); zypper names were checked on openSUSE Tumbleweed only;
@@ -47,6 +52,7 @@ PACKAGES_apt_wayland="python3-pywayland"
 PACKAGES_apt_x11libs="python3-xlib python3-xcffib"
 PACKAGES_apt_systemd="python3-systemd"
 PACKAGES_apt_ui="python3-pyside6.qtcore python3-pyside6.qtgui python3-pyside6.qtwidgets python3-pyside6.qtsvg"
+PACKAGES_apt_layershell="gir1.2-gtk4layershell-1.0 libgtk4-layer-shell0"
 
 # Fedora, also immutable Fedora (rpm-ostree) and yum; gobject-introspection
 # has the cairo and DBus typelibs that GTK, Rsvg and pyatspi load.
@@ -59,6 +65,7 @@ PACKAGES_dnf_wayland="python3-pywayland"
 PACKAGES_dnf_x11libs="python3-xlib python3-xcffib"
 PACKAGES_dnf_systemd="python3-systemd"
 PACKAGES_dnf_ui="python3-pyside6"
+PACKAGES_dnf_layershell="gtk4-layer-shell"
 
 # Arch Linux (the Arch package in packaging/arch is the better way there)
 PACKAGES_pacman_required="python python-libevdev python-gobject python-cairo libxkbcommon i2c-tools
@@ -70,6 +77,7 @@ PACKAGES_pacman_wayland="python-pywayland"
 PACKAGES_pacman_x11libs="python-xlib python-xcffib"
 PACKAGES_pacman_systemd="python-systemd"
 PACKAGES_pacman_ui="pyside6"
+PACKAGES_pacman_layershell="gtk4-layer-shell"
 
 # openSUSE
 PACKAGES_zypper_required="python3 python3-libevdev python3-gobject python3-gobject-cairo python3-cairo libxkbcommon0 i2c-tools
@@ -81,6 +89,7 @@ PACKAGES_zypper_wayland="python3-pywayland"
 PACKAGES_zypper_x11libs="python3-python-xlib python3-xcffib"
 PACKAGES_zypper_systemd="python3-systemd"
 PACKAGES_zypper_ui="python3-pyside6"
+PACKAGES_zypper_layershell="typelib-1_0-Gtk4LayerShell-1_0 libgtk4-layer-shell0"
 
 # Void Linux (not tested)
 PACKAGES_xbps_required="python3 python3-libevdev python3-gobject python3-cairo libxkbcommon i2c-tools
@@ -92,6 +101,7 @@ PACKAGES_xbps_wayland="python3-pywayland"
 PACKAGES_xbps_x11libs="python3-xlib python3-xcffib"
 PACKAGES_xbps_systemd=""
 PACKAGES_xbps_ui="python3-pyside6"
+PACKAGES_xbps_layershell="gtk4-layer-shell"
 
 # Gentoo (not tested)
 PACKAGES_portage_required="dev-lang/python dev-python/libevdev dev-python/pygobject dev-python/pycairo x11-libs/libxkbcommon sys-apps/i2c-tools
@@ -103,6 +113,7 @@ PACKAGES_portage_wayland="dev-python/pywayland"
 PACKAGES_portage_x11libs="dev-python/python-xlib dev-python/xcffib"
 PACKAGES_portage_systemd="dev-python/python-systemd"
 PACKAGES_portage_ui="dev-python/pyside"
+PACKAGES_portage_layershell="gui-libs/gtk4-layer-shell"
 
 # Solus (not tested)
 PACKAGES_eopkg_required="python3 python-libevdev python-gobject python-cairo libxkbcommon i2c-tools
@@ -114,6 +125,7 @@ PACKAGES_eopkg_wayland="python-pywayland"
 PACKAGES_eopkg_x11libs="python-xlib python-xcffib"
 PACKAGES_eopkg_systemd="python-systemd"
 PACKAGES_eopkg_ui="pyside6"
+PACKAGES_eopkg_layershell="gtk4-layer-shell"
 
 detect_package_manager() {
     PACKAGE_MANAGER=""

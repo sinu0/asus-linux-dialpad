@@ -32,15 +32,26 @@ LIBRARIES = {
     "PySide6": ("ui", {"apt": "python3-pyside6.qtwidgets", "dnf": "python3-pyside6", "pacman": "pyside6", "zypper": "python3-pyside6"}),
 }
 
-# GObject introspection namespaces (gi.require_version) and their packages.
+# GObject introspection namespaces (gi.require_version): their group in
+# install_packages.sh and the package that brings the typelib (itself or as
+# a dependency) per manager.
 TYPELIBS = {
-    "GLib": {"apt": "python3-gi", "dnf": "python3-gobject", "pacman": "python-gobject", "zypper": "python3-gobject"},
-    "Gio": {"apt": "python3-gi", "dnf": "python3-gobject", "pacman": "python-gobject", "zypper": "python3-gobject"},
-    "Gtk": {"apt": "gir1.2-gtk-4.0", "dnf": "gtk4", "pacman": "gtk4", "zypper": "typelib-1_0-Gtk-4_0"},
-    "Gdk": {"apt": "gir1.2-gtk-4.0", "dnf": "gtk4", "pacman": "gtk4", "zypper": "typelib-1_0-Gtk-4_0"},
-    "GdkPixbuf": {"apt": "gir1.2-gtk-4.0", "dnf": "gtk4", "pacman": "gtk4", "zypper": "typelib-1_0-Gtk-4_0"},
-    "Adw": {"apt": "gir1.2-adw-1", "dnf": "libadwaita", "pacman": "libadwaita", "zypper": "typelib-1_0-Adw-1"},
-    "Rsvg": {"apt": "gir1.2-rsvg-2.0", "dnf": "librsvg2", "pacman": "librsvg", "zypper": "typelib-1_0-Rsvg-2_0"},
+    "GLib": ("required", {"apt": "python3-gi", "dnf": "python3-gobject", "pacman": "python-gobject", "zypper": "python3-gobject"}),
+    "Gio": ("required", {"apt": "python3-gi", "dnf": "python3-gobject", "pacman": "python-gobject", "zypper": "python3-gobject"}),
+    # GLib 2.80 and newer (overlay/layer_shell.py falls back to GLib before);
+    # gir1.2-glib-2.0, glib2 and typelib-1_0-GLibUnix-2_0 come with PyGObject.
+    "GLibUnix": ("required", {"apt": "python3-gi", "dnf": "python3-gobject", "pacman": "python-gobject", "zypper": "python3-gobject"}),
+    "Gtk": ("required", {"apt": "gir1.2-gtk-4.0", "dnf": "gtk4", "pacman": "gtk4", "zypper": "typelib-1_0-Gtk-4_0"}),
+    "Gdk": ("required", {"apt": "gir1.2-gtk-4.0", "dnf": "gtk4", "pacman": "gtk4", "zypper": "typelib-1_0-Gtk-4_0"}),
+    "GdkPixbuf": ("required", {"apt": "gir1.2-gtk-4.0", "dnf": "gtk4", "pacman": "gtk4", "zypper": "typelib-1_0-Gtk-4_0"}),
+    "Adw": ("required", {"apt": "gir1.2-adw-1", "dnf": "libadwaita", "pacman": "libadwaita", "zypper": "typelib-1_0-Adw-1"}),
+    # Optional on Debian and Ubuntu (overlay/gtk_icons.py works without it);
+    # elsewhere the required librsvg has it.
+    "Rsvg": ("optional", {"apt": "gir1.2-rsvg-2.0", "dnf": "librsvg2", "pacman": "librsvg", "zypper": "typelib-1_0-Rsvg-2_0"}),
+    # The on-screen dial on Wayland desktops other than GNOME; not packaged
+    # by Ubuntu 24.04 (the dial is then left out).
+    "Gtk4LayerShell": ("layershell", {"apt": "gir1.2-gtk4layershell-1.0", "dnf": "gtk4-layer-shell",
+                                      "pacman": "gtk4-layer-shell", "zypper": "typelib-1_0-Gtk4LayerShell-1_0"}),
 }
 
 
@@ -175,7 +186,8 @@ class DistributionPackagesTest(unittest.TestCase):
         groups = package_groups()
         managers = sorted({manager for manager, _ in groups})
         names = sorted({group for _, group in groups})
-        self.assertEqual(names, sorted(["required", "x11", "plasma", "optional", "wayland", "x11libs", "systemd", "ui"]))
+        self.assertEqual(names, sorted(["required", "x11", "plasma", "optional", "wayland", "x11libs", "systemd", "ui",
+                                                "layershell"]))
         for manager in managers:
             for group in names:
                 with self.subTest(manager=manager, group=group):
@@ -217,11 +229,13 @@ class DistributionPackagesTest(unittest.TestCase):
         groups = package_groups()
         for namespace in sorted(namespaces):
             with self.subTest(namespace=namespace):
-                self.assertIn(namespace, TYPELIBS)
+                self.assertIn(namespace, TYPELIBS, "no package in tests/test_install.py TYPELIBS")
+                group, names = TYPELIBS[namespace]
                 for manager in MANAGERS:
-                    # Rsvg is optional (overlay/gtk_icons.py works without it).
-                    installed = groups[(manager, "required")] + groups[(manager, "optional")]
-                    self.assertIn(TYPELIBS[namespace][manager], installed)
+                    # Required groups bring required typelibs; the others
+                    # turn one feature off when missing.
+                    installed = groups[(manager, "required")] + groups[(manager, group)]
+                    self.assertIn(names[manager], installed)
 
     def test_native_libraries_and_tools(self):
         # libxkbcommon (keyboard layouts), i2ctransfer, curl and xmllint
