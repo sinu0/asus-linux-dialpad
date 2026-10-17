@@ -198,6 +198,41 @@ class Sway:
 COMPOSITORS = {"sway": Sway}
 
 
+class FakeHyprland:
+    """Hyprland's IPC socket answering "j/cursorpos" with self.cursor
+    (global logical pixels), so the dial's position "pointer" can be
+    tested on sway (desktop/pointer.py)."""
+
+    SIGNATURE = "turnpad_test"
+
+    def __init__(self, runtime: Path, cursor):
+        import socket
+        import threading
+
+        self.cursor = cursor
+        self.requests = 0
+        path = runtime / "hypr" / self.SIGNATURE / ".socket.sock"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._server.bind(str(path))
+        self._server.listen()
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        while True:
+            try:
+                connection, _ = self._server.accept()
+            except OSError:
+                return
+            with connection:
+                if connection.recv(64) == b"j/cursorpos":
+                    self.requests += 1
+                    connection.sendall(json.dumps({"x": self.cursor[0], "y": self.cursor[1]}).encode())
+
+    def close(self):
+        self._server.close()
+
+
 def write_overlay(overlay: dict) -> None:
     config = Path.home() / ".config" / identity.CONFIG_DIR_NAME
     config.mkdir(parents=True, exist_ok=True)
@@ -247,8 +282,10 @@ def main() -> int:
                     str(output / "reference")], check=True)
 
     compositor = COMPOSITORS[compositor_name](runtime, output)
+    # The Hyprland signature only matters for position "pointer"; its socket
+    # appears in the "near the pointer" checks.
     environment = {**os.environ, "WAYLAND_DISPLAY": compositor.display, "GSK_RENDERER": "cairo",
-                   "GTK_A11Y": "none", "NO_AT_BRIDGE": "1"}
+                   "GTK_A11Y": "none", "NO_AT_BRIDGE": "1", "HYPRLAND_INSTANCE_SIGNATURE": FakeHyprland.SIGNATURE}
     processes = []
     try:
         print("== target window", flush=True)
@@ -384,6 +421,52 @@ def main() -> int:
         expected = Image.blend(plain, full, 0.35)
         dimmed = changed_pixels(faded, expected)
         check(dimmed < 400, f"visibility fade dims the dial to fade_opacity while touching ({dimmed} pixels differ)")
+
+        print("== near the pointer", flush=True)
+        hide_time = look.DEFAULT_APPEARANCE["hide_delay_ms"] / 1000 + look.FADE_OUT_MS / 1000 + 0.6
+
+        def hide_fully(details):
+            driver.send(details, released)
+            pump(hide_time)
+
+        def dial_at(name, box, message):
+            shot = compositor.screenshot(output / f"screen-{name}.png")
+            pixels = changed_pixels(shot.crop(box), full)
+            outside = shot.copy()
+            outside.paste(Image.new("RGB", (box[2] - box[0], box[3] - box[1]), BACKGROUND), box[:2])
+            check(pixels is not None and pixels < MIN_PIXELS and background_pixels(outside) == 0,
+                  f"{message} ({pixels} pixels differ, {background_pixels(outside)} outside)")
+
+        near = {**menu["details"], "look": {"position": "pointer"}}
+        hide_fully(near)
+        # No compositor answer (no Hyprland socket yet): "lower".
+        driver.send(near, menu["signal"])
+        pump(0.6)
+        dial_at("pointer-unknown", (x0, y0, x1, y1), "without a pointer position the dial shows at lower")
+        hide_fully(near)
+        hyprland = FakeHyprland(runtime, (100, 60))
+        try:
+            driver.send(near, menu["signal"])
+            pump(0.6)
+            appearance_scale = look.load_appearance(menu["overlay"])["scale"]
+
+            def beside(pointer, gap):
+                placed = look.overlay_placement({"width": WIDTH, "height": HEIGHT}, appearance_scale, "pointer",
+                                                None, pointer, "below-right", gap)
+                box = placed["x"], placed["y"], placed["x"] + placed["width"], placed["y"] + placed["height"]
+                return tuple(round(value * SCALE) for value in box)
+
+            check(hyprland.requests == 1, f"the pointer is asked once when the dial shows ({hyprland.requests})")
+            dial_at("pointer", beside((100, 60), 24), "the dial shows below right of the pointer")
+            # The pointer moves and the look changes while the dial shows:
+            # it keeps the pointer from when it appeared.
+            hyprland.cursor = (700, 400)
+            driver.send({**near, "look": {"position": "pointer", "pointer_gap": 60}}, menu["signal"])
+            pump(0.6)
+            check(hyprland.requests == 1, f"a visible dial does not ask again ({hyprland.requests})")
+            dial_at("pointer-gap", beside((100, 60), 60), "a look change keeps the pointer from when it appeared")
+        finally:
+            hyprland.close()
 
         check(dial.poll() is None, "the dial is still running")
     finally:
