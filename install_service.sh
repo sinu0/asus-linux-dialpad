@@ -2,7 +2,11 @@
 
 source non_sudo_check.sh
 
+source install_common.sh "$@"
+
 source install_paths.sh
+
+source install_packages.sh
 
 if [ -z "$LAYOUT_NAME" ]; then
     LAYOUT_NAME="asusvivobook16x"
@@ -16,10 +20,10 @@ fi
 install_unit() {
     local template=$1
     local name=$2
-    INSTALL_DIR_PATH=$INSTALL_DIR_PATH LAYOUT_NAME=$LAYOUT_NAME CONFIG_FILE_DIR_PATH="$CONFIG_FILE_DIR_PATH/" \
+    PYTHON=$PYTHON INSTALL_DIR_PATH=$INSTALL_DIR_PATH LAYOUT_NAME=$LAYOUT_NAME CONFIG_FILE_DIR_PATH="$CONFIG_FILE_DIR_PATH/" \
     DISPLAY=$DISPLAY WAYLAND_DISPLAY=$WAYLAND_DISPLAY XAUTHORITY=$XAUTHORITY XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR \
     XDG_SESSION_TYPE=$XDG_SESSION_TYPE DBUS_SESSION_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS LOG_ENV_LINE=$LOG_ENV_LINE \
-        envsubst '$INSTALL_DIR_PATH $LAYOUT_NAME $CONFIG_FILE_DIR_PATH $DISPLAY $WAYLAND_DISPLAY $XAUTHORITY $XDG_RUNTIME_DIR $XDG_SESSION_TYPE $DBUS_SESSION_BUS_ADDRESS $LOG_ENV_LINE' \
+        envsubst '$PYTHON $INSTALL_DIR_PATH $LAYOUT_NAME $CONFIG_FILE_DIR_PATH $DISPLAY $WAYLAND_DISPLAY $XAUTHORITY $XDG_RUNTIME_DIR $XDG_SESSION_TYPE $DBUS_SESSION_BUS_ADDRESS $LOG_ENV_LINE' \
         < "$template" > "$SERVICE_INSTALL_DIR_PATH/$name"
 }
 
@@ -41,43 +45,10 @@ echo
 
 if ask "Do you want install systemctl service(s)?" y; then
 
-    # check rpm-ostree FIRST before dnf/yum (for BazziteOS/Fedora Atomic/Silverblue)
-    # because dnf may exist as a wrapper that blocks usage on immutable systems
-    # https://github.com/asus-linux-drivers/asus-numberpad-driver/pull/280
-    if [[ $(command -v rpm-ostree 2>/dev/null) ]] && grep -qi "ostree" /etc/os-release 2>/dev/null; then
-
-        PACKAGES="systemd-devel python3-systemd"
-        MISSING_PACKAGES=""
-        for pkg in $PACKAGES; do
-            if ! rpm -q "$pkg" >/dev/null 2>&1; then
-                MISSING_PACKAGES="$MISSING_PACKAGES $pkg"
-            fi
-        done
-
-        if [ -n "$MISSING_PACKAGES" ]; then
-            sudo rpm-ostree --allow-inactive install $MISSING_PACKAGES
-        fi
-    elif command -v apt-get >/dev/null 2>&1; then
-        sudo apt-get -y install libsystemd-dev python3-systemd
-    elif command -v pacman >/dev/null 2>&1; then
-        sudo pacman --noconfirm --needed -S systemd python-systemd
-    elif command -v dnf >/dev/null 2>&1; then
-        sudo dnf -y install systemd-devel python3-systemd
-    elif command -v yum >/dev/null 2>&1; then
-        sudo yum -y install systemd-devel python3-systemd
-    elif command -v zypper >/dev/null 2>&1; then
-        sudo zypper --non-interactive install systemd-devel python3-systemd
-    elif command -v xbps-install >/dev/null 2>&1; then
-        sudo xbps-install -Suy systemd python3-systemd
-    elif command -v emerge >/dev/null 2>&1; then
-        sudo emerge sys-apps/systemd dev-python/python-systemd
-    elif command -v eopkg >/dev/null 2>&1; then
-        sudo eopkg install -y systemd-devel python-systemd
-    else
-        echo "Not detected package manager. Driver may not work properly because required packages have not been installed. Please create an issue (https://github.com/sinu0/asus-turnpad/issues)."
-    fi
-
-    venv_pip install -r requirements.systemd.txt
+    # python-systemd sends the driver's log to the journal (optional; the
+    # service then logs nothing).
+    detect_package_manager
+    install_optional $(packages systemd)
 
     SERVICE=1
 

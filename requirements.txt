@@ -1,7 +1,0 @@
-dbus-python
-libevdev
-pyinotify
-python-periphery
-pyasyncore
-xkbcommon
-pygobject

@@ -6,7 +6,7 @@
 #
 # Layout (Filesystem Hierarchy Standard for software installed outside the
 # package manager):
-#   /opt/asus-turnpad                  program and its Python environment (root)
+#   /opt/asus-turnpad                  program (root)
 #   ~/.config/asus-turnpad             config.json, skins/, driver state (user)
 #   ~/.config/systemd/user             user services
 #   /etc/udev/rules.d, /etc/modules-load.d   device access, kernel modules
@@ -37,7 +37,7 @@ UDEV_RULE_UINPUT="$INSTALL_UDEV_DIR_PATH/rules.d/70-$SLUG-uinput.rules"
 UDEV_RULE_I2C="$INSTALL_UDEV_DIR_PATH/rules.d/70-$SLUG-i2c-dev.rules"
 UDEV_RULE_HIDRAW="$INSTALL_UDEV_DIR_PATH/rules.d/70-$SLUG-hidraw.rules"
 
-# pip of the program's Python environment, which root owns.
-venv_pip() {
-    sudo env PIP_ROOT_USER_ACTION=ignore "$INSTALL_DIR_PATH/.env/bin/pip3" "$@"
-}
+# The program runs with the distribution's Python and the libraries from
+# its packages (install_packages.sh): no Python environment of its own, and
+# never a Python found in PATH (conda, pyenv).
+PYTHON="/usr/bin/python3"
