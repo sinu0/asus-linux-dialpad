@@ -19,6 +19,7 @@
 - Unattended installer (`bash install.sh`; `--interactive` for the original questions)
 - On-screen dial position and visibility for all apps, per profile and per function: a custom place on the screen, fading while turning (to a chosen opacity) or a small label instead of the dial
 - Arch package (`bash packaging/arch/build.sh` + `asus-turnpad-setup`): system Python libraries instead of a pip environment, layout picked when the driver starts (`auto`), tested in CI; `INSTALL.md` explains both ways to install
+- `install.sh` is tested on Fedora and Ubuntu in CI; it now installs the libraries the settings app and the pip builds need there, stops when pip fails instead of reporting success, and warns when Libadwaita is too old for the settings app
 - Guided calibration asks to keep or revert the measured geometry (it is live meanwhile, so the dial can be tried); the Calibration page can reset the geometry to the layout's values
 
 ### Removed

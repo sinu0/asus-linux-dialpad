@@ -13,7 +13,16 @@ The short version is in the [README](README.md#install). This page has the detai
 
 Use one of them, not both: `install.sh` refuses to run while the package is installed, and `asus-turnpad-setup` refuses while an `install.sh` install is present. Your settings in `~/.config/asus-turnpad` are kept by both and work with both.
 
-Only tested on CachyOS (Arch) with GNOME 51. The settings app needs a current GTK 4 and Libadwaita, so older long-term releases may not run it.
+| Distribution | Tested | Result |
+| --- | --- | --- |
+| CachyOS (Arch), GNOME 51 | On a ProArt PX13 | Everything |
+| Arch Linux (package) | CI, every push | Package builds, installs, imports, removes |
+| Fedora 44 (`install.sh`) | CI, every push | Installs, imports, uninstalls |
+| Ubuntu 26.04 LTS (`install.sh`) | CI, every push | Installs, imports, uninstalls |
+| Ubuntu 24.04 LTS (`install.sh`) | Once, by hand | Driver works; the settings app does not start (Libadwaita 1.5) |
+| Debian, openSUSE, Void, Gentoo, Solus, immutable Fedora | No | The installer has their package names from the original project |
+
+The CI tests run in containers without a DialPad, so they cover packages, the Python environment, files and the uninstaller, not the touchpad itself. The settings app needs Libadwaita 1.9 (GNOME 50 or newer); the installer warns when it is older.
 
 ## Arch package
 

@@ -63,3 +63,20 @@ jobs:
 
       - name: Build, install and remove the package
         run: bash packaging/arch/test-package.sh "$GITHUB_WORKSPACE"
+
+  # install.sh and uninstall.sh on other distributions, in clean containers
+  # (tests/install_in_container.sh; no DialPad there, so INSTALL_IN_CONTAINER).
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["fedora:latest", "ubuntu:latest"]
+    name: install.sh on ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install, check and uninstall
+        run: bash tests/install_in_container.sh "$GITHUB_WORKSPACE"

@@ -48,24 +48,28 @@ else
     sudo bash -c "echo 'input:x:104:$USER' >> /etc/group"
 fi
 
-sudo modprobe uinput
-
-# check if the uinput module is successfully loaded
-if [[ $? != 0 ]]; then
-    echo "uinput module cannot be loaded"
-    exit 1
+if [ "$INSTALL_IN_CONTAINER" = "1" ]; then
+    echo "Container install: not loading the kernel modules uinput and i2c-dev"
 else
-    echo "uinput module loaded"
-fi
+    sudo modprobe uinput
 
-sudo modprobe i2c-dev
+    # check if the uinput module is successfully loaded
+    if [[ $? != 0 ]]; then
+        echo "uinput module cannot be loaded"
+        exit 1
+    else
+        echo "uinput module loaded"
+    fi
 
-# check if the i2c-dev module is successfully loaded
-if [[ $? != 0 ]]; then
-    echo "i2c-dev module cannot be loaded. Make sure you have installed i2c-tools package"
-    exit 1
-else
-    echo "i2c-dev module loaded"
+    sudo modprobe i2c-dev
+
+    # check if the i2c-dev module is successfully loaded
+    if [[ $? != 0 ]]; then
+        echo "i2c-dev module cannot be loaded. Make sure you have installed i2c-tools package"
+        exit 1
+    else
+        echo "i2c-dev module loaded"
+    fi
 fi
 
 sudo mkdir -p /etc/modules-load.d

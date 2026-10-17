@@ -26,6 +26,10 @@ install_unit() {
 # start_unit <name>: enables the service and (re)starts it now.
 start_unit() {
     local name=$1
+    if [ "$INSTALL_IN_CONTAINER" = "1" ]; then
+        echo "Container install: $name placed, not started"
+        return
+    fi
     systemctl --user daemon-reload || { echo "Something went wrong when reloading the systemd user manager"; exit 1; }
     systemctl --user enable "$name" || { echo "Something went wrong when enabling $name"; exit 1; }
     systemctl --user restart "$name" || { echo "Something went wrong when starting $name"; exit 1; }

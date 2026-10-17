@@ -4,6 +4,11 @@
 # started with --interactive (or INTERACTIVE=1); every question then takes
 # its default answer.
 
+# INSTALL_IN_CONTAINER=1 installs everything that does not need the laptop
+# itself, for the distribution tests in CI (tests/install_in_container.sh):
+# no touchpad check, no kernel modules, services placed but not started.
+INSTALL_IN_CONTAINER=${INSTALL_IN_CONTAINER:-0}
+
 if [ -z "$INTERACTIVE" ]; then
     INTERACTIVE=0
     for ARG in "$@"; do

@@ -14,7 +14,7 @@ echo
 USER_INTERFACE=0
 
 UI_DEFAULT=y
-if is_gnome; then
+if [[ "${XDG_CURRENT_DESKTOP,,}" == *gnome* ]]; then
     # GNOME draws the dial with the Shell extension instead.
     UI_DEFAULT=n
 fi

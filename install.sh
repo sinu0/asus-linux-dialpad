@@ -32,6 +32,9 @@ echo
 LOGS_INSTALL_LOG_FILE_NAME=install-"$(date +"%d-%m-%Y-%H-%M-%S")".log
 LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
 
+# The installer's exit status, not the one of tee below.
+set -o pipefail
+
 
 {
     # determine plasma version
@@ -76,7 +79,9 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         fi
     elif command -v apt-get >/dev/null 2>&1; then
         PACKAGE_MANAGER="apt"
-        sudo apt-get -y install ibus libevdev2 curl i2c-tools python3-dev python3-virtualenv python3-pyatspi libxml2-utils libxkbcommon-dev libdbus-1-dev gcc pkg-config
+        sudo apt-get -y install ibus libevdev2 curl i2c-tools python3-dev python3-virtualenv python3-pyatspi libxml2-utils libxkbcommon-dev libdbus-1-dev gcc pkg-config \
+            libglib2.0-dev libgirepository-2.0-dev libcairo2-dev gettext-base \
+            python3-gi python3-gi-cairo python3-cairo gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-rsvg-2.0
         if [ "$XDG_SESSION_TYPE" == "x11" ]; then
             sudo apt-get -y install xinput
         fi
@@ -88,7 +93,8 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         fi
     elif command -v pacman >/dev/null 2>&1; then
         PACKAGE_MANAGER="pacman"
-        sudo pacman --noconfirm --needed -S ibus libevdev curl i2c-tools python python-virtualenv python-pyatspi python-dbus python-gobject gtk4 libadwaita dbus libxml2 libxkbcommon gcc pkgconf
+        sudo pacman --noconfirm --needed -S ibus libevdev curl i2c-tools python python-virtualenv python-pyatspi python-dbus python-gobject gtk4 libadwaita dbus libxml2 libxkbcommon gcc pkgconf \
+            gobject-introspection cairo gettext python-cairo librsvg
         if [ "$XDG_SESSION_TYPE" == "x11" ]; then
             sudo pacman --noconfirm --needed -S xorg-xinput
         fi
@@ -100,7 +106,9 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         fi
     elif command -v dnf >/dev/null 2>&1; then
         PACKAGE_MANAGER="dnf"
-        sudo dnf -y install ibus libevdev curl i2c-tools python3-devel python3-virtualenv python3-pyatspi libxml2 libxkbcommon-devel dbus-devel gcc pkg-config
+        sudo dnf -y install ibus libevdev curl i2c-tools python3-devel python3-virtualenv python3-pyatspi libxml2 libxkbcommon-devel dbus-devel gcc pkg-config \
+            glib2-devel gobject-introspection-devel cairo-devel cairo-gobject-devel gettext-envsubst \
+            python3-gobject python3-cairo gtk4 libadwaita librsvg2
         if [ "$XDG_SESSION_TYPE" == "x11" ]; then
             sudo dnf -y install xinput
         fi
@@ -213,7 +221,11 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
 
     echo
 
-    source install_device_check.sh
+    if [ "$INSTALL_IN_CONTAINER" = "1" ]; then
+        echo "Container install: skipping the touchpad check"
+    else
+        source install_device_check.sh
+    fi
 
     echo
 
@@ -303,18 +315,25 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
         # A file, not <(...): sudo closes the descriptor of a substitution.
         CONSTRAINTS_FILE=$(mktemp)
         printf '%s\n' "${constraints[@]}" > "$CONSTRAINTS_FILE"
-        venv_pip install -r requirements.txt -c "$CONSTRAINTS_FILE"
+        venv_pip install -r requirements.txt -c "$CONSTRAINTS_FILE" || PIP_FAILED=1
         rm -f "$CONSTRAINTS_FILE"
     else
-        venv_pip install -r requirements.txt
+        venv_pip install -r requirements.txt || PIP_FAILED=1
     fi
 
     if [ "$XDG_SESSION_TYPE" == "x11" ]; then
-        venv_pip install -r requirements.x11.txt
+        venv_pip install -r requirements.x11.txt || PIP_FAILED=1
     fi
 
     if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
-        venv_pip install -r requirements.wayland.txt
+        venv_pip install -r requirements.wayland.txt || PIP_FAILED=1
+    fi
+
+    if [ -n "$PIP_FAILED" ]; then
+        echo
+        echo "Error: installing the Python libraries failed (see the pip output above)."
+        echo "Usually a development package is missing; please create an issue with this log: https://github.com/sinu0/asus-turnpad/issues"
+        exit 1
     fi
 
     # The program directory is read-only for the user, so compile it once.
@@ -362,6 +381,13 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
     source install_overlay.sh
 
     echo
+
+    # The settings app uses Adw.ViewSwitcherSidebar (Libadwaita 1.9, GNOME 50).
+    if ! python3 -c 'import gi, sys; gi.require_version("Adw", "1"); from gi.repository import Adw; sys.exit(0 if hasattr(Adw, "ViewSwitcherSidebar") else 1)' 2>/dev/null; then
+        echo "WARNING: the Turnpad settings app needs Libadwaita 1.9 or newer (GNOME 50 or newer); it will not start on this system."
+        echo "The driver works; its settings are then kept in $CONFIG_FILE_DIR_PATH/config.json."
+        echo
+    fi
 
     echo "Installation finished successfully"
     echo
