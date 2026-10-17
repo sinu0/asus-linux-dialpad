@@ -41,7 +41,7 @@ GNOME_EXTENSION_UUID = "asus-turnpad@sinu0.github.io"
 INSTALL_DIR = "/opt/asus-turnpad"
 
 # Where distribution packages put the program (packaging/).
-# Twins: packaging/asus-turnpad.service, packaging/arch/PKGBUILD, install.sh.
+# Twins: packaging/asus-turnpad.service, packaging/install-files.sh, install.sh.
 PACKAGE_DIR = f"/usr/share/{SLUG}"
 
 # Socket for the legacy PySide overlay, in $XDG_RUNTIME_DIR.

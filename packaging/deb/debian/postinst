@@ -1,0 +1,28 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = configure ]; then
+    # Groups i2c and uinput of the udev rules.
+    systemd-sysusers asus-turnpad.conf || true
+    # Device access now rather than after the next boot; modules-load.d
+    # loads the modules at boot. Fails harmlessly in containers.
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload-rules 2>/dev/null || true
+        udevadm trigger --subsystem-match=misc --subsystem-match=i2c-dev --subsystem-match=hidraw 2>/dev/null || true
+    fi
+    modprobe -a uinput i2c-dev 2>/dev/null || true
+
+    if [ -z "$2" ]; then
+        echo
+        echo "==> Finish the setup once as your user (not root):"
+        echo "      asus-turnpad-setup"
+        echo "    then log out and back in."
+        echo
+    else
+        echo "==> Restart the driver with 'systemctl --user restart asus-turnpad'; a new GNOME extension loads at the next login."
+    fi
+fi
+
+#DEBHELPER#
+
+exit 0
