@@ -39,6 +39,10 @@ jobs:
       - name: README pictures
         run: python3 tools/update_previews.py --check --only overlay --output rendered
 
+      - name: TEMPORARY print new overlay picture
+        if: always()
+        run: echo PNG-BEGIN; base64 -w 100 rendered/overlay-submenu.png; echo PNG-END
+
       - name: Keep the rendered pictures
         if: always()
         uses: actions/upload-artifact@v7
