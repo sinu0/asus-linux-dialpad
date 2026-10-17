@@ -4,25 +4,27 @@
 # a clean Arch Linux container, compared with the GNOME extension's painting:
 #
 #   docker run --rm -v "$PWD:/src:ro" archlinux:latest \
-#       bash /src/tests/layer_shell_in_container.sh /src sway [output-dir]
+#       bash /src/tests/layer_shell_in_container.sh /src sway [output-dir] [output-scale]
 #
 # Installs the compositor, GTK 4, gtk4-layer-shell, grim and fonts, then
 # runs tests/layer_shell_check.py as an unprivileged user in a private D-Bus
 # session with a scratch HOME. Pictures and logs go to output-dir (default
-# /tmp/layer-shell-test). Compositors: sway (kwin is planned: it needs a
-# screenshot path grim can use).
+# /tmp/layer-shell-test); output-scale 2 tests HiDPI. Compositors: sway
+# (KWin is planned: it needs a screenshot path grim can use).
 #
 # TURNPAD_SKIP_PACKAGES=1 skips pacman for an image that has them already.
 
 set -euo pipefail
 
-SRC=$(realpath "${1:?usage: layer_shell_in_container.sh <clone of asus-turnpad> [sway] [output-dir]}")
+SRC=$(realpath "${1:?usage: layer_shell_in_container.sh <clone of asus-turnpad> [sway] [output-dir] [output-scale]}")
 COMPOSITOR=${2:-sway}
 OUTPUT=${3:-/tmp/layer-shell-test}
+SCALE=${4:-1}
 TESTER=tester
 
 case "$COMPOSITOR" in
-    sway) compositor_packages=(sway grim wtype) ;;
+    # grim screenshots, wtype and a virtual pointer (pywayland) type and click.
+    sway) compositor_packages=(sway grim wtype python-pywayland wlr-protocols) ;;
     *) echo "unknown compositor: $COMPOSITOR (supported: sway)"; exit 2 ;;
 esac
 
@@ -44,6 +46,6 @@ echo "== $COMPOSITOR"
 status=0
 runuser -u "$TESTER" -- env -i PATH=/usr/bin:/bin LANG=C.UTF-8 HOME="$SCRATCH/home" \
     XDG_RUNTIME_DIR="$SCRATCH/runtime" XDG_CONFIG_HOME="$SCRATCH/home/.config" \
-    dbus-run-session -- python3 "$SRC/tests/layer_shell_check.py" "$COMPOSITOR" "$OUTPUT" || status=$?
+    dbus-run-session -- python3 "$SRC/tests/layer_shell_check.py" "$COMPOSITOR" "$OUTPUT" "$SCALE" || status=$?
 rm -rf "$SCRATCH"
 exit $status

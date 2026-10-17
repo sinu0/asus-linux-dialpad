@@ -166,7 +166,7 @@ class _Layer:
         self._image = None
         self.area.queue_draw()
 
-    def _pixel_scale(self) -> float:
+    def pixel_scale(self) -> float:
         native = self.area.get_native()
         surface = native.get_surface() if native is not None else None
         if surface is not None and hasattr(surface, "get_scale"):
@@ -174,7 +174,7 @@ class _Layer:
         return float(self.area.get_scale_factor())
 
     def _draw(self, _area, cr, width, height):
-        scale = self._pixel_scale()
+        scale = self.pixel_scale()
         key = (width, height, scale)
         if self._image is None or self._key != key:
             image = cairo.ImageSurface(cairo.FORMAT_ARGB32, math.ceil(width * scale), math.ceil(height * scale))
@@ -246,6 +246,7 @@ class DialLayers:
             return
         scale = view["appearance"]["scale"]
         half = look.POINTER_SIZE * scale / 2
+        # Between screen pixels the dot is resampled, as in the Shell.
         self._fixed.move(self._pointer.area, placement["x"] * scale - half, placement["y"] * scale - half)
         key = json.dumps([placement["color"], view["skin"]["palette"]["pointer"]])
         if key != self._pointer_key:
