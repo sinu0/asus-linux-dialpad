@@ -434,8 +434,9 @@ def main() -> int:
             pixels = changed_pixels(shot.crop(box), full)
             outside = shot.copy()
             outside.paste(Image.new("RGB", (box[2] - box[0], box[3] - box[1]), BACKGROUND), box[:2])
-            check(pixels is not None and pixels < MIN_PIXELS and background_pixels(outside) == 0,
-                  f"{message} ({pixels} pixels differ, {background_pixels(outside)} outside)")
+            shown = background_pixels(shot, box)
+            check(shown > 1000 and pixels is not None and pixels < MIN_PIXELS and background_pixels(outside) == 0,
+                  f"{message} ({shown} dial pixels, {pixels} differ, {background_pixels(outside)} outside)")
 
         near = {**menu["details"], "look": {"position": "pointer"}}
         hide_fully(near)

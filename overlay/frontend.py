@@ -445,12 +445,12 @@ class DialFrontend:
             pinned = self._monitor_by_connector(self._output)
             if pinned is not None:
                 return pinned
-        items = self._monitors()
+        items = self._outputs()
         if self._placed_on in items:
             return self._placed_on
         return items[0] if items else None
 
-    def _monitors(self) -> list:
+    def _outputs(self) -> list:
         monitors = Gdk.Display.get_default().get_monitors()
         return [monitors.get_item(index) for index in range(monitors.get_n_items())]
 
@@ -464,7 +464,7 @@ class DialFrontend:
         found = None
         if self._look()["position"] == "pointer":
             at = desktop_pointer.position()
-            for monitor in self._monitors() if at else ():
+            for monitor in self._outputs() if at else ():
                 area = monitor.get_geometry()
                 if area.x <= at[0] < area.x + area.width and area.y <= at[1] < area.y + area.height:
                     found = (monitor, [at[0] - area.x, at[1] - area.y])
