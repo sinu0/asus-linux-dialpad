@@ -52,7 +52,7 @@ package() {
 
     # Driver and settings app (the same files install.sh puts in /opt/asus-turnpad).
     install -Dm755 dialpad.py "$app/dialpad.py"
-    install -Dm644 -t "$app" dialpad_dbus.py dial_gesture.py backlight.py launch.py layout_detect.py \
+    install -Dm644 -t "$app" dialpad_dbus.py dial_gesture.py backlight.py dir_watch.py launch.py layout_detect.py xkb.py \
         laptop_touchpad_dialpad_layouts.csv
     local dir
     for dir in config config_app desktop layouts overlay; do

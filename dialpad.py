@@ -19,14 +19,9 @@ try:
 except Exception:
     pass
 
-from xkbcommon import xkb
+# libxkbcommon through ctypes (xkb.py), nothing to compile at install.
+import xkb
 from libevdev import EV_ABS, EV_KEY, EV_REL, EV_SYN, Device, InputEvent, device
-from pyinotify import WatchManager, IN_CLOSE_WRITE, IN_IGNORED, IN_MOVED_TO
-# AsyncNotifier needs asyncore, which Python 3.12 removed.
-try:
-    from pyinotify import ThreadedNotifier as Notifier
-except Exception:
-    from pyinotify import AsyncNotifier as Notifier
 # Only a fallback when i2ctransfer (i2c-tools) fails.
 try:
     from periphery import I2C
@@ -49,6 +44,7 @@ import queue
 
 import launch
 import layout_detect
+from dir_watch import DirectoryWatcher
 from backlight import KeyboardBacklight, commands_for_level
 from config.identity import SLUG, socket_path
 from desktop.active_window import ActiveWindow, Context as ActiveWindowContext
@@ -410,7 +406,7 @@ except:
 config_file_dir = ""
 if len(sys.argv) > 2:
     config_file_dir = sys.argv[2]
-# When is given config dir empty or is used default -> to ./ because inotify needs check folder (nor nothing = "")
+# When is given config dir empty or is used default -> to ./ because the config watcher needs a folder (nor nothing = "")
 if config_file_dir == "":
      config_file_dir = "./"
 config_file_dir = os.path.join(config_file_dir, "")
@@ -758,7 +754,7 @@ def config_set(key, value, no_save=False, already_has_lock=False):
         config_save()
 
     if not already_has_lock:
-        # because inotify (deadlock)
+        # keep the lock while the config watcher sees this save (deadlock)
         sleep(0.1)
         config_lock.release()
 
@@ -2380,29 +2376,27 @@ def listen_touchpad_events():
             log.exception("Error in listen_touchpad_events")
             break
 
+def config_dir_event(name):
+    """A file in the config dir was written or moved in (config watcher thread).
+
+    The driver's own saves hold config_lock while the event arrives
+    (config_set() keeps it 0.1 s after saving), so they are not read back.
+    """
+    global config_lock
+
+    if config_lock.locked():
+        log.info("check_config_values_changes: detected internal change of config file -> do nothing -> would be deadlock")
+        return False
+    return True
+
+
 def check_config_values_changes():
-    global config_lock, stop_threads, event_notifier
-
-    while not stop_threads:
-        try:
-            event_notifier.process_events()
-            if event_notifier.check_events():
-                event_notifier.read_events()
-
-                if not config_lock.locked():
-                    log.info("check_config_values_changes: detected external change of config file -> loading changes")
-                    # because file might be read so fast that changes will not be there yet
-                    sleep(0.1)
-                    load_all_config_values()
-                    # Settings from the GUI configuration take precedence.
-                    apply_gui_settings()
-                else:
-                    log.info("check_config_values_changes: detected internal change of config file -> do nothing -> would be deadlock")
-
-        except KeyboardInterrupt:
-            break
-
-    log.info("check_config_values_changes: inotify watching config file ended")
+    # The watcher calls this 0.1 s after the first accepted event, because the
+    # file might be read so fast that changes will not be there yet.
+    log.info("check_config_values_changes: detected external change of config file -> loading changes")
+    load_all_config_values()
+    # Settings from the GUI configuration take precedence.
+    apply_gui_settings()
 
 
 def gsettingsGet(path, name):
@@ -2853,7 +2847,7 @@ def check_gnome_layout():
 
 
 def cleanup():
-    global dialpad, display, display_wayland, stop_threads, event_notifier, watch_manager, xkb_conn, sock, dbus_service
+    global dialpad, display, display_wayland, stop_threads, config_watcher, xkb_conn, sock, dbus_service
 
     log.info("Clean up started")
 
@@ -2896,8 +2890,9 @@ def cleanup():
         except Exception:
             pass
 
-        if watch_manager:
-            watch_manager.close()
+        if config_watcher:
+            config_watcher.close()
+            log.info("check_config_values_changes: watching config file ended")
 
         if sock:
             sock.close()
@@ -2919,8 +2914,7 @@ def cleanup():
 
 threads = []
 stop_threads = False
-watch_manager = None
-event_notifier = None
+config_watcher = None
 
 def isEvent(event):
     if hasattr(event, "name") and (event in EV_KEY.codes or event in EV_REL.codes):
@@ -3177,16 +3171,15 @@ try:
     config_lock.acquire()
     config_save()
     config_lock.release()
-    # because inotify (deadlock)
-    sleep(0.5)
 
-    watch_manager = WatchManager()
-
-    path = os.path.abspath(config_file_dir)
-    mask = IN_CLOSE_WRITE | IN_IGNORED | IN_MOVED_TO
-    watch_manager.add_watch(path, mask)
-
-    event_notifier = Notifier(watch_manager)
+    # check changes in config values; the save above happened before the
+    # watch exists, so it is not read back
+    config_watcher = DirectoryWatcher(os.path.abspath(config_file_dir), check_config_values_changes, config_dir_event)
+    try:
+        config_watcher.start()
+    except Exception:
+        log.exception("Cannot watch the config dir %s; changes apply after a restart", config_file_dir)
+        config_watcher = None
 
     t = threading.Thread(target=check_dialpad_automatical_disable_or_idle_due_inactivity)
     t.daemon = True
@@ -3198,12 +3191,6 @@ try:
         t.daemon = True
         threads.append(t)
         t.start()
-
-    # check changes in config values
-    t = threading.Thread(target=check_config_values_changes)
-    t.daemon = True
-    threads.append(t)
-    t.start()
 
     t = threading.Thread(target=check_gnome_layout)
     t.daemon = True
