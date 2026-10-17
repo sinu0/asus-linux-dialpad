@@ -85,6 +85,12 @@ def dialogs(app, profile):
     yield "function library"
     app._show_function_editor(profile, segment)
     yield "function editor"
+    held = next(
+        row for row in demo._descendants(app._window.get_visible_dialog(), Adw.ComboRow)
+        if row.get_title() == "Actions for"
+    )
+    held.set_selected(1)
+    yield "function editor, Ctrl held"
     for kind in StepType:
         demo.close_dialogs(app)
         app._show_step_dialog(segment, "macro_cw", None, lambda: None)

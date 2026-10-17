@@ -41,6 +41,7 @@ import glob
 import socket
 import json
 import queue
+import hashlib
 
 import launch
 import layout_detect
@@ -69,7 +70,7 @@ except Exception:
     DBUS_SERVICE_AVAILABLE = False
 
 try:
-    from config.schema import CONFIG_FILE, MacroStep, StepType, load_config
+    from config.schema import CONFIG_FILE, MacroStep, StepType, config_from_text
     from config.legacy_adapter import META_KEY, shortcuts_from_config
     from config.runtime import MacroExecutionError, MacroExecutor
     CONFIG_APP_AVAILABLE = True
@@ -77,7 +78,7 @@ except Exception:
     CONFIG_FILE = None
     MacroStep = None
     StepType = None
-    load_config = None
+    config_from_text = None
     META_KEY = "_meta"
     shortcuts_from_config = None
     MacroExecutionError = None
@@ -90,6 +91,12 @@ dbus_service = None
 driver_state_lock = threading.RLock()
 pending_active_application = None
 pending_config_reload = False
+# Configuration read and checked by ReloadConfig, applied by the touch loop
+# between gestures: (config, shortcuts, revision) from read_gui_config().
+pending_gui_config = None
+# The applied config.json (first characters of its SHA-256), why a newer one
+# was not applied, and whether one waits for the finger to lift (GetStatus).
+config_status = {"revision": "", "error": "", "pending": False}
 # Guided calibration: requested over D-Bus, run on the touch thread.
 pending_calibration = None
 calibration = None
@@ -114,38 +121,57 @@ def on_dbus_active_application(app_id):
         pending_active_application = normalized_app_id or None
 
 def on_dbus_reload_config():
-    global pending_config_reload
+    """Read and check config.json now; the touch loop applies it between gestures.
+
+    False when the file cannot be used: the driver keeps what it runs and
+    GetStatus() says why in config_error.
+    """
+    global pending_config_reload, pending_gui_config
+
+    try:
+        prepared = read_gui_config()
+    except Exception as error:
+        log.error("config.json not applied, keeping the running configuration: %s", error)
+        with driver_state_lock:
+            config_status["error"] = str(error)
+        return False
 
     with driver_state_lock:
+        pending_gui_config = prepared
         pending_config_reload = True
+        config_status.update(error="", pending=True)
     return True
 
-def process_pending_driver_updates():
-    global pending_active_application, pending_config_reload, pending_calibration
+def process_pending_driver_updates(gesture_idle=True):
+    """Apply what the D-Bus thread requested.
+
+    While a finger is on the dial (gesture_idle False) configuration and
+    application changes wait, so one gesture never mixes two configurations
+    or virtual devices.
+    """
+    global pending_active_application, pending_config_reload, pending_calibration, pending_gui_config
 
     with driver_state_lock:
-        active_application = pending_active_application
-        reload_config = pending_config_reload
         calibration_request = pending_calibration
-        pending_active_application = None
-        pending_config_reload = False
         pending_calibration = None
+        if gesture_idle:
+            active_application = pending_active_application
+            reload_config = pending_config_reload
+            prepared = pending_gui_config
+            pending_active_application = None
+            pending_config_reload = False
+            pending_gui_config = None
+        else:
+            active_application = None
+            reload_config = False
 
     if calibration_request == "start":
         start_calibration()
     elif calibration_request == "cancel":
         stop_calibration(cancelled=True)
 
-    if reload_config:
-        try:
-            load_gui_shortcuts()
-            apply_gui_settings()
-            enable_config_macro_capabilities(reset_udev=True)
-        except Exception:
-            log.exception("Configuration reload failed")
-            return
-
-        if active_application is None:
+    if reload_config and prepared is not None:
+        if apply_gui_config(prepared) and active_application is None:
             active_application = window_binary
 
     if active_application is not None:
@@ -233,6 +259,8 @@ def calibration_frame(touch_x, touch_y, finger_down, prev_finger_down):
             emit_calibration_state()
 
 def get_dbus_status():
+    with driver_state_lock:
+        config_state = dict(config_status)
     return {
         "enabled": bool(dialpad),
         "application": app_name or "",
@@ -254,6 +282,9 @@ def get_dbus_status():
         "calibrating": calibration is not None,
         "emulation": bool(emulation),
         "touchpad": touchpad_name or "",
+        "config_revision": config_state["revision"],
+        "config_error": config_state["error"],
+        "config_pending": config_state["pending"],
     }
 
 def init_dbus():
@@ -452,26 +483,61 @@ submenu_index = 0
 # Turning per step of the highlight in a group's list.
 SUBMENU_STEP_DEGREES = 30
 
+def read_gui_config():
+    """(config, shortcuts, revision) from config.json; raises when it is unusable.
+
+    Without config.json (or the config package) config is None and the
+    shortcuts are the layout's.
+    """
+    if not CONFIG_APP_AVAILABLE or CONFIG_FILE is None or not CONFIG_FILE.exists():
+        return None, legacy_app_shortcuts, ""
+    data = CONFIG_FILE.read_bytes()
+    config = config_from_text(data.decode("utf-8"))
+    return config, shortcuts_from_config(config), hashlib.sha256(data).hexdigest()[:12]
+
+def set_config_status(**values):
+    with driver_state_lock:
+        config_status.update(values)
+
 def load_gui_shortcuts():
     global app_shortcuts, gui_config
 
-    if not CONFIG_APP_AVAILABLE or CONFIG_FILE is None or not CONFIG_FILE.exists():
-        app_shortcuts = legacy_app_shortcuts
-        gui_config = None
-        return False
-
     try:
-        config = load_config()
-        shortcuts = shortcuts_from_config(config)
-    except Exception:
-        log.exception("Failed to load GUI configuration")
+        gui_config, app_shortcuts, revision = read_gui_config()
+    except Exception as error:
+        log.error("Failed to load config.json, using the layout's shortcuts: %s", error)
         app_shortcuts = legacy_app_shortcuts
         gui_config = None
+        set_config_status(error=str(error))
         return False
 
-    gui_config = config
-    app_shortcuts = shortcuts
+    set_config_status(revision=revision, error="")
+    if gui_config is None:
+        return False
     log.info("Loaded GUI configuration from %s", CONFIG_FILE)
+    return True
+
+def apply_gui_config(prepared):
+    """Run a configuration from read_gui_config(); keep the running one if it fails."""
+    global app_shortcuts, gui_config
+
+    previous = (gui_config, app_shortcuts)
+    gui_config, app_shortcuts, revision = prepared
+    try:
+        apply_gui_settings()
+        enable_config_macro_capabilities(reset_udev=True)
+    except Exception as error:
+        log.exception("Configuration reload failed; keeping the running configuration")
+        gui_config, app_shortcuts = previous
+        try:
+            apply_gui_settings()
+        except Exception:
+            log.exception("Restoring the running configuration failed")
+        set_config_status(error=str(error) or type(error).__name__, pending=False)
+        return False
+
+    set_config_status(revision=revision, error="", pending=False)
+    log.info("Applied configuration %s", revision or "(layout shortcuts)")
     return True
 
 def apply_gui_settings():
@@ -1072,11 +1138,20 @@ def enable_config_macro_capabilities(reset_udev=False):
             elif step.type is StepType.MEDIA and step.direction is not None:
                 enable_macro_key(step.direction)
 
+    def track_modifier_keys(names):
+        # The keyboard listener follows these keys for the function's
+        # variants with Ctrl, Shift or Alt held.
+        for name in names if isinstance(names, list) else []:
+            code = getattr(EV_KEY, name, None) if isinstance(name, str) else None
+            if code is not None:
+                modifiers.add(code)
+
     def scan_shortcuts(value):
         if isinstance(value, dict):
             macro = value.get("macro")
             if isinstance(macro, list) and all(isinstance(step, MacroStep) for step in macro):
                 process_macro(macro)
+                track_modifier_keys(value.get("modifier"))
             for nested_value in value.values():
                 scan_shortcuts(nested_value)
         elif isinstance(value, list):
@@ -1086,7 +1161,9 @@ def enable_config_macro_capabilities(reset_udev=False):
     scan_shortcuts(app_shortcuts)
 
     if reset_udev and udev and len(enabled_evdev_keys) > enabled_keys_count:
-        reset_udev_device()
+        # The action thread rebuilds the device: the dial keeps running
+        # meanwhile and the actions queued after it use the new keys.
+        enqueue_action(reset_udev_device, required=True)
 
 def initialize_virtual_device():
     global udev, dev, modifiers
@@ -1236,17 +1313,25 @@ def resolve_evdev_key(key):
     except (AttributeError, IndexError, KeyError, ValueError):
         raise MacroExecutionError("Unknown evdev key: %s" % key)
 
-def set_keys_held(keys, pressed):
-    if not udev or not keys:
+# Sends to the virtual device and its replacement (reset_udev_device) are
+# serialised, so a key's press and release always reach the same device.
+uinput_lock = threading.RLock()
+
+def set_keys_held(keys, pressed, device=None):
+    if not keys:
         return
-    try:
-        for key in (keys if pressed else reversed(keys)):
-            udev.send_events([
-                InputEvent(key, 1 if pressed else 0),
-                InputEvent(EV_SYN.SYN_REPORT, 0)
-            ])
-    except Exception as e:
-        log.error(f"Error sending modifier event: {e}")
+    with uinput_lock:
+        target = device or udev
+        if not target:
+            return
+        try:
+            for key in (keys if pressed else reversed(keys)):
+                target.send_events([
+                    InputEvent(key, 1 if pressed else 0),
+                    InputEvent(EV_SYN.SYN_REPORT, 0)
+                ])
+        except Exception as e:
+            log.error(f"Error sending modifier event: {e}")
 
 # Keys held for scroll steps (Ctrl + wheel = zoom) stay pressed while the
 # dial keeps turning, like a hand holding Ctrl on a mouse. Releasing them
@@ -1296,10 +1381,11 @@ def send_wheel(codes, notches, high_resolution):
         events.append(InputEvent(codes[0], notches))
     events.append(InputEvent(codes[1], high_resolution))
     events.append(InputEvent(EV_SYN.SYN_REPORT, 0))
-    try:
-        udev.send_events(events)
-    except Exception as e:
-        log.error(f"Error sending scroll event: {e}")
+    with uinput_lock:
+        try:
+            udev.send_events(events)
+        except Exception as e:
+            log.error(f"Error sending scroll event: {e}")
 
 def execute_config_macro(steps, scroll_multiplier=1):
     if not CONFIG_APP_AVAILABLE:
@@ -1361,6 +1447,24 @@ def execute_config_macro(steps, scroll_multiplier=1):
     except Exception:
         log.exception("Configuration macro execution failed")
 
+def modifier_names(modifier):
+    """Key names in a shortcut's "modifier": an evdev code, a name or a list of them."""
+    if modifier is None:
+        return set()
+    items = modifier if isinstance(modifier, (list, tuple, set)) else [modifier]
+    return {getattr(item, "name", str(item)) for item in items}
+
+def shortcuts_for_modifiers(entries, held):
+    """The entries bound to a held keyboard modifier, otherwise those without one.
+
+    A function without a variant for the held key keeps working; the
+    application sees the held key with it (Ctrl + scroll zooms).
+    """
+    entries = [entry for entry in entries if isinstance(entry, dict)]
+    held_names = modifier_names(held)
+    bound = [entry for entry in entries if modifier_names(entry.get("modifier")) & held_names]
+    return bound or [entry for entry in entries if not entry.get("modifier")]
+
 def emulate_shortcuts(app_shortcuts, touch_input, event_code, active_modifiers, duration_held=0, scroll_multiplier=1):
     global suppress_app_specifics_shortcuts
 
@@ -1368,58 +1472,39 @@ def emulate_shortcuts(app_shortcuts, touch_input, event_code, active_modifiers, 
     if not isinstance(matched_shortcuts, list):
         matched_shortcuts = [matched_shortcuts]
 
-    prioritized_shortcuts = sorted(matched_shortcuts, key=lambda s: "modifier" not in s)
-
-    for shortcut in prioritized_shortcuts:
-        key_code = None
-        try:
-            key_code = shortcut["key"]
-        except:
-            pass
-        key_value = None
-        try:
-            key_value = shortcut["value"]
-        except:
-            pass
-        command = None
-        try:
-            command = shortcut["command"]
-        except:
-            pass
+    for shortcut in shortcuts_for_modifiers(matched_shortcuts, active_modifiers):
+        key_code = shortcut.get("key")
+        key_value = shortcut.get("value")
+        command = shortcut.get("command")
         trigger_mode = shortcut.get("trigger", "release")
         modifier = shortcut.get("modifier")
         required_duration = shortcut.get("duration", 0)  # Default to 0 (immediate)
 
-        # Ensure correct modifiers
-        if (modifier and modifier in active_modifiers) or (not modifier and not active_modifiers):
-            if duration_held is None or duration_held >= required_duration:
-                if (trigger_mode == "immediate" and event_code) or\
-                    (trigger_mode == "release" and not event_code) or\
-                    (touch_input == "center"):
+        if duration_held is None or duration_held >= required_duration:
+            if (trigger_mode == "immediate" and event_code) or\
+                (trigger_mode == "release" and not event_code) or\
+                (touch_input == "center"):
 
-                    if "macro" in shortcut:
-                        execute_config_macro(shortcut["macro"], scroll_multiplier)
-                        if any(
-                            getattr(step, "type", None) is StepType.SCROLL
-                            for step in shortcut["macro"]
-                        ):
-                            log.debug("Executed accelerated scroll macro")
-                        else:
-                            log.info("Executed configuration macro with modifier %s", modifier)
-                        return shortcut
+                if "macro" in shortcut:
+                    execute_config_macro(shortcut["macro"], scroll_multiplier)
+                    if any(
+                        getattr(step, "type", None) is StepType.SCROLL
+                        for step in shortcut["macro"]
+                    ):
+                        log.debug("Executed accelerated scroll macro")
+                    else:
+                        log.info("Executed configuration macro with modifier %s", modifier)
+                    return shortcut
 
-                    if key_code:
-                        send_key_event(key_code, key_value)
-                    if command:
-                        execute_command(command)    
+                if key_code:
+                    send_key_event(key_code, key_value)
+                if command:
+                    execute_command(command)
 
-                    log.info(f"Executed shortcut: {key_code} with value {key_value} with modifier {modifier} (Held for {duration_held:.2f}s)")
-                    return shortcut # Stop after first valid shortcut
-            else:
-                #log.info(trigger_mode)
-                #log.info(event_code)
-                if (trigger_mode == "immediate" and event_code) or (trigger_mode == "release" and not event_code):
-                    log.info(f"Shortcut {key_code} with value {key_value} requires {required_duration}s, but was held for {duration_held:.2f}s")
+                log.info(f"Executed shortcut: {key_code} with value {key_value} with modifier {modifier} (Held for {duration_held:.2f}s)")
+                return shortcut # Stop after first valid shortcut
+        elif (trigger_mode == "immediate" and event_code) or (trigger_mode == "release" and not event_code):
+            log.info(f"Shortcut {key_code} with value {key_value} requires {required_duration}s, but was held for {duration_held:.2f}s")
 
     return None
 
@@ -1440,8 +1525,10 @@ def shortcut_has_scroll_action(shortcuts, direction):
     return False
 
 def send_key_event(key_code, key_value=None, log_event=True):
-    global udev
+    with uinput_lock:
+        _send_key_event(key_code, key_value, log_event)
 
+def _send_key_event(key_code, key_value, log_event):
     if not udev:
         log.error("Virtual device is not initialized. Cannot send key events.")
         return
@@ -2056,11 +2143,14 @@ def action_worker():
         except Exception:
             log.exception("DialPad action failed")
 
-def enqueue_action(job):
+def enqueue_action(job, required=False):
     try:
         action_queue.put_nowait(job)
     except queue.Full:
-        log.warning("DialPad action queue is full; dropping an action")
+        if required:
+            threading.Thread(target=job, name="dialpad-actions-overflow", daemon=True).start()
+        else:
+            log.warning("DialPad action queue is full; dropping an action")
 
 def send_function_value(shortcuts, function_title):
     """Query a function's current value off the touch thread and show it."""
@@ -2127,7 +2217,8 @@ def run_function_center_action(selected_shortcuts, modifiers, selected_title):
         send_function_value(selected_shortcuts, selected_title)
 
 def function_has_center_action(function_title):
-    return bool(function_entry(function_title).get("center"))
+    center = function_entry(function_title).get("center") or []
+    return bool(shortcuts_for_modifiers(center if isinstance(center, list) else [center], active_modifiers))
 
 def select_multifunction_segment():
     """Select the highlighted radial-menu segment or invoke an action-only one."""
@@ -2258,7 +2349,7 @@ def listen_touchpad_events():
                 last_event_time = time()
 
                 if event.matches(EV_SYN.SYN_REPORT):
-                    process_pending_driver_updates()
+                    process_pending_driver_updates(gesture_idle=not prev_finger_down)
                     rotation.hysteresis = angle_hysteresis
                     circle_radius = circle_diameter / 2
                     center_button_radius = center_button_diameter / 2
@@ -2596,6 +2687,10 @@ def listen_touchpad_events():
                         if tap_disabled:
                             set_touchpad_prop_send_events(1)
                             tap_disabled = False
+
+                        # Configuration and focus changes that came while the
+                        # finger was on the dial apply now, between gestures.
+                        process_pending_driver_updates()
 
                     prev_finger_down = finger_down
 
@@ -3247,19 +3342,51 @@ def load_evdev_key_for_x11(char):
 
     return key
 
+uinput_rebuild_lock = threading.Lock()
+
 # necessary when are new keys enabled
 def reset_udev_device():
-    global dev, udev
+    """Replace the virtual device by one with the keys enabled since."""
+    global udev, scroll_modifiers_held
 
-    log.info("Old device at {} ({})".format(udev.devnode, udev.syspath))
-    udev = dev.create_uinput_device()
-    log.info("New device at {} ({})".format(udev.devnode, udev.syspath))
+    # One rebuild at a time, so the newest capabilities always win.
+    with uinput_rebuild_lock:
+        new_device = dev.create_uinput_device()
+        log.info("New device at {} ({})".format(new_device.devnode, new_device.syspath))
 
-    # Sleep for a little bit so udev, libinput, Xorg, Wayland, ... all have had
-    # a chance to see the device and initialize it. Otherwise the event
-    # will be sent by the kernel but nothing is ready to listen to the
-    # device yet
-    sleep(0.5)
+        # Sleep for a little bit so udev, libinput, Xorg, Wayland, ... all have
+        # had a chance to see the device and initialize it. Until then events
+        # keep going to the old device.
+        sleep(0.5)
+
+        with scroll_modifier_lock, uinput_lock:
+            old_device, udev = udev, new_device
+            # Keys held for zoom scrolling are released on the device that
+            # pressed them; the next scroll step presses them on the new one.
+            set_keys_held(scroll_modifiers_held, False, device=old_device)
+            scroll_modifiers_held = []
+        close_virtual_device(old_device)
+
+def close_virtual_device(device):
+    """Remove a replaced virtual device at once.
+
+    python-libevdev keeps devices in reference cycles: without this the old
+    DialPad keyboard stayed until the garbage collector ran, and the desktop
+    saw two of them.
+    """
+    uinput = getattr(device, "_uinput", None)
+    if uinput is None:
+        return
+    # Later sends to it fail instead of reaching a destroyed device.
+    device._uinput = None
+    try:
+        handle = uinput._uinput_device
+        if handle is not None:
+            uinput._uinput_device = None
+            uinput._uinput_destroy(handle)
+        log.info("Old virtual device removed")
+    except Exception:
+        log.debug("Could not remove the old virtual device now", exc_info=True)
 
 def load_evdev_keys_for_x11():
   global enabled_evdev_keys, keymap_loaded, coactivator_keys, udev

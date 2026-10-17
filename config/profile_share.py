@@ -8,7 +8,7 @@ import json
 import re
 
 from config.labels import parse_keys
-from config.schema import SCROLL_AXES, MacroStep, Profile, Segment, StepType, _decoder, _encoder
+from config.schema import MACRO_FIELDS, MODIFIER_KEYS, SCROLL_AXES, MacroStep, Profile, Segment, StepType, _decoder, _encoder
 
 PROFILE_FORMAT = """A Turnpad profile is one JSON object:
 - "name": shown in the settings app.
@@ -26,6 +26,7 @@ PROFILE_FORMAT = """A Turnpad profile is one JSON object:
   - "value_command": optional shell command that prints a number shown in the centre; "unit" such as "%" (with % the dial draws a gauge).
   - "overlay": optional, like the profile's, while this function is selected; e.g. {"visibility": "pill"} keeps the view clear while zooming.
   - "items": optional; makes the function a group (a folder): choosing it opens a straight list of these functions beside the dial; turning moves the highlight, a tap on the centre chooses, holding it goes back. Items have the same fields but no "items" of their own (one level), and the group has no steps itself, only "title", "color", "icon_url", "enabled" and "overlay". Use a group when a profile needs more than about 8 functions.
+  - "with_modifier": optional; other steps while a keyboard key is held, by key: {"Ctrl": {...}, "Shift": {...}, "Alt": {...}}, each with its own "macro_cw", "macro_ccw" and "macro_center". The held key stays pressed, so the application sees it with the steps (Ctrl + a scroll step zooms). Leave it out unless asked.
 
 Steps run from top to bottom. Each is {"type": ...} with an optional "title", a short label shown as a hint below the dial ("Zoom in"):
 - "keystroke": "keys" pressed together, modifiers first, as evdev names, e.g. ["KEY_LEFTCTRL", "KEY_Z"]. Names: KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_LEFTALT, KEY_LEFTMETA (Super), KEY_A to KEY_Z, KEY_0 to KEY_9, KEY_F1 to KEY_F24, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_PAGEUP, KEY_PAGEDOWN, KEY_HOME, KEY_END, KEY_ENTER, KEY_ESC, KEY_TAB, KEY_SPACE, KEY_BACKSPACE, KEY_DELETE, KEY_LEFTBRACE ([), KEY_RIGHTBRACE (]), KEY_MINUS, KEY_EQUAL, KEY_COMMA, KEY_DOT, KEY_SLASH. They are key positions on a US keyboard.
@@ -131,8 +132,17 @@ def _check_functions(segments, where: str, nested: bool = False) -> None:
     for index, segment in enumerate(segments, 1):
         if not isinstance(segment, dict) or not str(segment.get("title") or "").strip():
             raise ProfileTextError(f"{where}, function {index} has no \"title\".")
-        for field in ("macro_cw", "macro_ccw", "macro_center"):
-            for step in segment.get(field) or []:
+        variants = segment.get("with_modifier") or {}
+        if not isinstance(variants, dict) or any(
+            name not in MODIFIER_KEYS or not isinstance(actions, dict) for name, actions in variants.items()
+        ):
+            raise ProfileTextError(
+                f"{where}, “{segment['title']}”: \"with_modifier\" takes "
+                + ", ".join(f'"{name}"' for name in MODIFIER_KEYS) + " with steps for each."
+            )
+        holders = [segment, *variants.values()]
+        for field in MACRO_FIELDS:
+            for step in [step for holder in holders for step in holder.get(field) or []]:
                 kind = step.get("type") if isinstance(step, dict) else None
                 if kind not in {item.value for item in StepType}:
                     raise ProfileTextError(
@@ -167,8 +177,9 @@ def _clean_functions(segments: list[Segment], where: str) -> None:
         if segment.is_group:
             segment.macro_cw, segment.macro_ccw, segment.macro_center = [], [], []
             segment.value_command = segment.unit = segment.treshold = None
-        for field in ("macro_cw", "macro_ccw", "macro_center"):
-            for step in getattr(segment, field):
+            segment.with_modifier = {}
+        for steps in segment.macro_lists():
+            for step in steps:
                 _check_step(step, f"{where}, “{segment.title}”")
 
 

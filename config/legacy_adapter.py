@@ -2,17 +2,30 @@ from __future__ import annotations
 
 from config.labels import GROUP_ICON, describe_macro
 from config.presets import segment_color
-from config.schema import DialPadConfig, MacroStep, Profile, Segment, _default_config
+from config.schema import MODIFIER_KEYS, DialPadConfig, MacroStep, Profile, Segment, _default_config
 
 # Profile-level settings travel in a reserved key that the driver never
 # mistakes for a radial-menu function.
 META_KEY = "_meta"
 
 
-def _legacy_trigger(macro: list[MacroStep], title: str) -> list[dict]:
+def _legacy_trigger(macro: list[MacroStep], title: str, modifier: str | None = None) -> list[dict]:
     if not macro:
         return []
-    return [{"macro": list(macro), "trigger": "immediate", "title": title}]
+    entry = {"macro": list(macro), "trigger": "immediate", "title": title}
+    if modifier:
+        # The driver runs this entry instead of the plain one while one of
+        # these keyboard keys is held.
+        entry["modifier"] = list(MODIFIER_KEYS[modifier])
+    return [entry]
+
+
+def _legacy_triggers(segment: Segment, field: str) -> list[dict]:
+    entries = _legacy_trigger(getattr(segment, field), segment.title)
+    for name, actions in segment.with_modifier.items():
+        if name in MODIFIER_KEYS:
+            entries += _legacy_trigger(getattr(actions, field), segment.title, name)
+    return entries
 
 
 def _hints(segment: Segment) -> dict:
@@ -26,9 +39,9 @@ def _hints(segment: Segment) -> dict:
 def _legacy_segment(segment: Segment, index: int = 0) -> dict:
     result = {
         "icon": segment.icon_url,
-        "clockwise": _legacy_trigger(segment.macro_cw, segment.title),
-        "counterclockwise": _legacy_trigger(segment.macro_ccw, segment.title),
-        "center": _legacy_trigger(segment.macro_center, segment.title),
+        "clockwise": _legacy_triggers(segment, "macro_cw"),
+        "counterclockwise": _legacy_triggers(segment, "macro_ccw"),
+        "center": _legacy_triggers(segment, "macro_center"),
         "color": segment_color(segment, index),
         "hints": _hints(segment),
     }

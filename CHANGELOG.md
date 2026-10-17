@@ -25,6 +25,8 @@
 - Groups: a function of the radial menu can be a group whose functions open as a straight list beside the dial (turn to move, tap the centre to choose, hold to go back one level); the library has an *Apps* group with every launcher, the settings app edits a group with a live preview, and groups work in profile import, export and the AI prompt
 - Guided calibration asks to keep or revert the measured geometry (it is live meanwhile, so the dial can be tried); the Calibration page can reset the geometry to the layout's values
 - DialPad emulation for touchpads without a DialPad (*Driver → Emulate the DialPad*): any touchpad, no commands to its hardware; while on, the whole touchpad is the dial and the pointer stands still; switched by holding the top-right corner or with the new D-Bus method `Toggle` (a keyboard shortcut); `install.sh` no longer stops on such touchpads
+- Functions can do something else while Ctrl, Shift or Alt is held on the keyboard (turning and tapping, per function; "Actions for" in the function editor)
+- Saved settings reach the driver only between gestures; a `config.json` it cannot use is refused with the reason (Driver page, `GetStatus()`), and the running settings stay
 
 ### Removed
 
@@ -34,6 +36,9 @@
 
 ### Fixed
 
+- Saving settings while turning could leave Ctrl held (zoom scrolling) on a replaced virtual keyboard, the replaced DialPad keyboard stayed until Python's garbage collector removed it, and the dial stopped for half a second while the new one was created
+- A broken `config.json` made the driver fall back to the layout's shortcuts on the next reload
+- Holding a tracked keyboard key (Ctrl, Shift, Alt) blocked every action without one
 - Commands and shell scripts of dial actions blocked every further dial action until they ended (a calculator until it was closed), and programs started from the dial were killed with the driver service
 - Centre actions of rotating functions were unreachable in the radial menu
 - Switching application kept the previous application's selected function
