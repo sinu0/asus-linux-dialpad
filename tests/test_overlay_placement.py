@@ -3,7 +3,8 @@
 GNOME places actors in logical pixels: a 4K panel at 200 % is 1920 × 1080,
 the ProArt PX13 (2880 × 1800) at 200 % only 1440 × 900. overlayPlacement()
 in dial.js runs in gjs for every monitor, dial size and position, and with
-position "pointer" for pointers all over the monitor.
+position "pointer" for pointers all over the monitor; submenuPlacement()
+puts a group's list beside each of those dials.
 """
 
 import json
