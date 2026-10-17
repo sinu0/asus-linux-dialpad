@@ -64,6 +64,45 @@ jobs:
       - name: Build, install and remove the package
         run: bash packaging/arch/test-package.sh "$GITHUB_WORKSPACE"
 
+  # The .deb from this commit, built, installed with apt (dependencies from
+  # the distribution), checked and removed in a clean container.
+  deb-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:latest", "ubuntu:24.04", "debian:trixie"]
+    name: .deb on ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: ${{ matrix.image }}
+    steps:
+      - name: Install git
+        run: apt-get update -qq && apt-get install -y -qq git ca-certificates
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Build, install and remove the package
+        run: bash packaging/deb/test-package.sh "$GITHUB_WORKSPACE"
+
+  # The .rpm from this commit, the same way with dnf.
+  rpm-package:
+    name: .rpm on fedora:latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container: fedora:latest
+    steps:
+      - name: Install git
+        run: dnf -y -q install git
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Build, install and remove the package
+        run: bash packaging/rpm/test-package.sh "$GITHUB_WORKSPACE"
+
   # install.sh and uninstall.sh on other distributions, in clean containers
   # (tests/install_in_container.sh; no DialPad there, so INSTALL_IN_CONTAINER).
   install:

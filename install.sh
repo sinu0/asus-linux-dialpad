@@ -10,11 +10,14 @@ source install_migrate.sh
 
 source install_security_check.sh
 
-# A distribution package (packaging/arch) installs to /usr/share; two
-# installs would start two drivers.
+# A distribution package (packaging/arch, deb, rpm) installs to /usr/share;
+# two installs would start two drivers.
 if [ -d /usr/share/asus-turnpad ]; then
     echo "Turnpad is installed as a package (/usr/share/asus-turnpad)."
-    echo "Update it with your package manager, or remove it first (Arch: sudo pacman -R asus-turnpad-git)."
+    echo "Update it with your package manager, or remove it first:"
+    echo "  Arch: sudo pacman -R asus-turnpad-git"
+    echo "  Debian, Ubuntu: sudo apt remove asus-turnpad"
+    echo "  Fedora: sudo dnf remove asus-turnpad"
     exit 1
 fi
 

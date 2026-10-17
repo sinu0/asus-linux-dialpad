@@ -1,0 +1,17 @@
+#!/usr/bin/make -f
+
+# packaging/deb/build.sh copies this directory to the root of an exported
+# source tree and writes debian/changelog with the version before building.
+
+%:
+	dh $@ --with python3
+
+# Plain files, nothing to build: the file list is shared with the Arch and
+# RPM packages. dh_python3 compiles the bytecode at installation (py3compile)
+# for the Python of the system it is installed on.
+override_dh_auto_install:
+	bash packaging/install-files.sh $(CURDIR)/debian/asus-turnpad --no-bytecode
+
+# The driver is a user service that asus-turnpad-setup enables for each user
+# who wants it; not for every user of the system.
+override_dh_installsystemduser:

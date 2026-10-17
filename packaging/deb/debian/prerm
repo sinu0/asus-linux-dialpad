@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = remove ]; then
+    echo "==> Users of Turnpad: run 'systemctl --user disable --now asus-turnpad' (settings in ~/.config/asus-turnpad stay)."
+fi
+
+#DEBHELPER#
+
+exit 0

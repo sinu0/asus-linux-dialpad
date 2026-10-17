@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = remove ] && command -v udevadm >/dev/null 2>&1; then
+    # The rules are gone; devices keep their access until the next boot or
+    # replug, the groups stay (other software may use them).
+    udevadm control --reload-rules 2>/dev/null || true
+fi
+
+#DEBHELPER#
+
+exit 0
