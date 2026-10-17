@@ -13,7 +13,8 @@ install_migrate.sh.
 # Shown to people: window titles, launcher, installer messages.
 APP_NAME = "Turnpad"
 APP_SUMMARY = "Touchpad dial for ASUS laptops with a DialPad"
-ISSUES_URL = "https://github.com/sinu0/asus-linux-dialpad/issues"
+REPOSITORY_URL = "https://github.com/sinu0/asus-turnpad"
+ISSUES_URL = f"{REPOSITORY_URL}/issues"
 
 # Technical name: install and config directories, services, log names.
 # Twin: install_paths.sh.
@@ -38,6 +39,10 @@ GNOME_EXTENSION_UUID = "asus-turnpad@sinu0.github.io"
 
 # Twin: install_paths.sh.
 INSTALL_DIR = "/opt/asus-turnpad"
+
+# Where distribution packages put the program (packaging/).
+# Twins: packaging/asus-turnpad.service, packaging/arch/PKGBUILD, install.sh.
+PACKAGE_DIR = f"/usr/share/{SLUG}"
 
 # Socket for the legacy PySide overlay, in $XDG_RUNTIME_DIR.
 SOCKET_NAME = f"{SLUG}.sock"

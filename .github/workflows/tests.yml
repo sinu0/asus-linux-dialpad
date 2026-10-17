@@ -46,3 +46,20 @@ jobs:
           name: rendered-pictures
           path: rendered/
           if-no-files-found: ignore
+
+  # Builds the Arch package from this commit, installs it in a clean
+  # container, checks files and imports and removes it again.
+  arch-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: archlinux:latest
+    steps:
+      - name: Install git
+        run: pacman -Syu --noconfirm --needed git
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Build, install and remove the package
+        run: bash packaging/arch/test-package.sh "$GITHUB_WORKSPACE"

@@ -8,7 +8,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Turnpad currently supports **GNOME** (Shell 45–51). The driver itself runs on any desktop; what each desktop needs is an on-screen dial and focused-window detection. [ARCHITECTURE.md](https://github.com/sinu0/asus-linux-dialpad/blob/master/ARCHITECTURE.md#adding-a-desktop-environment) explains what that takes.
+        Turnpad currently supports **GNOME** (Shell 45–51). The driver itself runs on any desktop; what each desktop needs is an on-screen dial and focused-window detection. [ARCHITECTURE.md](https://github.com/sinu0/asus-turnpad/blob/master/ARCHITECTURE.md#adding-a-desktop-environment) explains what that takes.
 
   - type: input
     attributes:

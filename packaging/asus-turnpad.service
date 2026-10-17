@@ -1,0 +1,30 @@
+# The driver as a user service, for distribution packages (install.sh
+# writes its own units from the *.service templates in the repository root).
+# The graphical session hands DISPLAY, WAYLAND_DISPLAY and XDG_SESSION_TYPE
+# to the user's service manager; asus-turnpad-setup enables this unit.
+
+[Unit]
+Description=Turnpad driver (ASUS DialPad)
+# Stop with the graphical session and start again with the next one.
+PartOf=graphical-session.target
+After=graphical-session.target
+StartLimitBurst=20
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+# Commands of dial actions run as the user and can never gain privileges
+# (sudo, pkexec and other setuid helpers fail), even with passwordless sudo.
+NoNewPrivileges=yes
+# "auto" picks the layout of this laptop (layout_detect.py); %E is ~/.config.
+ExecStart=/usr/bin/python3 /usr/share/asus-turnpad/dialpad.py auto %E/asus-turnpad/
+TimeoutSec=5
+Restart=on-failure
+RestartSec=1
+# The driver logs to the journal directly.
+StandardOutput=null
+StandardError=null
+Environment="PATH=/usr/sbin:/usr/bin:/bin"
+
+[Install]
+WantedBy=graphical-session.target

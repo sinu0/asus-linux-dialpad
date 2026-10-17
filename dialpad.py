@@ -27,7 +27,11 @@ try:
     from pyinotify import ThreadedNotifier as Notifier
 except Exception:
     from pyinotify import AsyncNotifier as Notifier
-from periphery import I2C
+# Only a fallback when i2ctransfer (i2c-tools) fails.
+try:
+    from periphery import I2C
+except ImportError:
+    I2C = None
 from typing import Optional
 import re
 import math
@@ -44,6 +48,7 @@ import json
 import queue
 
 import launch
+import layout_detect
 from backlight import KeyboardBacklight, commands_for_level
 from config.identity import SLUG, socket_path
 from desktop.active_window import ActiveWindow, Context as ActiveWindowContext
@@ -384,6 +389,10 @@ dialpad: bool = False
 model = None
 if len(sys.argv) > 1:
     model = sys.argv[1]
+# Packages start the driver without knowing the laptop.
+if model in (None, "", layout_detect.AUTO):
+    model = layout_detect.detect_layout(os.path.join(os.path.dirname(os.path.abspath(__file__)), "layouts"))
+    log.info("Layout detected for this laptop: %s", model)
 try:
     model_layout = importlib.import_module('layouts.' + model)
 except:
@@ -404,6 +413,8 @@ if len(sys.argv) > 2:
 # When is given config dir empty or is used default -> to ./ because inotify needs check folder (nor nothing = "")
 if config_file_dir == "":
      config_file_dir = "./"
+config_file_dir = os.path.join(config_file_dir, "")
+os.makedirs(config_file_dir, exist_ok=True)
 
 # Layout
 circle_diameter = getattr(model_layout, "circle_diameter", 0)

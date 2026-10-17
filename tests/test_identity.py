@@ -57,6 +57,32 @@ class IdentityTest(unittest.TestCase):
         self.assertIn(f"Icon={identity.APP_ID}", text)
         self.assertIn(f"Name={identity.APP_NAME}", text)
 
+    def test_packaging(self):
+        pkgbuild = read("packaging/arch/PKGBUILD")
+        self.assertIn(f"_pkgname={identity.SLUG}\n", pkgbuild)
+        self.assertIn(f'url="{identity.REPOSITORY_URL}"', pkgbuild)
+        self.assertIn(f"/usr/share/gnome-shell/extensions/{identity.GNOME_EXTENSION_UUID}", pkgbuild)
+        self.assertIn(f"{identity.APP_ID}.desktop", pkgbuild)
+        self.assertIn(f"{identity.APP_ID}.svg", pkgbuild)
+        self.assertIn(f"/usr/share/$_pkgname", pkgbuild)
+        self.assertEqual(identity.PACKAGE_DIR, f"/usr/share/{identity.SLUG}")
+        service = read(f"packaging/{identity.SLUG}.service")
+        self.assertIn(f"{identity.PACKAGE_DIR}/dialpad.py auto %E/{identity.CONFIG_DIR_NAME}/", service)
+        setup = read(f"packaging/{identity.SLUG}-setup")
+        self.assertIn(f'GNOME_EXTENSION_UUID="{identity.GNOME_EXTENSION_UUID}"', setup)
+        self.assertIn(f'SERVICE="{identity.SLUG}.service"', setup)
+        self.assertIn(identity.INSTALL_DIR, setup)
+        self.assertIn(f"[ -d {identity.PACKAGE_DIR} ]", read("install.sh"))
+
+    def test_repository_links(self):
+        # The repository was renamed; GitHub redirects, but links should not rely on it.
+        for path in ROOT.rglob("*"):
+            if path == Path(__file__).resolve() or ".git" in path.parts:
+                continue
+            if path.is_file() and path.suffix in {".md", ".sh", ".py", ".yml", ".json", ".js", ""}:
+                with self.subTest(path=str(path.relative_to(ROOT))):
+                    self.assertNotIn("sinu0/asus-linux-dialpad", path.read_text(errors="ignore"))
+
     def test_service_templates_for_every_session(self):
         for kind in ("wayland", "x11", "plasma-wayland"):
             for name in (identity.SLUG, f"{identity.SLUG}-ui"):

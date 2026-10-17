@@ -8,7 +8,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Please make sure to [test existing layouts](https://github.com/sinu0/asus-linux-dialpad/tree/master/layouts) before filing this issue!
+        Please make sure to [test existing layouts](https://github.com/sinu0/asus-turnpad/tree/master/layouts) before filing this issue!
 
   - type: input
     attributes:
@@ -65,5 +65,5 @@ body:
     attributes:
       label: Acknowledgements
       options:
-        - label: This layout doesn't currently exist and I have read the [Layout section](https://github.com/sinu0/asus-linux-dialpad#layouts)
+        - label: This layout doesn't currently exist and I have read the [Layout section](https://github.com/sinu0/asus-turnpad#layouts)
           required: true

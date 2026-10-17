@@ -1,0 +1,3 @@
+# Groups of the udev rules in 70-asus-turnpad.rules.
+g i2c -
+g uinput -

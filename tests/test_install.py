@@ -2,6 +2,7 @@
 there only fails on the next start or login."""
 
 import ast
+import re
 import unittest
 from pathlib import Path
 
@@ -30,6 +31,29 @@ class InstallTest(unittest.TestCase):
             elif (ROOT / name / "__init__.py").exists():
                 with self.subTest(package=name):
                     self.assertIn(f"{name}/*.py", text)
+
+    def test_package_copies_what_the_installer_copies(self):
+        pkgbuild = (ROOT / "packaging" / "arch" / "PKGBUILD").read_text()
+        installer = (ROOT / "install.sh").read_text()
+        for path in sorted(ROOT.glob("*.py")):
+            if path.name == "dialpad_ui.py":
+                # Legacy PySide overlay for desktops without the Shell extension.
+                continue
+            with self.subTest(module=path.name):
+                self.assertIn(path.name, installer)
+                self.assertIn(path.name, pkgbuild)
+        for package in ("config", "config_app", "desktop", "layouts", "overlay"):
+            with self.subTest(package=package):
+                if package != "config_app":  # listed one by one, see below
+                    self.assertIn(f"{package}/*.py", installer)
+                self.assertRegex(pkgbuild, rf"for dir in [^;]*\b{package}\b")
+        for name in sorted(path.name for path in EXTENSION.iterdir() if path.suffix in {".js", ".json", ".css"}):
+            with self.subTest(file=name):
+                self.assertRegex(pkgbuild, rf"gnome/extension/\{{[^}}]*\b{re.escape(name)}\b")
+        for name in ("laptop_touchpad_dialpad_layouts.csv", "config_app/icon.svg", "config_app/style.css"):
+            with self.subTest(file=name):
+                self.assertIn(name, installer)
+                self.assertIn(name, pkgbuild)
 
     def test_installer_copies_every_settings_app_module(self):
         text = (ROOT / "install.sh").read_text()

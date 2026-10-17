@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+
+# One-time setup of Turnpad for the current user after installing a
+# distribution package: device groups, the driver's user service and the
+# GNOME extension. Safe to run again. install.sh does the same on its own.
+
+set -u
+
+SERVICE="asus-turnpad.service"
+GNOME_EXTENSION_UUID="asus-turnpad@sinu0.github.io"
+
+if [[ $(id -u) == 0 ]]; then
+    echo "Run asus-turnpad-setup as your user, not as root (it asks for sudo when needed)."
+    exit 1
+fi
+
+# An install made with install.sh would shadow the package: its user service
+# and extension take precedence over the system-wide ones.
+if [[ -e "$HOME/.config/systemd/user/$SERVICE" || -d /opt/asus-turnpad ||
+      -d "$HOME/.local/share/gnome-shell/extensions/$GNOME_EXTENSION_UUID" ]]; then
+    echo "Turnpad installed with install.sh is still present."
+    echo "Remove it first with 'bash uninstall.sh' in the repository (your settings stay), then run asus-turnpad-setup again."
+    exit 1
+fi
+
+RELOGIN=0
+
+# input: reading the touchpad and keyboard. i2c and uinput: devices the udev
+# rules also open through the session (uaccess); the groups cover the rest.
+MISSING=()
+for GROUP in input i2c uinput; do
+    if ! id -nG "$USER" | tr ' ' '\n' | grep -qx "$GROUP"; then
+        MISSING+=("$GROUP")
+    fi
+done
+if (( ${#MISSING[@]} )); then
+    echo "Adding $USER to the groups ${MISSING[*]} (sudo)..."
+    sudo usermod -a -G "$(IFS=,; echo "${MISSING[*]}")" "$USER" || exit 1
+    RELOGIN=1
+fi
+
+if systemctl --user enable "$SERVICE"; then
+    echo "Driver service enabled: it starts with every graphical login."
+else
+    echo "WARNING: could not enable $SERVICE"
+fi
+if (( ! RELOGIN )); then
+    systemctl --user restart "$SERVICE" && echo "Driver started."
+fi
+
+if [[ "${XDG_CURRENT_DESKTOP,,}" == *gnome* ]] && command -v gnome-extensions >/dev/null 2>&1; then
+    if gnome-extensions enable "$GNOME_EXTENSION_UUID" 2>/dev/null; then
+        echo "GNOME extension enabled."
+    else
+        # GNOME Shell knows a newly installed extension only after the next
+        # login; listing it as enabled makes the Shell load it then.
+        ENABLED=$(gsettings get org.gnome.shell enabled-extensions | sed 's/^@as //')
+        gsettings set org.gnome.shell enabled-extensions "$(python3 -c '
+import ast, sys
+items = ast.literal_eval(sys.argv[1]) if sys.argv[1].startswith("[") else []
+if sys.argv[2] not in items:
+    items.append(sys.argv[2])
+print(items)' "$ENABLED" "$GNOME_EXTENSION_UUID")"
+        echo "GNOME extension will be enabled at the next login."
+        RELOGIN=1
+    fi
+else
+    echo "Not a GNOME session: the driver works, the on-screen dial needs GNOME Shell 45 or newer."
+fi
+
+echo
+if (( RELOGIN )); then
+    echo "Done. Log out and back in, then hold the illuminated corner of the touchpad to switch the DialPad on."
+else
+    echo "Done. Hold the illuminated corner of the touchpad to switch the DialPad on."
+fi
+echo "Settings: open \"Turnpad\" from the applications menu."

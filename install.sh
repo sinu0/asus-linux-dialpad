@@ -10,6 +10,14 @@ source install_migrate.sh
 
 source install_security_check.sh
 
+# A distribution package (packaging/arch) installs to /usr/share; two
+# installs would start two drivers.
+if [ -d /usr/share/asus-turnpad ]; then
+    echo "Turnpad is installed as a package (/usr/share/asus-turnpad)."
+    echo "Update it with your package manager, or remove it first (Arch: sudo pacman -R asus-turnpad-git)."
+    exit 1
+fi
+
 echo
 
 START_TIME=${EPOCHREALTIME::-7}
@@ -163,7 +171,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
             sudo eopkg install -y qt$PLASMA_VER-tools
         fi
     else
-        echo "WARNING: Not detected package manager. Driver may not work properly because required packages have not been installed. Please create an issue (https://github.com/asus-linux-drivers/asus-dialpad-driver/issues)."
+        echo "WARNING: Not detected package manager. Driver may not work properly because required packages have not been installed. Please create an issue (https://github.com/sinu0/asus-turnpad/issues)."
     fi
 
     if [[ $? != 0 ]]; then
@@ -221,7 +229,7 @@ LOGS_INSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/$LOGS_INSTALL_LOG_FILE_NAME"
     sudo install dialpad.py "$INSTALL_DIR_PATH"
     sudo install dialpad_dbus.py "$INSTALL_DIR_PATH"
     sudo install dial_gesture.py "$INSTALL_DIR_PATH"
-    sudo install -m 644 backlight.py launch.py "$INSTALL_DIR_PATH"
+    sudo install -m 644 backlight.py launch.py layout_detect.py laptop_touchpad_dialpad_layouts.csv "$INSTALL_DIR_PATH"
     sudo install -t "$INSTALL_DIR_PATH/layouts" layouts/*.py
     sudo install -m 644 -t "$INSTALL_DIR_PATH/config" config/*.py
     sudo install -m 644 -t "$INSTALL_DIR_PATH/desktop" desktop/*.py

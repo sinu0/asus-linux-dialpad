@@ -5,9 +5,11 @@ The driver detects ASUS touchpads by name (`ASUE`, `ELAN`, `ASUP`, `ASUF`,
 differs between models is the dial geometry and, rarely, the I2C address of
 the corner LED. Both can be handled without code changes:
 
-1. **Install** with `bash install.sh` and pick the closest layout when asked
-   (`proartp16`, `asusvivobook16x` or `zenbookpro14`). Known touchpads are
-   listed in `laptop_touchpad_dialpad_layouts.csv`.
+1. **Install** as described in the [README](README.md#install). The layout
+   (`proartp16`, `asusvivobook16x` or `zenbookpro14`) is picked from
+   `laptop_touchpad_dialpad_layouts.csv` by laptop name or touchpad id; an
+   unknown laptop gets `proartp16` (`bash install.sh --interactive` lets you
+   choose).
 2. **Calibrate.** Open *Turnpad → Calibration → Guided calibration*,
    press *Start*, trace the printed outer ring once with one finger, lift it,
    then trace the edge of the centre button. The measured geometry is used

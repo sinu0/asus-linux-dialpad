@@ -70,7 +70,7 @@ if ask "Do you want install systemctl service(s)?" y; then
     elif command -v eopkg >/dev/null 2>&1; then
         sudo eopkg install -y systemd-devel python-systemd
     else
-        echo "Not detected package manager. Driver may not work properly because required packages have not been installed. Please create an issue (https://github.com/sinu0/asus-linux-dialpad/issues)."
+        echo "Not detected package manager. Driver may not work properly because required packages have not been installed. Please create an issue (https://github.com/sinu0/asus-turnpad/issues)."
     fi
 
     venv_pip install -r requirements.systemd.txt

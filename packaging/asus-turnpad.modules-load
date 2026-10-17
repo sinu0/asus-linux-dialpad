@@ -1,0 +1,3 @@
+# Kernel modules the Turnpad driver uses.
+uinput
+i2c-dev

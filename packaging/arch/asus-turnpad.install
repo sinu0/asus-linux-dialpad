@@ -1,0 +1,19 @@
+post_install() {
+    # modules-load.d applies at boot; load them now so no reboot is needed.
+    # pacman's udev hook applies the new rules after the transaction.
+    modprobe -a uinput i2c-dev 2>/dev/null
+    echo
+    echo "==> Finish the setup once as your user (not root):"
+    echo "      asus-turnpad-setup"
+    echo "    then log out and back in."
+    echo
+}
+
+post_upgrade() {
+    modprobe -a uinput i2c-dev 2>/dev/null
+    echo "==> Restart the driver with 'systemctl --user restart asus-turnpad'; a new GNOME extension loads at the next login."
+}
+
+pre_remove() {
+    echo "==> Users of Turnpad: run 'systemctl --user disable --now asus-turnpad' (settings in ~/.config/asus-turnpad stay)."
+}

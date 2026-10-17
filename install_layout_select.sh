@@ -10,7 +10,7 @@ if [ -z "$LAYOUT_NAME" ]; then
     echo
     echo "The driver will try to find the appropriate keys for each field of the layout that can be successfully sent. Key modifiers are supported. When the appropriate key cannot be found then the field will be sent using the Unicode shortcut (usually Ctrl+Shift+U+<0-F>)."
     echo
-    echo "Photos of all layouts can be found here https://github.com/sinu0/asus-linux-dialpad#layouts."
+    echo "Photos of all layouts can be found here https://github.com/sinu0/asus-turnpad#layouts."
     echo
     echo "Select layout:"
     echo

@@ -8,7 +8,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Please make sure to [search for existing issues](https://github.com/sinu0/asus-linux-dialpad/issues) before filing a new one!
+        Please make sure to [search for existing issues](https://github.com/sinu0/asus-turnpad/issues) before filing a new one!
 
   - type: textarea
     id: what-happened

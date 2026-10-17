@@ -10,19 +10,11 @@ DEVICE_ID=$(cat /proc/bus/input/devices | grep ".*Touchpad\"$" | sort | cut -f 3
 VENDOR_ID=$(cat /proc/bus/input/devices | grep ".*Touchpad\"$" | sort | cut -f 3 -d" " | cut -f 1 -d ":" | head -1)
 # VENDOR_ID="04F3"
 
-# the base was provided by cz asus support and manually fixed + manually extended about missing laptops gathered from users by github issues and via GA
-SUGGESTED_LAYOUT=$(cat laptop_dialpad_layouts | grep "$LAPTOP_NAME" | head -1 | cut -d'=' -f2)
-
-# gathered from users via GA
-if [[ -z "$SUGGESTED_LAYOUT" ]]; then
-  SUGGESTED_LAYOUT=$(cat laptop_touchpad_dialpad_layouts.csv | grep "$LAPTOP_NAME_FULL" | sort -t , -k 6 -r | head -1 | cut -d',' -f4)
-else
+# laptop_touchpad_dialpad_layouts.csv by product name, then by touchpad id
+# (layout_detect.py, the same lookup the driver does for the layout "auto")
+SUGGESTED_LAYOUT=$(python3 layout_detect.py)
+if [[ -n "$SUGGESTED_LAYOUT" ]]; then
   LAYOUT_AUTO_SUGGESTION_BY_LAPTOP_PRODUCT=1
-fi
-if [[ -z "$SUGGESTED_LAYOUT" ]]; then
-  SUGGESTED_LAYOUT=$(cat laptop_touchpad_dialpad_layouts.csv | grep "$VENDOR_ID" | grep "$DEVICE_ID" | sort -t , -k 6 -r | head -1 | cut -d',' -f4)
-elif [[ -z "$LAYOUT_AUTO_SUGGESTION_BY_LAPTOP_PRODUCT" ]]; then
-  LAYOUT_AUTO_SUGGESTION_BY_LAPTOP_NAME=1
 fi
 
 if [[ -z "$SUGGESTED_LAYOUT" || "$SUGGESTED_LAYOUT" == "none" ]]; then
@@ -71,12 +63,7 @@ if [[ -z "$SUGGESTED_LAYOUT" || "$SUGGESTED_LAYOUT" == "none" ]]; then
             PROBE_LAPTOP_NAME_FULL="${array[INDEX]}"
             PROBE_LAPTOP_NAME=$( echo $PROBE_LAPTOP_NAME_FULL | rev | cut -d ' ' -f1 | rev | cut -d "_" -f1)
 
-            SUGGESTED_LAYOUT=$(cat laptop_dialpad_layouts | grep "$PROBE_LAPTOP_NAME" | head -1 | cut -d'=' -f2)
-            if [[ -z "$SUGGESTED_LAYOUT" ]]; then
-              SUGGESTED_LAYOUT=$(cat laptop_touchpad_dialpad_layouts.csv | grep "$PROBE_LAPTOP_NAME_FULL" | head -1 | cut -d',' -f4)
-            else
-              LAYOUT_AUTO_SUGGESTION_BY_LAPTOP_PRODUCT=1
-            fi
+            SUGGESTED_LAYOUT=$(cat laptop_touchpad_dialpad_layouts.csv | grep "$PROBE_LAPTOP_NAME_FULL" | head -1 | cut -d',' -f4)
             if [[ -z "$SUGGESTED_LAYOUT" || "$SUGGESTED_LAYOUT" == "none" ]]; then
               continue
             else

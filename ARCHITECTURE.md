@@ -34,7 +34,7 @@ Turnpad is a set of separately running parts that talk over the session D-Bus an
 
 ## Adding a desktop environment
 
-Turnpad supports GNOME only for now. A new desktop starts with a [desktop support request](https://github.com/sinu0/asus-linux-dialpad/issues/new?template=desktop-support.yml), ideally from someone who can test on it.
+Turnpad supports GNOME only for now. A new desktop starts with a [desktop support request](https://github.com/sinu0/asus-turnpad/issues/new?template=desktop-support.yml), ideally from someone who can test on it.
 
 Three integration points, all optional. The driver already works everywhere evdev and uinput do.
 
@@ -66,7 +66,7 @@ Show the dial while `touching` is true and fade it out `hide_delay_ms` after rel
 
 ### 3. Installer
 
-Add a case to `install_overlay.sh` that sources an `install_<desktop>_overlay.sh`, and the matching removal to `uninstall.sh`.
+Add a case to `install_overlay.sh` that sources an `install_<desktop>_overlay.sh`, and the matching removal to `uninstall.sh`. Distribution packages (`packaging/`) install the frontend's files system-wide, and `packaging/asus-turnpad-setup` enables it per user.
 
 ## Keeping the two painters in sync
 

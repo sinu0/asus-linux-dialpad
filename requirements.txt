@@ -1,6 +1,5 @@
 dbus-python
 libevdev
-numpy
 pyinotify
 python-periphery
 pyasyncore
