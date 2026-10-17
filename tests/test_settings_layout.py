@@ -54,7 +54,10 @@ class SettingsLayoutTest(unittest.TestCase):
                     self.fail(f"{size}: the probe did not finish\n{errors[-2000:]}")
                 faults += json.loads(output.read_text())
                 faults += [f"{size}: {line.strip()}" for line in errors.splitlines()
-                           if "Gtk-CRITICAL" in line or "Gtk-WARNING" in line]
+                           if "Gtk-CRITICAL" in line or "Gtk-WARNING" in line or "Adwaita-CRITICAL" in line]
+                # A failing signal handler only prints its traceback.
+                if "Traceback (most recent call last)" in errors:
+                    faults.append(f"{size}: an exception in the app\n{errors[-2000:]}")
         self.assertEqual(faults, [], "\n".join(faults))
 
 

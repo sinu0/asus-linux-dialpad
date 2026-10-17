@@ -202,6 +202,58 @@ def _icon_button(icon_name, tooltip, callback, *css):
     return button
 
 
+def _button_row(title, icon_name):
+    """A row that acts as a button; callers connect "activated".
+
+    Adw.ButtonRow needs Libadwaita 1.6; older ones get an activatable ActionRow.
+    """
+    if hasattr(Adw, "ButtonRow"):
+        return Adw.ButtonRow(title=title, start_icon_name=icon_name)
+    row = Adw.ActionRow(title=title, activatable=True)
+    row.add_prefix(Gtk.Image.new_from_icon_name(icon_name))
+    return row
+
+
+def _page_sidebar(stack):
+    """Navigation between the pages of an Adw.ViewStack.
+
+    Adw.ViewSwitcherSidebar needs Libadwaita 1.9; older ones (Ubuntu 24.04,
+    Debian 13) get a navigation list showing the same pages that follows the
+    stack both ways, also when code switches the page.
+    """
+    if hasattr(Adw, "ViewSwitcherSidebar"):
+        sidebar = Adw.ViewSwitcherSidebar()
+        sidebar.set_stack(stack)
+        return sidebar
+    sidebar = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
+    sidebar.add_css_class("navigation-sidebar")
+    names = []
+    pages = stack.get_pages()
+    for index in range(pages.get_n_items()):
+        page = pages.get_item(index)
+        names.append(page.get_name())
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        box.append(Gtk.Image.new_from_icon_name(page.get_icon_name()))
+        box.append(Gtk.Label(label=page.get_title(), xalign=0, hexpand=True))
+        sidebar.append(Gtk.ListBoxRow(child=box))
+
+    def show_page(_sidebar, row):
+        if row is not None and stack.get_visible_child_name() != names[row.get_index()]:
+            stack.set_visible_child_name(names[row.get_index()])
+
+    def follow_stack(*_args):
+        name = stack.get_visible_child_name()
+        if name in names:
+            row = sidebar.get_row_at_index(names.index(name))
+            if sidebar.get_selected_row() is not row:
+                sidebar.select_row(row)
+
+    sidebar.connect("row-selected", show_page)
+    stack.connect("notify::visible-child-name", follow_stack)
+    follow_stack()
+    return sidebar
+
+
 def _spin_row(title, subtitle, value, minimum, maximum, step, digits, changed):
     row = Adw.SpinRow.new_with_range(minimum, maximum, step)
     row.set_title(title)
@@ -333,8 +385,7 @@ class Application(Adw.Application):
         self._view_stack.connect("notify::visible-child", self._on_visible_page_changed)
 
         content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        sidebar = Adw.ViewSwitcherSidebar()
-        sidebar.set_stack(self._view_stack)
+        sidebar = _page_sidebar(self._view_stack)
         sidebar.set_size_request(218, -1)
         sidebar.add_css_class("proart-sidebar")
         content.append(sidebar)
@@ -2416,10 +2467,10 @@ class Application(Adw.Application):
         group.add(self._skin_gallery)
 
         # Clear entry points; the pencil on each card does the same.
-        customise = Adw.ButtonRow(title="Customise the selected skin…", start_icon_name="document-edit-symbolic")
+        customise = _button_row("Customise the selected skin…", "document-edit-symbolic")
         customise.connect("activated", lambda _row: self._customise_current_skin())
         group.add(customise)
-        new = Adw.ButtonRow(title="New skin…", start_icon_name="list-add-symbolic")
+        new = _button_row("New skin…", "list-add-symbolic")
         new.connect("activated", lambda _row: self._show_skin_editor(None, self._new_skin_draft(self._current_skin_id())))
         group.add(new)
         self._refresh_skin_gallery()
