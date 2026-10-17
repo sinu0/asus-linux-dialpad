@@ -125,14 +125,64 @@ const ICON_RULES = [
     [['notif'], 'preferences-system-notifications'],
 ];
 
+// Sides the dial may take around the pointer (position "pointer"), and its
+// distance from the pointer in logical pixels. The gap is not multiplied by
+// the dial's scale: it is what the user set.
+export const POINTER_SIDES = ['below-right', 'below-left', 'above-right', 'above-left', 'right', 'left', 'above', 'below'];
+export const POINTER_GAP = 24;
+export const POINTER_GAP_MAX = 400;
+
+// Where a box (width × height) goes next to the pointer ([x, y] on the
+// monitor): on the given side, gap pixels away; middle is the height of the
+// line centred on the pointer for "right" and "left" (the dial's centre,
+// not its hints). A side without room gives way to the opposite one, a
+// straight side then to the two across it; the box stays on the monitor
+// and covers the pointer only when no side leaves room.
+export function besidePointer(monitor, pointer, side, gap, width, height, middle) {
+    const [px, py] = pointer;
+    // [vertical, horizontal]: 1 below or right of the pointer, -1 above or
+    // left, 0 centred on it.
+    const directions = [[1, 1], [1, -1], [-1, 1], [-1, -1], [0, 1], [0, -1], [-1, 0], [1, 0]];
+    const [v, h] = directions[Math.max(0, POINTER_SIDES.indexOf(side))];
+    let candidates;
+    if (v && h)
+        candidates = [[v, h], [v, -h], [-v, h], [-v, -h]];
+    else if (v)
+        candidates = [[v, 0], [-v, 0], [0, 1], [0, -1]];
+    else
+        candidates = [[0, h], [0, -h], [1, 0], [-1, 0]];
+    const clamp = (value, maximum) => Math.max(0, Math.min(maximum, Math.round(value)));
+    let best = null;
+    for (const [cv, ch] of candidates) {
+        const wantedX = ch > 0 ? px + gap : ch < 0 ? px - gap - width : px - width / 2;
+        const wantedY = cv > 0 ? py + gap : cv < 0 ? py - gap - height : py - middle;
+        // Room on the side's own axes; the other one may be pushed in.
+        const fits = (!ch || (wantedX >= 0 && wantedX + width <= monitor.width)) &&
+            (!cv || (wantedY >= 0 && wantedY + height <= monitor.height));
+        const x = clamp(wantedX, monitor.width - width);
+        const y = clamp(wantedY, monitor.height - height);
+        // How far the pointer is outside the box, up to the gap (negative
+        // when it is inside).
+        const away = Math.min(gap, Math.max(x - px, px - x - width, y - py, py - y - height));
+        if (!best || away > best.away || (away === best.away && fits && !best.fits))
+            best = { x, y, away, fits };
+    }
+    return { x: best.x, y: best.y };
+}
+
 // Where the overlay goes on a monitor ({width, height} in logical pixels):
 // centred horizontally, at the chosen height, never past an edge.
 // custom: [x, y], the dial's centre as fractions of the monitor, used
-// with position "custom".
-export function overlayPlacement(monitor, scale, position, custom = null) {
+// with position "custom". pointer: [x, y] on the monitor for position
+// "pointer", with side and gap (besidePointer()); unknown, the dial goes
+// to "lower".
+export function overlayPlacement(monitor, scale, position, custom = null, pointer = null,
+    side = POINTER_SIDES[0], gap = POINTER_GAP) {
     const width = Math.round(DIAL_D * scale);
     const height = Math.round((DIAL_D + HINT_H) * scale);
     const clamp = (value, maximum) => Math.max(0, Math.min(maximum, Math.round(value)));
+    if (position === 'pointer' && pointer)
+        return { ...besidePointer(monitor, pointer, side, gap, width, height, width / 2), width, height };
     if (position === 'custom' && custom) {
         return {
             x: clamp(monitor.width * custom[0] - width / 2, monitor.width - width),
@@ -162,7 +212,7 @@ export function overlayPlacement(monitor, scale, position, custom = null) {
     };
 }
 
-const LOOK_POSITIONS = ['center', 'lower', 'bottom', 'top', 'custom'];
+const LOOK_POSITIONS = ['center', 'lower', 'bottom', 'top', 'custom', 'pointer'];
 const LOOK_VISIBILITIES = ['full', 'fade', 'pill'];
 
 // Where and how the dial shows: the overlay section of config.json
@@ -183,6 +233,9 @@ export function effectiveLook(appearance, look) {
         custom: [pick('custom_x', fraction, 0.5), pick('custom_y', fraction, 0.5)],
         visibility: pick('visibility', value => LOOK_VISIBILITIES.includes(value), 'full'),
         fadeOpacity: pick('fade_opacity', value => typeof value === 'number' && value >= 0 && value <= 100, 35) / 100,
+        pointerSide: pick('pointer_side', value => POINTER_SIDES.includes(value), POINTER_SIDES[0]),
+        pointerGap: pick('pointer_gap', value => typeof value === 'number' && value >= 0 && value <= POINTER_GAP_MAX,
+            POINTER_GAP),
     };
 }
 
@@ -203,8 +256,11 @@ export function pillContent(view) {
 }
 
 // The pill sits where the dial's centre would be, inside the monitor; a
-// custom point near an edge puts it at that edge.
-export function pillPlacement(monitor, scale, look, width, height) {
+// custom point near an edge puts it at that edge. Near the pointer it takes
+// the dial's side of it.
+export function pillPlacement(monitor, scale, look, width, height, pointer = null) {
+    if (look.position === 'pointer' && pointer)
+        return besidePointer(monitor, pointer, look.pointerSide, look.pointerGap, width, height, height / 2);
     let [cx, cy] = [monitor.width * look.custom[0], monitor.height * look.custom[1]];
     if (look.position !== 'custom') {
         const dial = overlayPlacement(monitor, scale, look.position);

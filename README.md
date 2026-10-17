@@ -13,7 +13,7 @@ What Turnpad adds to the original driver:
 
 - **Settings app** (GTK4/libadwaita): per-application profiles, a function library, pre-programmed packs (browsers, GIMP, Krita, Inkscape, Blender, Kdenlive, DaVinci Resolve, LibreOffice, code editors, Spotify, video players), function colours and order, import/export.
 - **ASUS Dial behaviour**: radial menu or single-function mode, per-app sensitivity and scroll speed, remembered last function, tap centre for the function's action, hold centre for the menu, horizontal scroll and Ctrl+wheel zoom.
-- **GNOME Shell overlay**: native radial dial with value gauge, rotation hints and finger position; size, position (anywhere on the screen) and visibility configurable: always visible, fading while you turn, or a small label instead of the dial — for all apps, per profile or per function.
+- **GNOME Shell overlay**: native radial dial with value gauge, rotation hints and finger position; size, position (anywhere on the screen or next to the mouse pointer) and visibility configurable: always visible, fading while you turn, or a small label instead of the dial — for all apps, per profile or per function.
 - **Guided calibration** that measures the dial on any DialPad touchpad — see [PORTING.md](PORTING.md).
 
 ### Install

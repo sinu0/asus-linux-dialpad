@@ -160,10 +160,12 @@ def main():
     output = Path(sys.argv[1])
     size_names = sys.argv[2:] or list(SIZES)
     config = demo.demo_config()
-    # Show every dial look row: the screen picker and the fade level.
+    # Show every dial look row: the screen picker, the side of the pointer
+    # and the fade level.
     config.overlay.position = "custom"
     config.overlay.visibility = "fade"
-    config.profiles[0].overlay = {"position": "custom", "custom_x": 0.8, "custom_y": 0.7, "visibility": "fade"}
+    config.profiles[0].overlay = {"position": "pointer", "pointer_side": "above-left", "pointer_gap": 40,
+                                  "visibility": "fade"}
     config.profiles[0].segments[0].overlay = {"position": "custom", "visibility": "fade"}
     demo.app_main.CONFIG_FILE = Path(__file__)
     demo.app_main.load_config = lambda: config

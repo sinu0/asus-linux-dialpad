@@ -15,7 +15,7 @@ PROFILE_FORMAT = """A Turnpad profile is one JSON object:
 - "app_id": optional; the .desktop id of the application it is for, e.g. "org.gimp.GIMP.desktop" or "firefox.desktop". Leave it out for a default profile.
 - "mode": "multi" (radial menu of functions) or "single" (the dial always runs the function named in "single_function").
 - "sensitivity" and "scroll_speed": 0.25 to 4 (1 = normal); "remember_last": true reopens the last used function.
-- "overlay": optional; how the on-screen dial shows for this profile, overriding the user's defaults: "position" ("top", "center", "lower", "bottom" or "custom" with "custom_x" and "custom_y", the dial's centre as fractions 0 to 1 of the screen), "visibility" ("full"; "fade": fades to "fade_opacity" percent while turning; "pill": a small label instead of the dial). Leave it out unless asked.
+- "overlay": optional; how the on-screen dial shows for this profile, overriding the user's defaults: "position" ("top", "center", "lower", "bottom", "custom" with "custom_x" and "custom_y", the dial's centre as fractions 0 to 1 of the screen, or "pointer": next to the mouse pointer, never covering it, on "pointer_side" ("below-right", "below-left", "above-right", "above-left", "right", "left", "above" or "below") "pointer_gap" pixels away, 0 to 400, default 24), "visibility" ("full"; "fade": fades to "fade_opacity" percent while turning; "pill": a small label instead of the dial). Leave it out unless asked.
 - "segments": the functions, clockwise from the top of the dial; 3 to 8 work best. Each one has:
   - "title": short and unique in the profile, shown on the dial.
   - "color": optional "#rrggbb".

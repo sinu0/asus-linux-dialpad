@@ -154,6 +154,37 @@ class VisibilityTest(unittest.TestCase):
         self.assertEqual(self.pill.opacity, 0)
         self.assertTrue(self.dial.visible)
 
+    def test_pointer_is_read_only_for_a_fully_hidden_dial(self):
+        reads = []
+
+        def follow_pointer():
+            # Like the frontends: nothing while the dial or the pill shows.
+            if not (self.dial.visible or self.pill.visible):
+                reads.append(self.timers.now)
+
+        self.visibility = Visibility(self.dial, self.pill, self.timers, lambda: self.look, lambda: self.state,
+                                     lambda: 1500, follow_pointer)
+        self.signal(True, True)
+        self.assertEqual(reads, [0])
+        for _ in range(3):
+            self.signal(True, True)
+        # Released, then touched again while lingering and while fading out.
+        self.signal(True, False)
+        self.timers.advance(1000)
+        self.signal(True, True)
+        self.signal(True, False)
+        self.timers.advance(1500)
+        self.signal(True, True)
+        # A look change (another profile shows the pill) does not read it.
+        self.look["visibility"] = "pill"
+        self.visibility.look_changed()
+        self.assertEqual(reads, [0])
+        self.signal(False, False)
+        self.pill.finish()
+        self.timers.advance(10)
+        self.signal(True, True)
+        self.assertEqual(reads, [0, 2510])
+
     def test_a_shown_actor_is_not_hidden_by_a_late_fade_out(self):
         self.signal(True, True)
         self.signal(False, False)

@@ -14,7 +14,11 @@ DARKTABLE_APP_ID = "org.darktable.darktable.desktop"
 
 
 PROFILE_MODES = ("multi", "single")
-OVERLAY_POSITIONS = ("center", "lower", "bottom", "top", "custom")
+OVERLAY_POSITIONS = ("center", "lower", "bottom", "top", "custom", "pointer")
+# Position "pointer": the dial's side of the pointer (the first one with
+# room wins, the opposite side next) and its distance in logical pixels.
+POINTER_SIDES = ("below-right", "below-left", "above-right", "above-left", "right", "left", "above", "below")
+POINTER_GAP_MAX = 400
 # full: always fully visible; fade: full on touch, then fades to
 # fade_opacity while turning; pill: a small label instead of the dial.
 OVERLAY_VISIBILITIES = ("full", "fade", "pill")
@@ -94,10 +98,14 @@ class OverlayConfig:
     visibility: str = "full"
     # Percent the dial fades to with visibility "fade".
     fade_opacity: int = 35
+    # With position "pointer": where the dial appears around the pointer
+    # and how far from it (not multiplied by scale).
+    pointer_side: str = "below-right"
+    pointer_gap: int = 24
 
 
 # Keys a profile or a function may override; OverlayConfig holds defaults.
-OVERLAY_RULE_KEYS = ("position", "custom_x", "custom_y", "visibility", "fade_opacity")
+OVERLAY_RULE_KEYS = ("position", "custom_x", "custom_y", "visibility", "fade_opacity", "pointer_side", "pointer_gap")
 
 
 def overlay_rule(values) -> dict:
@@ -114,6 +122,10 @@ def overlay_rule(values) -> dict:
         rule["visibility"] = values["visibility"]
     if isinstance(values.get("fade_opacity"), (int, float)) and not isinstance(values.get("fade_opacity"), bool):
         rule["fade_opacity"] = int(_clamp(values["fade_opacity"], 0, 100, 35))
+    if values.get("pointer_side") in POINTER_SIDES:
+        rule["pointer_side"] = values["pointer_side"]
+    if isinstance(values.get("pointer_gap"), (int, float)) and not isinstance(values.get("pointer_gap"), bool):
+        rule["pointer_gap"] = int(_clamp(values["pointer_gap"], 0, POINTER_GAP_MAX, 24))
     return rule
 
 
@@ -362,6 +374,9 @@ def _decoder(d: dict, cls: type):
         if overlay.visibility not in OVERLAY_VISIBILITIES:
             overlay.visibility = "full"
         overlay.fade_opacity = int(_clamp(overlay.fade_opacity, 0, 100, 35))
+        if overlay.pointer_side not in POINTER_SIDES:
+            overlay.pointer_side = "below-right"
+        overlay.pointer_gap = int(_clamp(overlay.pointer_gap, 0, POINTER_GAP_MAX, 24))
         if not isinstance(overlay.skin, str) or not overlay.skin.strip():
             overlay.skin = "glass"
         if not isinstance(overlay.skin_light, str) or not overlay.skin_light.strip():

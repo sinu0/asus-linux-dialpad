@@ -46,6 +46,7 @@ from config.schema import (
     CONFIG_FILE,
     DARKTABLE_APP_ID,
     OVERLAY_POSITIONS,
+    POINTER_GAP_MAX,
     DialPadConfig,
     MacroStep,
     Profile,
@@ -130,6 +131,17 @@ POSITION_LABELS = {
     "bottom": "Bottom of the screen",
     "top": "Top of the screen",
     "custom": "Custom place",
+    "pointer": "Near the pointer",
+}
+POINTER_SIDE_LABELS = {
+    "below-right": "Below right",
+    "below-left": "Below left",
+    "above-right": "Above right",
+    "above-left": "Above left",
+    "right": "Right",
+    "left": "Left",
+    "above": "Above",
+    "below": "Below",
 }
 VISIBILITY_LABELS = {
     "full": "Always visible",
@@ -2294,6 +2306,7 @@ class Application(Adw.Application):
             return inherited(key) if value is None and inherited else value
 
         def choices_row(title, key, labels, extra_keys):
+            """extra_keys: {option: keys} of the details an option shows."""
             options = ([None] if inherit_label else []) + list(labels)
             names = [
                 f"{inherit_label} ({labels[inherited(key)]})" if option is None else labels[option]
@@ -2303,12 +2316,12 @@ class Application(Adw.Application):
             def chosen(index):
                 option = options[index]
                 if option is None:
-                    for extra in (key, *extra_keys):
+                    for extra in (key, *(extra for keys in extra_keys.values() for extra in keys)):
                         set_value(extra, None)
                 else:
                     set_value(key, option)
                     # Keep the inherited details so the choice looks the same.
-                    for extra in extra_keys:
+                    for extra in extra_keys.get(option, ()):
                         if get(extra) is None:
                             set_value(extra, current(extra))
                 update()
@@ -2316,14 +2329,31 @@ class Application(Adw.Application):
             selected = get(key)
             return _combo_row(title, None, names, options.index(selected) if selected in options else 0, chosen)
 
-        position = choices_row("Position", "position", POSITION_LABELS, ("custom_x", "custom_y"))
+        position = choices_row("Position", "position", POSITION_LABELS, {
+            "custom": ("custom_x", "custom_y"),
+            "pointer": ("pointer_side", "pointer_gap"),
+        })
         add(position)
         picker = self._screen_point_picker(
             lambda: (current("custom_x"), current("custom_y")),
             lambda x, y: (set_value("custom_x", x), set_value("custom_y", y)),
         )
         add(picker)
-        visibility = choices_row("Visibility", "visibility", VISIBILITY_LABELS, ("fade_opacity",))
+        sides = list(POINTER_SIDE_LABELS)
+        side = _combo_row(
+            "Side of the pointer", "Another side when there is no room on this one",
+            list(POINTER_SIDE_LABELS.values()),
+            sides.index(current("pointer_side")) if current("pointer_side") in sides else 0,
+            lambda index: set_value("pointer_side", sides[index]),
+        )
+        add(side)
+        gap = _spin_row(
+            "Distance from the pointer", "Pixels between the pointer and the dial",
+            current("pointer_gap"), 0, POINTER_GAP_MAX, 4, 0,
+            lambda value: set_value("pointer_gap", int(value)),
+        )
+        add(gap)
+        visibility = choices_row("Visibility", "visibility", VISIBILITY_LABELS, {"fade": ("fade_opacity",)})
         add(visibility)
         fade = _spin_row(
             "Fade to", "Percent of full opacity, reached a second after the finger lands",
@@ -2334,6 +2364,8 @@ class Application(Adw.Application):
 
         def update():
             picker.set_visible(get("position") == "custom")
+            side.set_visible(get("position") == "pointer")
+            gap.set_visible(get("position") == "pointer")
             fade.set_visible(get("visibility") == "fade")
 
         update()

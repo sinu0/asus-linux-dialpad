@@ -46,11 +46,15 @@ class Timers(Protocol):
 
 class Visibility:
     """dial and pill: Actors. look(): the effective look (overlay.look),
-    state(): the driver state, hide_delay(): hide_delay_ms."""
+    state(): the driver state, hide_delay(): hide_delay_ms. follow_pointer()
+    runs before every show, like _followPointer() in the extension; it
+    should do nothing while an actor is visible."""
 
     def __init__(self, dial: Actor, pill: Actor, timers: Timers,
-                 look: Callable[[], dict], state: Callable[[], dict], hide_delay: Callable[[], int]):
+                 look: Callable[[], dict], state: Callable[[], dict], hide_delay: Callable[[], int],
+                 follow_pointer: Callable[[], None] = lambda: None):
         self._dial = dial
+        self._follow_pointer = follow_pointer
         self._pill = pill
         self._timers = timers
         self._look = look
@@ -90,6 +94,7 @@ class Visibility:
 
     def show(self, touch_started: bool) -> None:
         """touch_started: a new touch brings a faded dial back to full."""
+        self._follow_pointer()
         actor = self.active_actor()
         if self.shown_actor is not None and self.shown_actor is not actor:
             self.shown_actor.remove_all_transitions()
