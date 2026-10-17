@@ -2,21 +2,23 @@
 
 The short version is in the [README](README.md#install). This page has the details of both ways to install.
 
-| | Arch package | `install.sh` |
-| --- | --- | --- |
-| Distributions | Arch Linux and derivatives (CachyOS, EndeavourOS, Manjaro) | Any distribution with systemd: Fedora, Ubuntu, Debian, openSUSE, Void, Gentoo, Solus, immutable Fedora |
-| Program | `/usr/share/asus-turnpad`, managed by pacman | `/opt/asus-turnpad` with its own Python environment |
-| Python libraries | Distribution packages | Downloaded by pip into `/opt/asus-turnpad/.env` |
-| Layout of your laptop | Picked when the driver starts (`auto`) | Picked during installation |
-| Update | `git pull`, then `bash packaging/arch/build.sh` | `git pull`, then `bash install.sh` again |
-| Remove | `sudo pacman -R asus-turnpad-git` | `bash uninstall.sh` |
+| | Arch package | .deb / .rpm package | `install.sh` |
+| --- | --- | --- | --- |
+| Distributions | Arch Linux and derivatives (CachyOS, EndeavourOS, Manjaro) | Debian 13, Ubuntu 24.04 and newer; Fedora | Any distribution with systemd: Fedora, Ubuntu, Debian, openSUSE, Void, Gentoo, Solus, immutable Fedora |
+| Program | `/usr/share/asus-turnpad`, managed by pacman | `/usr/share/asus-turnpad`, managed by apt or dnf | `/opt/asus-turnpad` with its own Python environment |
+| Python libraries | Distribution packages | Distribution packages | Downloaded by pip into `/opt/asus-turnpad/.env` |
+| Layout of your laptop | Picked when the driver starts (`auto`) | Picked when the driver starts (`auto`) | Picked during installation |
+| Update | `git pull`, then `bash packaging/arch/build.sh` | `git pull`, build again, install the new file | `git pull`, then `bash install.sh` again |
+| Remove | `sudo pacman -R asus-turnpad-git` | `sudo apt remove asus-turnpad` / `sudo dnf remove asus-turnpad` | `bash uninstall.sh` |
 
-Use one of them, not both: `install.sh` refuses to run while the package is installed, and `asus-turnpad-setup` refuses while an `install.sh` install is present. Your settings in `~/.config/asus-turnpad` are kept by both and work with both.
+Use one of them, not both: `install.sh` refuses to run while a package is installed, and `asus-turnpad-setup` refuses while an `install.sh` install is present. Your settings in `~/.config/asus-turnpad` are kept by both and work with both.
 
 | Distribution | Tested | Result |
 | --- | --- | --- |
 | CachyOS (Arch), GNOME 51 | On a ProArt PX13 | Everything |
 | Arch Linux (package) | CI, every push | Package builds, installs, imports, removes |
+| Ubuntu 26.04 and 24.04 LTS, Debian 13 (.deb) | CI, every push | Package builds, installs, imports, removes |
+| Fedora 44 (.rpm) | CI, every push | Package builds, installs, imports, removes |
 | Fedora 44 (`install.sh`) | CI, every push | Installs, imports, uninstalls |
 | Ubuntu 26.04 LTS (`install.sh`) | CI, every push | Installs, imports, uninstalls |
 | Ubuntu 24.04 LTS (`install.sh`) | Once, by hand | Driver works; the settings app does not start (Libadwaita 1.5) |
@@ -58,6 +60,40 @@ sudo pacman -R asus-turnpad-git
 ```
 
 **Coming from `install.sh`:** run `bash uninstall.sh` in the old clone first (it keeps your settings), then install the package.
+
+## .deb and .rpm packages (Debian, Ubuntu, Fedora)
+
+There is no PPA or COPR repository yet; build the package from a clone:
+
+```bash
+git clone https://github.com/sinu0/asus-turnpad.git
+cd asus-turnpad
+
+# Debian 13, Ubuntu 24.04 or newer
+sudo apt install build-essential debhelper dh-python git
+bash packaging/deb/build.sh
+sudo apt install ~/.cache/asus-turnpad/deb/asus-turnpad_*_all.deb
+
+# Fedora
+sudo dnf install rpm-build python3-devel systemd-rpm-macros desktop-file-utils git
+bash packaging/rpm/build.sh
+sudo dnf install ~/.cache/asus-turnpad/rpm/asus-turnpad-*.noarch.rpm
+
+asus-turnpad-setup             # once, as your user
+```
+
+`build.sh` builds the checked-out commit (or the one given as argument; `--worktree` adds uncommitted changes) from a copy made with `git archive` in a temporary directory, so the clone stays untouched, and puts the package in `~/.cache/asus-turnpad/deb` or `rpm` (`-o <dir>` for another place). The version is `0.r<commits>.<hash>`, like the Arch package's. apt or dnf installs the libraries from the distribution; `python3-pywayland` is only recommended (Ubuntu 24.04 has none).
+
+The package installs the same files as the Arch package (one list for all three, `packaging/install-files.sh`), and `asus-turnpad-setup` works the same way: log out and back in afterwards.
+
+**Update:** `git pull`, build again and install the new file, then `systemctl --user restart asus-turnpad`. A changed GNOME extension loads at the next login.
+
+**Remove:**
+
+```bash
+systemctl --user disable --now asus-turnpad
+sudo apt remove asus-turnpad     # or: sudo dnf remove asus-turnpad
+```
 
 ## install.sh (all distributions)
 
