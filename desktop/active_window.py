@@ -100,12 +100,40 @@ def kde(context: Context) -> WindowInfo:
     return binary_from_pid(pid), title
 
 
+_session_bus = None
+
+
+def _session_connection():
+    """A session bus connection of our own, opened on first use.
+
+    Not the shared Gio.bus_get_sync() one: that one ends the process when the
+    session bus goes away.
+    """
+    global _session_bus
+    from gi.repository import Gio
+
+    if _session_bus is None or _session_bus.is_closed():
+        _session_bus = Gio.DBusConnection.new_for_address_sync(
+            Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None),
+            Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
+            | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+            None,
+            None,
+        )
+    return _session_bus
+
+
 @backend("gnome", ("wayland",))
 def gnome(_context: Context) -> WindowInfo:
-    import dbus
+    from gi.repository import Gio, GLib
 
-    shell = dbus.SessionBus().get_object("org.gnome.Shell", "/org/gnome/Shell")
-    return None, shell.Get("org.gnome.Shell", "focusWindow").get("title", None)
+    # Default timeout (-1, 25 s), as the dbus-python call had.
+    reply = _session_connection().call_sync(
+        "org.gnome.Shell", "/org/gnome/Shell", "org.freedesktop.DBus.Properties", "Get",
+        GLib.Variant("(ss)", ("org.gnome.Shell", "focusWindow")), GLib.VariantType("(v)"),
+        Gio.DBusCallFlags.NONE, -1, None,
+    )
+    return None, reply.unpack()[0].get("title", None)
 
 
 @backend("niri", ("wayland",))

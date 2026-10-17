@@ -11,13 +11,11 @@ import threading
 import time
 from typing import Any
 
-import dbus
-import dbus.service
-from dbus.mainloop.glib import DBusGMainLoop
 import gi
 
+gi.require_version("Gio", "2.0")
 gi.require_version("GLib", "2.0")
-from gi.repository import GLib
+from gi.repository import Gio, GLib
 
 from config.identity import DBUS_INTERFACE, DBUS_NAME, DBUS_PATH
 
@@ -30,66 +28,73 @@ _INT32_MIN = -(2**31)
 _INT32_MAX = 2**31 - 1
 _INT64_MIN = -(2**63)
 _INT64_MAX = 2**63 - 1
+# org.freedesktop.DBus.RequestName: fail instead of waiting in the queue.
+_NAME_FLAG_DO_NOT_QUEUE = 4
+_NAME_REPLY_PRIMARY_OWNER = 1
+
+# The wire contract (see the D-Bus table in AGENTS.md). Argument names and
+# unnamed out arguments match what the dbus-python version exported.
+INTERFACE_XML = f"""<node>
+  <interface name="{INTERFACE_NAME}">
+    <method name="CancelCalibration">
+      <arg direction="out" type="b"/>
+    </method>
+    <method name="GetOverlayDetails">
+      <arg direction="out" type="s"/>
+    </method>
+    <method name="SetActiveApplication">
+      <arg direction="in" type="s" name="application"/>
+    </method>
+    <method name="GetStatus">
+      <arg direction="out" type="a{{sv}}"/>
+    </method>
+    <method name="ReloadConfig">
+      <arg direction="out" type="b"/>
+    </method>
+    <method name="StartCalibration">
+      <arg direction="out" type="b"/>
+    </method>
+    <signal name="OverlayState">
+      <arg type="b" name="enabled"/>
+      <arg type="s" name="title"/>
+      <arg type="as" name="titles"/>
+      <arg type="as" name="icons"/>
+      <arg type="i" name="value"/>
+      <arg type="d" name="value_angle_start"/>
+      <arg type="s" name="unit"/>
+      <arg type="b" name="center_pressed"/>
+      <arg type="b" name="value_show_only_progress"/>
+      <arg type="b" name="touching"/>
+    </signal>
+    <!-- Presentation details as JSON: profile, colours, hints, pointer. -->
+    <signal name="OverlayDetails">
+      <arg type="s" name="details_json"/>
+    </signal>
+    <!-- Guided calibration state as JSON (step, message, error, result…). -->
+    <signal name="CalibrationProgress">
+      <arg type="s" name="state_json"/>
+    </signal>
+  </interface>
+</node>"""
+
+NODE_INFO = Gio.DBusNodeInfo.new_for_xml(INTERFACE_XML)
+INTERFACE_INFO = NODE_INFO.lookup_interface(INTERFACE_NAME)
+
+
+def signal_signature(name: str) -> str:
+    """The D-Bus signature of a signal's arguments, e.g. ``bsasasidsbbb``."""
+    return "".join(arg.signature for arg in INTERFACE_INFO.lookup_signal(name).args)
+
+
+_OVERLAY_STATE_TYPE = "(" + signal_signature("OverlayState") + ")"
+# Methods whose reply is the boolean result of a driver callback.
+_BOOL_METHODS = {
+    "CancelCalibration": "_on_cancel_calibration",
+    "ReloadConfig": "_on_reload_config",
+    "StartCalibration": "_on_start_calibration",
+}
 
 LOG = logging.getLogger(__name__)
-
-
-class _DialPadObject(dbus.service.Object):
-    """The D-Bus object delegates request handling to its service owner."""
-
-    def __init__(self, service: "DialPadDBusService", bus_name: dbus.service.BusName):
-        super().__init__(bus_name, OBJECT_PATH)
-        self._service = service
-
-    @dbus.service.signal(INTERFACE_NAME, signature="bsasasidsbbb")
-    def OverlayState(
-        self,
-        enabled: dbus.Boolean,
-        title: dbus.String,
-        titles: dbus.Array,
-        icons: dbus.Array,
-        value: dbus.Int32,
-        value_angle_start: dbus.Double,
-        unit: dbus.String,
-        center_pressed: dbus.Boolean,
-        value_show_only_progress: dbus.Boolean,
-        touching: dbus.Boolean,
-    ) -> None:
-        pass
-
-    @dbus.service.signal(INTERFACE_NAME, signature="s")
-    def OverlayDetails(self, details_json: dbus.String) -> None:
-        """Presentation details as JSON: profile, colours, hints, pointer."""
-
-    @dbus.service.signal(INTERFACE_NAME, signature="s")
-    def CalibrationProgress(self, state_json: dbus.String) -> None:
-        """Guided calibration state as JSON (step, message, error, result…)."""
-
-    @dbus.service.method(INTERFACE_NAME, in_signature="", out_signature="b")
-    def CancelCalibration(self) -> dbus.Boolean:
-        return dbus.Boolean(
-            self._service._call_bool_callback(self._service._on_cancel_calibration, "CancelCalibration")
-        )
-
-    @dbus.service.method(INTERFACE_NAME, in_signature="", out_signature="s")
-    def GetOverlayDetails(self) -> dbus.String:
-        return dbus.String(self._service._details_json())
-
-    @dbus.service.method(INTERFACE_NAME, in_signature="s", out_signature="")
-    def SetActiveApplication(self, application: str) -> None:
-        self._service._set_active_application(str(application))
-
-    @dbus.service.method(INTERFACE_NAME, in_signature="", out_signature="a{sv}")
-    def GetStatus(self) -> dbus.Dictionary:
-        return self._service._get_status()
-
-    @dbus.service.method(INTERFACE_NAME, in_signature="", out_signature="b")
-    def ReloadConfig(self) -> dbus.Boolean:
-        return dbus.Boolean(self._service._reload_config())
-
-    @dbus.service.method(INTERFACE_NAME, in_signature="", out_signature="b")
-    def StartCalibration(self) -> dbus.Boolean:
-        return dbus.Boolean(self._service._start_calibration())
 
 
 class DialPadDBusService:
@@ -114,9 +119,9 @@ class DialPadDBusService:
         self._started = False
         self._thread: threading.Thread | None = None
         self._main_loop: GLib.MainLoop | None = None
-        self._bus: dbus.bus.BusConnection | None = None
-        self._bus_name: dbus.service.BusName | None = None
-        self._object: _DialPadObject | None = None
+        # Own connection, not the shared Gio.bus_get_sync() one: that one
+        # exits the process when the session bus goes away.
+        self._connection: Gio.DBusConnection | None = None
         self._overlay_state: dict[str, Any] = {
             "enabled": False,
             "title": "",
@@ -260,20 +265,20 @@ class DialPadDBusService:
                 )
 
             values = None if details_only else self._normalize_overlay_payload(state)
-            dbus_object = self._object if self._started else None
+            connection = self._connection if self._started else None
 
-        if dbus_object is None or (values is None and details_json is None):
+        if connection is None or (values is None and details_json is None):
             return
 
         try:
-            GLib.idle_add(self._emit_overlay_state, dbus_object, values, details_json)
+            GLib.idle_add(self._emit_overlay_state, connection, values, details_json)
         except Exception:
             LOG.exception("Failed to schedule the DialPad overlay state signal")
 
     def emit_calibration_progress(self, state: Mapping[str, Any]) -> None:
         with self._lock:
-            dbus_object = self._object if self._started else None
-        if dbus_object is None:
+            connection = self._connection if self._started else None
+        if connection is None:
             return
         try:
             payload = json.dumps(dict(state))
@@ -282,35 +287,58 @@ class DialPadDBusService:
             return
 
         def emit() -> bool:
-            try:
-                dbus_object.CalibrationProgress(dbus.String(payload))
-            except Exception:
-                LOG.exception("Failed to emit the calibration progress signal")
+            if self._is_current(connection):
+                try:
+                    self._emit_signal(connection, "CalibrationProgress", GLib.Variant("(s)", (payload,)))
+                except Exception:
+                    LOG.exception("Failed to emit the calibration progress signal")
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(emit)
 
     def _run_main_loop(self) -> None:
-        bus: dbus.bus.BusConnection | None = None
-        bus_name: dbus.service.BusName | None = None
-        dbus_object: _DialPadObject | None = None
+        connection: Gio.DBusConnection | None = None
+        registration_id = 0
         main_loop: GLib.MainLoop | None = None
 
         try:
-            DBusGMainLoop(set_as_default=True)
-            bus = dbus.SessionBus()
-            bus_name = dbus.service.BusName(BUS_NAME, bus=bus, do_not_queue=True)
-            if bus.get_name_owner(BUS_NAME) != bus.get_unique_name():
+            # The loop runs the process's default main context, as the
+            # dbus-python version did: backlight.KeyboardBacklight subscribes
+            # to UPower from the main thread and its signals arrive here.
+            # Connection, object and emits below all use that context too.
+            address = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
+            connection = Gio.DBusConnection.new_for_address_sync(
+                address,
+                Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
+                | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+                None,
+                None,
+            )
+            registration_id = connection.register_object(
+                OBJECT_PATH, INTERFACE_INFO, self._on_method_call, None, None
+            )
+            reply = connection.call_sync(
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "RequestName",
+                GLib.Variant("(su)", (BUS_NAME, _NAME_FLAG_DO_NOT_QUEUE)),
+                GLib.VariantType("(u)"),
+                Gio.DBusCallFlags.NONE,
+                int(_STARTUP_TIMEOUT_SECONDS * 1000),
+                None,
+            )
+            if reply.unpack()[0] != _NAME_REPLY_PRIMARY_OWNER:
                 raise RuntimeError("the DialPad D-Bus name is already owned")
-            dbus_object = _DialPadObject(self, bus_name)
             main_loop = GLib.MainLoop()
+            # Without this the service would keep "running" on a dead bus and
+            # log a failure for every overlay update.
+            connection.connect("closed", self._on_connection_closed, main_loop)
 
             with self._lock:
                 should_run = not self._stop_requested
                 if should_run:
-                    self._bus = bus
-                    self._bus_name = bus_name
-                    self._object = dbus_object
+                    self._connection = connection
                     self._main_loop = main_loop
                     self._started = True
                 self._startup_complete.set()
@@ -320,50 +348,105 @@ class DialPadDBusService:
         except Exception:
             LOG.exception("DialPad D-Bus service is unavailable")
         finally:
-            if dbus_object is not None:
-                try:
-                    dbus_object.remove_from_connection()
-                except Exception:
-                    LOG.exception("Failed to remove the DialPad D-Bus object")
-
-            if bus is not None:
-                try:
-                    bus.release_name(BUS_NAME)
-                except Exception:
-                    LOG.exception("Failed to release the DialPad D-Bus name")
-
             with self._lock:
                 if self._thread is threading.current_thread():
                     self._started = False
                     self._main_loop = None
-                    self._object = None
-                    self._bus_name = None
-                    self._bus = None
+                    self._connection = None
+
+            if connection is not None:
+                if registration_id:
+                    try:
+                        connection.unregister_object(registration_id)
+                    except Exception:
+                        LOG.exception("Failed to remove the DialPad D-Bus object")
+                if not connection.is_closed():
+                    # Closing the connection also releases the name; flush
+                    # first so that signals already sent still arrive.
+                    try:
+                        connection.flush_sync(None)
+                        connection.close_sync(None)
+                    except Exception:
+                        LOG.exception("Failed to close the DialPad D-Bus connection")
+
+            with self._lock:
+                if self._thread is threading.current_thread():
                     self._thread = None
                 self._startup_complete.set()
 
+    @staticmethod
+    def _on_connection_closed(
+        _connection: Gio.DBusConnection,
+        remote_peer_vanished: bool,
+        error: GLib.Error | None,
+        main_loop: GLib.MainLoop,
+    ) -> None:
+        if remote_peer_vanished:
+            LOG.warning("Lost the session D-Bus connection: %s", error.message if error else "closed")
+        main_loop.quit()
+
+    def _is_current(self, connection: Gio.DBusConnection) -> bool:
+        with self._lock:
+            return self._started and self._connection is connection
+
+    @staticmethod
+    def _emit_signal(connection: Gio.DBusConnection, name: str, parameters: GLib.Variant) -> None:
+        connection.emit_signal(None, OBJECT_PATH, INTERFACE_NAME, name, parameters)
+
     def _emit_overlay_state(
         self,
-        dbus_object: _DialPadObject,
+        connection: Gio.DBusConnection,
         values: tuple[Any, ...] | None,
         details_json: str | None = None,
     ) -> bool:
-        with self._lock:
-            is_current_object = self._started and self._object is dbus_object
-
-        if not is_current_object:
+        if not self._is_current(connection):
             return GLib.SOURCE_REMOVE
 
         try:
             # Details first: the overlay repaints on OverlayState and must
             # already know the colours and hints of the new state.
             if details_json is not None:
-                dbus_object.OverlayDetails(dbus.String(details_json))
+                self._emit_signal(connection, "OverlayDetails", GLib.Variant("(s)", (details_json,)))
             if values is not None:
-                dbus_object.OverlayState(*values)
+                self._emit_signal(connection, "OverlayState", GLib.Variant(_OVERLAY_STATE_TYPE, values))
         except Exception:
             LOG.exception("Failed to emit the DialPad overlay state signal")
         return GLib.SOURCE_REMOVE
+
+    def _on_method_call(
+        self,
+        _connection: Gio.DBusConnection,
+        _sender: str,
+        _object_path: str,
+        _interface_name: str,
+        method_name: str,
+        parameters: GLib.Variant,
+        invocation: Gio.DBusMethodInvocation,
+    ) -> None:
+        # Gio has already checked the method name and argument types against
+        # INTERFACE_INFO and answered bad calls itself.
+        try:
+            if method_name == "SetActiveApplication":
+                self._set_active_application(str(parameters.unpack()[0]))
+                reply = None
+            elif method_name == "GetStatus":
+                reply = GLib.Variant("(a{sv})", (self._get_status(),))
+            elif method_name == "GetOverlayDetails":
+                reply = GLib.Variant("(s)", (self._details_json(),))
+            elif method_name in _BOOL_METHODS:
+                callback = getattr(self, _BOOL_METHODS[method_name])
+                reply = GLib.Variant("(b)", (self._call_bool_callback(callback, method_name),))
+            else:
+                invocation.return_dbus_error(
+                    "org.freedesktop.DBus.Error.UnknownMethod",
+                    f"Unknown method: {method_name}",
+                )
+                return
+        except Exception as error:
+            LOG.exception("%s failed", method_name)
+            invocation.return_dbus_error("org.freedesktop.DBus.Error.Failed", str(error))
+            return
+        invocation.return_value(reply)
 
     def _set_active_application(self, application: str) -> None:
         callback = self._on_active_application
@@ -374,13 +457,7 @@ class DialPadDBusService:
         except Exception:
             LOG.exception("SetActiveApplication callback failed")
 
-    def _reload_config(self) -> bool:
-        return self._call_bool_callback(self._on_reload_config, "ReloadConfig")
-
-    def _start_calibration(self) -> bool:
-        return self._call_bool_callback(self._on_start_calibration, "StartCalibration")
-
-    def _call_bool_callback(self, callback: Callable[[], Any], name: str) -> bool:
+    def _call_bool_callback(self, callback: Callable[[], Any] | None, name: str) -> bool:
         if callback is None:
             return False
         try:
@@ -389,22 +466,23 @@ class DialPadDBusService:
             LOG.exception("%s callback failed", name)
             return False
 
-    def _get_status(self) -> dbus.Dictionary:
+    def _get_status(self) -> dict[str, GLib.Variant]:
+        """The status as a{sv}: b, s, x (int64, clamped) and d; other values are left out."""
         provider = self._status_provider
         if provider is None:
-            return dbus.Dictionary(signature="sv")
+            return {}
 
         try:
             status = provider()
         except Exception:
             LOG.exception("GetStatus provider failed")
-            return dbus.Dictionary(signature="sv")
+            return {}
 
         if not isinstance(status, Mapping):
             LOG.warning("GetStatus provider returned a non-mapping value")
-            return dbus.Dictionary(signature="sv")
+            return {}
 
-        result: dict[dbus.String, Any] = {}
+        result: dict[str, GLib.Variant] = {}
         for key, value in status.items():
             try:
                 key_text = str(key)
@@ -413,40 +491,31 @@ class DialPadDBusService:
                 continue
 
             if isinstance(value, bool):
-                result[dbus.String(key_text)] = dbus.Boolean(value)
+                result[key_text] = GLib.Variant("b", value)
             elif isinstance(value, str):
-                result[dbus.String(key_text)] = dbus.String(value)
+                result[key_text] = GLib.Variant("s", value)
             elif isinstance(value, int):
-                result[dbus.String(key_text)] = dbus.Int64(
-                    max(_INT64_MIN, min(value, _INT64_MAX))
-                )
+                result[key_text] = GLib.Variant("x", max(_INT64_MIN, min(value, _INT64_MAX)))
             elif isinstance(value, float) and math.isfinite(value):
-                result[dbus.String(key_text)] = dbus.Double(value)
+                result[key_text] = GLib.Variant("d", value)
 
-        return dbus.Dictionary(result, signature="sv")
+        return result
 
     @staticmethod
     def _normalize_overlay_payload(payload: dict) -> tuple[Any, ...]:
+        """The OverlayState arguments in signature order (``bsasasidsbbb``)."""
         data: Mapping[str, Any] = payload if isinstance(payload, Mapping) else {}
         return (
-            dbus.Boolean(DialPadDBusService._as_bool(data.get("enabled", False))),
-            dbus.String(DialPadDBusService._as_text(data.get("title", ""))),
-            dbus.Array(
-                [dbus.String(item) for item in DialPadDBusService._as_text_list(data.get("titles", []))],
-                signature="s",
-            ),
-            dbus.Array(
-                [dbus.String(item) for item in DialPadDBusService._as_text_list(data.get("icons", []))],
-                signature="s",
-            ),
-            dbus.Int32(DialPadDBusService._as_int32(data.get("value", 0))),
-            dbus.Double(DialPadDBusService._as_float(data.get("value_angle_start", 0.0))),
-            dbus.String(DialPadDBusService._as_text(data.get("unit", ""))),
-            dbus.Boolean(DialPadDBusService._as_bool(data.get("center_pressed", False))),
-            dbus.Boolean(
-                DialPadDBusService._as_bool(data.get("value_show_only_progress", False))
-            ),
-            dbus.Boolean(DialPadDBusService._as_bool(data.get("touching", False))),
+            DialPadDBusService._as_bool(data.get("enabled", False)),
+            DialPadDBusService._as_text(data.get("title", "")),
+            DialPadDBusService._as_text_list(data.get("titles", [])),
+            DialPadDBusService._as_text_list(data.get("icons", [])),
+            DialPadDBusService._as_int32(data.get("value", 0)),
+            DialPadDBusService._as_float(data.get("value_angle_start", 0.0)),
+            DialPadDBusService._as_text(data.get("unit", "")),
+            DialPadDBusService._as_bool(data.get("center_pressed", False)),
+            DialPadDBusService._as_bool(data.get("value_show_only_progress", False)),
+            DialPadDBusService._as_bool(data.get("touching", False)),
         )
 
     @staticmethod

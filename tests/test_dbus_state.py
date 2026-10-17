@@ -6,11 +6,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     from dialpad_dbus import DialPadDBusService
-except ImportError:  # dbus-python or PyGObject missing
+except ImportError:  # PyGObject missing
     DialPadDBusService = None
 
 
-@unittest.skipIf(DialPadDBusService is None, "dbus-python is not installed")
+@unittest.skipIf(DialPadDBusService is None, "PyGObject is not installed")
 class OverlayStateTest(unittest.TestCase):
     def setUp(self):
         # Never started, so updates only touch the in-memory state.
@@ -25,13 +25,59 @@ class OverlayStateTest(unittest.TestCase):
         return self.service._overlay_state
 
     def test_signal_matches_declared_signature(self):
-        import dbus
-        from dialpad_dbus import _DialPadObject
+        from gi.repository import GLib
+        from dialpad_dbus import signal_signature
 
-        signature = _DialPadObject.OverlayState._dbus_signature
+        signature = signal_signature("OverlayState")
         self.assertEqual(signature, "bsasasidsbbb")
         values = DialPadDBusService._normalize_overlay_payload(self.state())
-        self.assertEqual(len(values), len(list(dbus.Signature(signature))))
+        variant = GLib.Variant("(%s)" % signature, values)
+        self.assertEqual(variant.get_type_string(), "(bsasasidsbbb)")
+
+    def test_interface_matches_contract(self):
+        from dialpad_dbus import INTERFACE_INFO
+
+        signals = {
+            signal.name: "".join(arg.signature for arg in signal.args)
+            for signal in INTERFACE_INFO.signals
+        }
+        self.assertEqual(signals, {
+            "OverlayState": "bsasasidsbbb",
+            "OverlayDetails": "s",
+            "CalibrationProgress": "s",
+        })
+        methods = {
+            method.name: (
+                "".join(arg.signature for arg in method.in_args),
+                "".join(arg.signature for arg in method.out_args),
+            )
+            for method in INTERFACE_INFO.methods
+        }
+        self.assertEqual(methods, {
+            "SetActiveApplication": ("s", ""),
+            "GetStatus": ("", "a{sv}"),
+            "GetOverlayDetails": ("", "s"),
+            "ReloadConfig": ("", "b"),
+            "StartCalibration": ("", "b"),
+            "CancelCalibration": ("", "b"),
+        })
+
+    def test_status_keeps_variant_types(self):
+        self.service._status_provider = lambda: {
+            "enabled": True,
+            "layout": "proartp16",
+            "touchpad_max_x": 4010,
+            "huge": 2**70,
+            "ratio": 0.5,
+            "nan": float("nan"),
+            "none": None,
+        }
+        status = self.service._get_status()
+        self.assertEqual(
+            {key: value.get_type_string() for key, value in status.items()},
+            {"enabled": "b", "layout": "s", "touchpad_max_x": "x", "huge": "x", "ratio": "d"},
+        )
+        self.assertEqual(status["huge"].unpack(), 2**63 - 1)
 
     def test_progress_mode_is_not_sticky(self):
         self.service.emit_overlay_state({"enabled": True})
@@ -62,7 +108,7 @@ class OverlayStateTest(unittest.TestCase):
             "titles": ["A", None],
             "touching": 1,
         })
-        self.assertEqual(int(values[4]), 42)
+        self.assertEqual(values[4], 42)
         self.assertEqual(str(values[1]), "")
         self.assertEqual([str(item) for item in values[2]], ["A", ""])
         self.assertTrue(bool(values[9]))
