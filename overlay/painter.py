@@ -13,6 +13,7 @@ import cairo
 
 from config.labels import icon_for_title
 from config.skins import parse_color
+from overlay import look
 
 DIAL_D = 360
 DIAL_R = DIAL_D / 2
@@ -63,6 +64,10 @@ class DialView:
     @property
     def count(self):
         return max(len(self.titles), 4)
+
+    def color_at(self, index):
+        """Colour of the function at a menu position."""
+        return self.color_of(self.titles[index])
 
     def color_of(self, title):
         if title in self.titles:
@@ -285,7 +290,7 @@ def _bubbles(cr, view):
             cr.set_source_rgba(*palette["freeSlot"])
             cr.fill()
             continue
-        color = view.color_of(label)
+        color = view.color_at(index)
         if active:
             _wedge(cr, CENTER_R + 8, OUTER_R - 3, start + 0.06, end - 0.06)
             cr.set_source_rgba(color[0], color[1], color[2], 0.07)
@@ -317,14 +322,14 @@ def _bubbles(cr, view):
 def _segments(cr, view):
     palette = view.palette
     inner, outer = CENTER_R + 8, OUTER_R - 6
-    for _index, label, active, start, end, _mid in _slices(view):
+    for index, label, active, start, end, _mid in _slices(view):
         start, end = start + 0.02, end - 0.02
         _wedge(cr, inner, outer, start, end)
         if not label:
             cr.set_source_rgba(*palette["freeSlot"])
             cr.fill()
             continue
-        color = view.color_of(label)
+        color = view.color_at(index)
         cr.set_source_rgba(*(color if active else palette["segment"]))
         cr.fill()
         if not active:
@@ -440,5 +445,307 @@ def _text(cr, text, y, size, color, bold):
     extents = cr.text_extents(text)
     cr.move_to(DIAL_R - extents.width / 2 - extents.x_bearing, y + extents.height / 2)
     cr.set_source_rgba(*color)
+    cr.show_text(text)
+    cr.restore()
+
+
+# --- the live dial ------------------------------------------------------------
+#
+# Twins of paintBackground(), paintContent() and paintPointer() in dial.js,
+# for frontends outside GNOME Shell (overlay/layer_shell.py). They take a
+# dial.js view (see overlay/look.py) and paint at the dial's top left corner
+# in logical pixels, scaled by appearance["scale"], so they match the Shell;
+# tests/layer_shell_in_container.sh compares them with dial.js on screen.
+
+CENTER_EXTENT = CENTER_R + 12
+GAUGE_STEPS = 24
+HINT_W = 300
+
+
+class _LiveMenu:
+    """A dial.js view in the shape _surface(), _bubbles() and _segments() read."""
+
+    def __init__(self, view):
+        state = view["state"]
+        segments = look.segment_state(state)
+        self.skin = view["skin"]
+        self.palette = self.skin["palette"]
+        self.titles = segments["titles"]
+        self.count = segments["count"]
+        self.title = "" if state["title"] == "Menu" else state["title"]
+        self.pointer = None
+        self._view = view
+
+    def color_at(self, index):
+        return look.segment_color(self._view, index)
+
+
+def paint_background(cr, view):
+    """Shadow, disc and rim: they change only with the skin and the scale."""
+    cr.save()
+    cr.scale(view["appearance"]["scale"], view["appearance"]["scale"])
+    _surface(cr, _LiveMenu(view))
+    cr.restore()
+
+
+def paint_content(cr, view, cache=None, draw_icon=None):
+    """Menu or gauge, centre, hints and the icons (actors in the Shell).
+
+    cache: a dict kept between calls; it holds the centre disc as an image.
+    """
+    scale = view["appearance"]["scale"]
+    cr.save()
+    cr.scale(scale, scale)
+    if look.is_selected_mode(view["state"]):
+        _live_gauge(cr, view)
+    else:
+        cr.save()
+        menu = _LiveMenu(view)
+        if view["skin"]["menu"] == "segments":
+            _segments(cr, menu)
+        else:
+            _bubbles(cr, menu)
+        cr.restore()
+    _live_center(cr, view, cache)
+    _hints(cr, view)
+    cr.restore()
+    cr.new_path()
+    if draw_icon is not None:
+        layout = look.icon_layout(view)
+        icons = layout["menu"] if layout["menuVisible"] else []
+        if layout["center"]:
+            icons = [*icons, layout["center"]]
+        for icon in icons:
+            name = look.icon_source(icon["title"], icon["configured"])
+            draw_icon(cr, name, icon["x"], icon["y"], icon["size"], icon["color"])
+
+
+def paint_pointer(cr, view, color):
+    """The finger dot centred in a POINTER_SIZE square (scaled)."""
+    cr.save()
+    cr.scale(view["appearance"]["scale"], view["appearance"]["scale"])
+    _draw_pointer(cr, view["skin"]["palette"], look.POINTER_GLOW_R, look.POINTER_GLOW_R, color)
+    cr.restore()
+
+
+def paint_live_dial(cr, view, draw_icon=None):
+    """All layers at once as the Shell shows them (paintDial() and the icon
+    actors); nothing while the dial is off."""
+    if not view["state"]["enabled"]:
+        return
+    paint_background(cr, view)
+    paint_content(cr, view, None, draw_icon)
+    pointer = look.pointer_placement(view)
+    if pointer:
+        scale = view["appearance"]["scale"]
+        cr.save()
+        cr.scale(scale, scale)
+        _draw_pointer(cr, view["skin"]["palette"], pointer["x"], pointer["y"], pointer["color"])
+        cr.restore()
+
+
+def _draw_pointer(cr, palette, x, y, color):
+    cr.save()
+    cr.new_path()
+    glow = cairo.RadialGradient(x, y, 2, x, y, look.POINTER_GLOW_R)
+    glow.add_color_stop_rgba(0, color[0], color[1], color[2], 0.55)
+    glow.add_color_stop_rgba(1, color[0], color[1], color[2], 0)
+    cr.arc(x, y, look.POINTER_GLOW_R, 0, 2 * math.pi)
+    cr.set_source(glow)
+    cr.fill()
+    cr.arc(x, y, 5.5, 0, 2 * math.pi)
+    cr.set_source_rgba(*palette["pointer"])
+    cr.fill()
+    cr.restore()
+
+
+def _live_gauge(cr, view):
+    state = view["state"]
+    palette = view["skin"]["palette"]
+    color = look.function_color(view)
+    number = look.js_number(state["value"])
+    value = number if math.isfinite(number) else None
+    level = not state["valueShowOnlyProgress"] and state["unit"] == "%" and value is not None
+    cr.save()
+    cr.new_path()
+    cr.set_line_cap(cairo.LINE_CAP_ROUND)
+    cr.set_line_width(GAUGE_W)
+    if level:
+        # Level functions (volume, brightness…) get a knob-style scale.
+        cr.set_source_rgba(*palette["track"])
+        cr.arc(DIAL_R, DIAL_R, GAUGE_R, GAUGE_START, GAUGE_START + GAUGE_SWEEP)
+        cr.stroke()
+        fraction = max(0, min(1, value / 100))
+        if fraction > 0.005:
+            cr.set_source_rgba(*color)
+            cr.arc(DIAL_R, DIAL_R, GAUGE_R, GAUGE_START, GAUGE_START + fraction * GAUGE_SWEEP)
+            cr.stroke()
+    else:
+        # Endless functions show detents, like the notches of a wheel.
+        cr.set_source_rgba(*palette["track"])
+        cr.arc(DIAL_R, DIAL_R, GAUGE_R, 0, 2 * math.pi)
+        cr.stroke()
+        cr.set_line_width(2)
+        for index in range(GAUGE_STEPS):
+            angle = index / GAUGE_STEPS * 2 * math.pi
+            cr.move_to(DIAL_R + math.cos(angle) * (GAUGE_R - 3), DIAL_R + math.sin(angle) * (GAUGE_R - 3))
+            cr.line_to(DIAL_R + math.cos(angle) * (GAUGE_R + 3), DIAL_R + math.sin(angle) * (GAUGE_R + 3))
+        cr.set_source_rgba(*palette["detent"])
+        cr.stroke()
+    if state["valueShowOnlyProgress"] and value is not None:
+        # Progress towards the next step of slow functions (Undo…).
+        fraction = max(-1, min(1, value / 100))
+        if abs(fraction) >= 0.01:
+            start = math.radians(look.js_number(state["valueAngleStart"])) - math.pi / 2
+            cr.set_line_width(GAUGE_W)
+            cr.set_source_rgba(*color)
+            if fraction > 0:
+                cr.arc(DIAL_R, DIAL_R, GAUGE_R, start, start + fraction * 2 * math.pi)
+            else:
+                cr.arc_negative(DIAL_R, DIAL_R, GAUGE_R, start, start + fraction * 2 * math.pi)
+            cr.stroke()
+    cr.restore()
+
+
+def _center_disc(cr, palette, cx, cy):
+    _radial(cr, cx, cy + 2, CENTER_R - 4, CENTER_R + 10, palette["shadow"] * 0.75)
+    gradient = cairo.LinearGradient(cx, cy - CENTER_R, cx, cy + CENTER_R)
+    gradient.add_color_stop_rgba(0, *palette["centerTop"])
+    gradient.add_color_stop_rgba(1, *palette["centerBottom"])
+    cr.arc(cx, cy, CENTER_R, 0, 2 * math.pi)
+    cr.set_source(gradient)
+    cr.fill()
+
+
+def _cached_center_disc(cr, palette, cache):
+    """The disc, the most expensive part, copied from an image made once per
+    skin and pixel density."""
+    pixel_scale = cr.user_to_device_distance(1, 0)[0] * cr.get_target().get_device_scale()[0]
+    key = (pixel_scale, palette["shadow"], tuple(palette["centerTop"]), tuple(palette["centerBottom"]))
+    if cache.get("center_key") != key:
+        pixels = math.ceil(2 * CENTER_EXTENT * pixel_scale)
+        image = cairo.ImageSurface(cairo.FORMAT_ARGB32, pixels, pixels)
+        image.set_device_scale(pixel_scale, pixel_scale)
+        _center_disc(cairo.Context(image), palette, CENTER_EXTENT, CENTER_EXTENT)
+        cache["center_image"] = image
+        cache["center_key"] = key
+    cr.save()
+    cr.set_source_surface(cache["center_image"], DIAL_R - CENTER_EXTENT, DIAL_R - CENTER_EXTENT)
+    cr.rectangle(DIAL_R - CENTER_EXTENT, DIAL_R - CENTER_EXTENT, 2 * CENTER_EXTENT, 2 * CENTER_EXTENT)
+    cr.fill()
+    cr.restore()
+
+
+def _live_center(cr, view, cache):
+    state, details = view["state"], view["details"]
+    palette = view["skin"]["palette"]
+    selected = look.is_selected_mode(state)
+    accent = look.function_color(view) if selected else view["accent"]
+    cr.save()
+    cr.new_path()
+    if cache is not None:
+        _cached_center_disc(cr, palette, cache)
+    else:
+        _center_disc(cr, palette, DIAL_R, DIAL_R)
+    cr.arc(DIAL_R, DIAL_R, CENTER_R - 0.5, 0, 2 * math.pi)
+    cr.set_line_width(2.5 if state["centerPressed"] else 1)
+    cr.set_source_rgba(*(accent if state["centerPressed"] else palette["rim"]))
+    cr.stroke()
+
+    title = state["title"]
+    profile = (details.get("profile") or "").upper()
+    if selected:
+        value = ""
+        if not state["valueShowOnlyProgress"] and state["unit"]:
+            value = f"{look.format_value(state['value'])}{state['unit']}"
+        _text(cr, _truncate(title, 14), DIAL_R + 2, 13 if len(title) > 10 else 16, palette["text"], True)
+        if value:
+            _text(cr, value, DIAL_R + 27, 18, accent, True)
+        elif profile:
+            _text(cr, _truncate(profile, 16), DIAL_R + 26, 8.5, palette["muted"], False)
+    elif title and title != "Menu":
+        _text(cr, _truncate(title, 14), DIAL_R + 10, 13 if len(title) > 10 else 16, palette["text"], True)
+        _text(cr, "Release to select", DIAL_R + 32, 8.5, palette["muted"], False)
+    else:
+        _text(cr, _truncate(profile or "DIAL", 14), DIAL_R - 8, 11 if len(profile) > 10 else 13, palette["text"], True)
+        _text(cr, "Choose a function", DIAL_R + 14, 9, palette["muted"], False)
+    cr.restore()
+
+
+def _hints(cr, view):
+    """The bar below the disc: what turning and the centre do."""
+    if not view["appearance"].get("show_hints") or not look.is_selected_mode(view["state"]):
+        return
+    palette = view["skin"]["palette"]
+    hints = view["details"].get("hints")
+    hints = hints if isinstance(hints, dict) else {}
+    multi = view["details"].get("mode") != "single"
+    ccw = _truncate(hints.get("ccw"), 20)
+    cw = _truncate(hints.get("cw"), 20)
+    center = ""
+    if hints.get("center"):
+        action = _truncate(hints["center"], 26)
+        center = f"Tap: {action}  ·  Hold: menu" if multi else f"Tap: {action}"
+    elif multi:
+        center = "Tap centre: menu"
+    if not ccw and not cw and not center:
+        return
+    height = 40 if center else 24
+    # The bar is centred in the HINT_H strip below the disc.
+    top = DIAL_D + 2
+    left, right = DIAL_R - HINT_W / 2, DIAL_R + HINT_W / 2
+    cr.save()
+    cr.new_path()
+    _rounded_rect(cr, left, top, HINT_W, height, 12)
+    cr.set_source_rgba(*palette["surfaceBottom"])
+    cr.fill_preserve()
+    cr.set_line_width(1)
+    cr.set_source_rgba(*palette["rim"])
+    cr.stroke()
+    arrow = look.function_color(view)
+    if ccw:
+        _turn_arrow(cr, left + 18, top + 12, False, arrow)
+        _aligned_text(cr, ccw, left + 30, top + 12, 11, palette["text"], "left")
+    if cw:
+        _turn_arrow(cr, right - 18, top + 12, True, arrow)
+        _aligned_text(cr, cw, right - 30, top + 12, 11, palette["text"], "right")
+    if center:
+        _text(cr, center, top + 29, 9, palette["muted"], False)
+    cr.restore()
+
+
+def _turn_arrow(cr, x, y, clockwise, color):
+    """Drawn instead of ↺/↻, which the Cairo toy font cannot render."""
+    radius = 5.5
+    start = -math.pi * 0.85 if clockwise else -math.pi * 0.15
+    end = math.pi * 0.45 if clockwise else math.pi * 0.55
+    cr.save()
+    cr.new_path()
+    cr.set_line_width(1.6)
+    cr.set_line_cap(cairo.LINE_CAP_ROUND)
+    cr.set_source_rgba(*color)
+    if clockwise:
+        cr.arc(x, y, radius, start, end)
+    else:
+        cr.arc_negative(x, y, radius, start, end)
+    cr.stroke()
+    tip_x, tip_y = x + math.cos(end) * radius, y + math.sin(end) * radius
+    tangent = end + (math.pi / 2 if clockwise else -math.pi / 2)
+    for spread in (0.5, -0.5):
+        angle = tangent + math.pi + spread
+        cr.move_to(tip_x, tip_y)
+        cr.line_to(tip_x + math.cos(angle) * 4, tip_y + math.sin(angle) * 4)
+    cr.stroke()
+    cr.restore()
+
+
+def _aligned_text(cr, text, x, y, size, color, align):
+    cr.save()
+    cr.set_source_rgba(*color)
+    cr.select_font_face(FONT, 0, 0)
+    cr.set_font_size(size)
+    extents = cr.text_extents(text)
+    left = x - extents.width - extents.x_bearing if align == "right" else x - extents.x_bearing
+    cr.move_to(left, y + extents.height / 2)
     cr.show_text(text)
     cr.restore()
