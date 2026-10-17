@@ -25,40 +25,14 @@ try:
 
     gi.require_version("Rsvg", "2.0")
     from gi.repository import Rsvg
-    from PIL import Image
+    import PIL  # noqa: F401
 except (ImportError, ValueError):
     cairo = None
 
-from config.skins import builtin_skins, resolve_skin  # noqa: E402
-from dial_cases import CASES  # noqa: E402
+from dial_cases import CASES, MIN_PIXELS, case_view, changed_pixels, reference_cases  # noqa: E402
 from overlay import look  # noqa: E402
 
-TOLERANCE = 12
-MIN_PIXELS = 25
 ICON_THEMES = ["/usr/share/icons/Adwaita", "/usr/share/icons/AdwaitaLegacy", "/usr/share/icons/hicolor"]
-
-
-def case_view(case):
-    """The view the dial builds from a case's signals and config."""
-    appearance = look.load_appearance(case["overlay"])
-    state, details = look.new_state(), look.new_details()
-    look.apply_overlay_state(state, case["signal"])
-    look.merge_details(details, json.dumps(case["details"]))
-    skin = resolve_skin(builtin_skins(), look.skin_id(appearance, True))
-    return look.make_view(state, details, appearance, skin)
-
-
-def reference_cases():
-    """The cases as render_dial_reference.js reads them."""
-    entries = []
-    for case in CASES:
-        view = case_view(case)
-        entries.append({
-            "name": case["name"], "skin": look.skin_id(view["appearance"], True),
-            "accent": view["appearance"]["accent"], "appearance": view["appearance"],
-            "state": view["state"], "details": view["details"],
-        })
-    return entries
 
 
 def find_icon(name, cache={}):
@@ -109,14 +83,6 @@ def paint_python(view, path, pixel_scale=1):
     cr.scale(pixel_scale, pixel_scale)
     paint_live_dial(cr, view, draw_icon)
     surface.write_to_png(str(path))
-
-
-def changed_pixels(first, second):
-    """Pixels whose largest channel (alpha included) differs by more than TOLERANCE."""
-    a, b = Image.open(first).convert("RGBA"), Image.open(second).convert("RGBA")
-    if a.size != b.size:
-        return None
-    return sum(1 for p, q in zip(a.getdata(), b.getdata()) if max(abs(x - y) for x, y in zip(p, q)) > TOLERANCE)
 
 
 @unittest.skipUnless(shutil.which("gjs") and cairo is not None, "needs gjs, pycairo, Rsvg and Pillow")
