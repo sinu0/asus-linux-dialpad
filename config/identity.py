@@ -20,6 +20,9 @@ ISSUES_URL = f"{REPOSITORY_URL}/issues"
 # Twin: install_paths.sh.
 SLUG = "asus-turnpad"
 
+# The driver's systemd user unit. Twin: install_paths.sh.
+DRIVER_SERVICE = f"{SLUG}.service"
+
 # Settings app (GApplication id, launcher and icon name).
 # Twins: config_app/<APP_ID>.desktop, install_paths.sh.
 APP_ID = "io.github.sinu0.AsusTurnpad"

@@ -54,6 +54,10 @@ INTERFACE_XML = f"""<node>
     <method name="StartCalibration">
       <arg direction="out" type="b"/>
     </method>
+    <!-- Switch the dial on or off, as holding the corner icon does. -->
+    <method name="Toggle">
+      <arg direction="out" type="b"/>
+    </method>
     <signal name="OverlayState">
       <arg type="b" name="enabled"/>
       <arg type="s" name="title"/>
@@ -92,6 +96,7 @@ _BOOL_METHODS = {
     "CancelCalibration": "_on_cancel_calibration",
     "ReloadConfig": "_on_reload_config",
     "StartCalibration": "_on_start_calibration",
+    "Toggle": "_on_toggle",
 }
 
 LOG = logging.getLogger(__name__)
@@ -107,8 +112,10 @@ class DialPadDBusService:
         on_start_calibration: Callable[[], Any],
         status_provider: Callable[[], Mapping[str, Any]],
         on_cancel_calibration: Callable[[], Any] | None = None,
+        on_toggle: Callable[[], Any] | None = None,
     ) -> None:
         self._on_cancel_calibration = on_cancel_calibration
+        self._on_toggle = on_toggle
         self._on_active_application = on_active_application
         self._on_reload_config = on_reload_config
         self._on_start_calibration = on_start_calibration

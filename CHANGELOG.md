@@ -24,6 +24,7 @@
 - Every application pack comes in a basic variant (a short menu) and an advanced one (more functions in groups, ordered by the stages of the work, with the dial kept out of the way: a small label for brush controls, fading for the view, the top of the screen for timelines); the app asks which when it adds a profile. New Files pack; the library got play/pause, microphone, overview, pages, up/down, copy, cut, paste, select all, find, save and full screen, and ready groups (Clipboard, Media controls, System, Navigation, Documents)
 - Groups: a function of the radial menu can be a group whose functions open as a straight list beside the dial (turn to move, tap the centre to choose, hold to go back one level); the library has an *Apps* group with every launcher, the settings app edits a group with a live preview, and groups work in profile import, export and the AI prompt
 - Guided calibration asks to keep or revert the measured geometry (it is live meanwhile, so the dial can be tried); the Calibration page can reset the geometry to the layout's values
+- DialPad emulation for touchpads without a DialPad (*Driver → Emulate the DialPad*): any touchpad, no commands to its hardware; while on, the whole touchpad is the dial and the pointer stands still; switched by holding the top-right corner or with the new D-Bus method `Toggle` (a keyboard shortcut); `install.sh` no longer stops on such touchpads
 
 ### Removed
 

@@ -60,6 +60,7 @@ class OverlayStateTest(unittest.TestCase):
             "ReloadConfig": ("", "b"),
             "StartCalibration": ("", "b"),
             "CancelCalibration": ("", "b"),
+            "Toggle": ("", "b"),
         })
 
     def test_status_keeps_variant_types(self):
