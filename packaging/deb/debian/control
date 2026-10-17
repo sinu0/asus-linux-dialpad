@@ -1,7 +1,7 @@
 Source: asus-turnpad
 Section: utils
 Priority: optional
-Maintainer: Mariusz Pacek <sinu0@users.noreply.github.com>
+Maintainer: Mariusz Pacek <1923291+sinu0@users.noreply.github.com>
 Build-Depends: debhelper-compat (= 13), dh-python, python3
 Standards-Version: 4.7.0
 Homepage: https://github.com/sinu0/asus-turnpad
