@@ -284,9 +284,15 @@ ICON_CHOICES = (
 )
 
 
+# A group opens a list of functions; without an icon of its own it shows a list.
+GROUP_ICON = "view-list-bullet-symbolic"
+
+
 def segment_icon(segment) -> str:
     """The icon a function shows: its own, else one matching its name."""
-    return segment.icon_url or icon_for_title(segment.title)
+    if segment.icon_url:
+        return segment.icon_url
+    return GROUP_ICON if getattr(segment, "is_group", False) else icon_for_title(segment.title)
 
 
 def icon_for_title(title: str) -> str:

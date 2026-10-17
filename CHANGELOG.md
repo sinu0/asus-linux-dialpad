@@ -20,6 +20,7 @@
 - On-screen dial position and visibility for all apps, per profile and per function: a custom place on the screen, fading while turning (to a chosen opacity) or a small label instead of the dial
 - Arch package (`bash packaging/arch/build.sh` + `asus-turnpad-setup`): system Python libraries instead of a pip environment, layout picked when the driver starts (`auto`), tested in CI; `INSTALL.md` explains both ways to install
 - `install.sh` is tested on Fedora and Ubuntu in CI; it now installs the libraries the settings app and the pip builds need there, stops when pip fails instead of reporting success, and warns when Libadwaita is too old for the settings app
+- Groups: a function of the radial menu can be a group whose functions open as a straight list beside the dial (turn to move, tap the centre to choose, hold to go back one level); the library has an *Apps* group with every launcher, the settings app edits a group with a live preview, and groups work in profile import, export and the AI prompt
 - Guided calibration asks to keep or revert the measured geometry (it is live meanwhile, so the dial can be tried); the Calibration page can reset the geometry to the layout's values
 
 ### Removed

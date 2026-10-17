@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from config.labels import describe_macro
+from config.labels import GROUP_ICON, describe_macro
 from config.presets import segment_color
 from config.schema import DialPadConfig, MacroStep, Profile, Segment, _default_config
 
@@ -44,6 +44,25 @@ def _legacy_segment(segment: Segment, index: int = 0) -> dict:
     return result
 
 
+def _legacy_group(group: Segment, index: int) -> dict:
+    """A group: no actions of its own, its enabled functions in list order."""
+    result = {
+        "icon": group.icon_url or GROUP_ICON,
+        "clockwise": [],
+        "counterclockwise": [],
+        "center": [],
+        "color": segment_color(group, index),
+        "hints": {},
+        "items": {
+            item.title: _legacy_segment(item, position)
+            for position, item in enumerate(group.active_items())
+        },
+    }
+    if group.overlay:
+        result["overlay"] = dict(group.overlay)
+    return result
+
+
 def _profile_meta(profile: Profile) -> dict:
     return {
         "name": profile.name,
@@ -56,12 +75,16 @@ def _profile_meta(profile: Profile) -> dict:
 
 
 def _profile_shortcuts(profile: Profile) -> dict | None:
-    segments = profile.active_segments()
+    # A group without functions to open has no place on the dial.
+    segments = [
+        segment for segment in profile.active_segments()
+        if not segment.is_group or segment.active_items()
+    ]
     if not segments:
         return None
     meta = _profile_meta(profile)
 
-    if profile.mode == "single":
+    if profile.mode == "single" and profile.single_segment() is not None:
         # Single-function mode uses the driver's original flat layout: the
         # dial is permanently bound to one function, the centre runs its tap
         # action.
@@ -86,7 +109,7 @@ def _profile_shortcuts(profile: Profile) -> dict | None:
         META_KEY: meta,
         "center": [],
         **{
-            segment.title: _legacy_segment(segment, index)
+            segment.title: _legacy_group(segment, index) if segment.is_group else _legacy_segment(segment, index)
             for index, segment in enumerate(segments)
         },
     }

@@ -33,6 +33,7 @@ from config.labels import (
     order_keys,
     parse_keys,
     segment_icon,
+    GROUP_ICON,
 )
 from config.presets import (
     FUNCTION_LIBRARY,
@@ -84,7 +85,17 @@ from config.skins import (
 from config_app.outline_editor import PRESETS, OutlineEditor
 from desktop.color_scheme import ColorScheme
 from overlay.gtk_icons import draw_icon
-from overlay.painter import DialView, hit_function, paint_dial
+from overlay.painter import (
+    LIST_MARGIN,
+    PAINTED_D,
+    DIAL_R,
+    DialView,
+    hit_function,
+    open_submenu,
+    paint_dial,
+    paint_submenu,
+    submenu_size,
+)
 
 
 STYLE_FILE = Path(__file__).with_name("style.css")
@@ -490,8 +501,10 @@ class Application(Adw.Application):
         return image
 
     @staticmethod
-    def _unique_title(profile, title, ignore=None):
-        existing = {segment.title for segment in profile.segments if segment is not ignore}
+    def _unique_title(profile, title, ignore=None, group=None):
+        """A title no other function of the menu (or of the group) has."""
+        siblings = group.items if group is not None else profile.segments
+        existing = {segment.title for segment in siblings if segment is not ignore}
         if title not in existing:
             return title
         index = 2
@@ -1034,9 +1047,9 @@ class Application(Adw.Application):
         )
         group.add(mode)
 
-        active = profile.active_segments()
-        if profile.mode == "single" and active:
-            titles = [segment.title for segment in active]
+        # The dial can be bound to a function, not to a group.
+        titles = [segment.title for segment in profile.active_segments() if not segment.is_group]
+        if profile.mode == "single" and titles:
             selected = profile.single_segment()
             group.add(_combo_row(
                 "Bound function",
@@ -1121,9 +1134,15 @@ class Application(Adw.Application):
             group.add(self._function_row(profile, segment, index, last))
         return group
 
-    def _function_row(self, profile, segment, index, last):
+    def _function_row(self, profile, segment, index, last, group=None, refresh=None):
+        """A function of the menu, or of group (refresh then redraws the
+        group's editor after a change)."""
         row = Adw.ActionRow(title=GLib.markup_escape_text(segment.title))
         parts = []
+        if segment.is_group:
+            titles = [item.title for item in segment.active_items()]
+            count = f"Group of {len(titles)} function{'s' if len(titles) != 1 else ''}"
+            parts.append(f"{count}: {', '.join(titles)}" if titles else "Empty group: add functions to it")
         ccw, cw, tap = (describe_macro(segment.macro_ccw), describe_macro(segment.macro_cw),
                         describe_macro(segment.macro_center))
         if ccw or cw:
@@ -1138,22 +1157,26 @@ class Application(Adw.Application):
         if not segment.enabled:
             row.add_css_class("dim-label")
         row.set_activatable(True)
-        row.connect("activated", lambda _row: self._show_function_editor(profile, segment))
+        row.connect("activated", lambda _row: self._show_function_editor(profile, segment, group, refresh))
 
-        up = _icon_button("go-up-symbolic", "Move earlier on the dial", lambda: self._move_segment(profile, segment, -1))
+        up = _icon_button("go-up-symbolic", "Move earlier on the dial" if group is None else "Move up the list",
+                          lambda: self._move_segment(profile, segment, -1, group, refresh))
         up.set_sensitive(index > 0)
         row.add_suffix(up)
-        down = _icon_button("go-down-symbolic", "Move later on the dial", lambda: self._move_segment(profile, segment, 1))
+        down = _icon_button("go-down-symbolic", "Move later on the dial" if group is None else "Move down the list",
+                            lambda: self._move_segment(profile, segment, 1, group, refresh))
         down.set_sensitive(index < last)
         row.add_suffix(down)
 
         toggle = Gtk.Switch()
         toggle.set_valign(Gtk.Align.CENTER)
         toggle.set_active(segment.enabled)
-        toggle.set_tooltip_text("Show this function on the dial")
-        toggle.connect("notify::active", lambda switch, _param: self._set_segment_enabled(segment, switch.get_active()))
+        toggle.set_tooltip_text("Show this function on the dial" if group is None else "Show this function in the list")
+        toggle.connect("notify::active",
+                       lambda switch, _param: self._set_segment_enabled(segment, switch.get_active(), refresh))
         row.add_suffix(toggle)
-        row.add_suffix(_icon_button("user-trash-symbolic", "Remove function", lambda: self._remove_segment(profile, segment), "error"))
+        row.add_suffix(_icon_button("user-trash-symbolic", "Remove function",
+                                    lambda: self._remove_segment(profile, segment, group, refresh), "error"))
         return row
 
     def _set_profile_mode(self, profile, index):
@@ -1172,24 +1195,37 @@ class Application(Adw.Application):
             setattr(profile, attribute, value)
             self._changed(rebuild=False)
 
-    def _set_segment_enabled(self, segment, enabled):
+    def _set_segment_enabled(self, segment, enabled, refresh=None):
         if segment.enabled != enabled:
             segment.enabled = enabled
-            GLib.idle_add(lambda: self._changed() and False)
 
-    def _move_segment(self, profile, segment, offset):
-        index = profile.segments.index(segment)
+            def changed():
+                self._changed()
+                if refresh is not None:
+                    refresh()
+                return False
+
+            GLib.idle_add(changed)
+
+    def _move_segment(self, profile, segment, offset, group=None, refresh=None):
+        siblings = group.items if group is not None else profile.segments
+        index = siblings.index(segment)
         target = index + offset
-        if 0 <= target < len(profile.segments):
-            profile.segments[index], profile.segments[target] = profile.segments[target], segment
+        if 0 <= target < len(siblings):
+            siblings[index], siblings[target] = siblings[target], segment
             self._changed()
+            if refresh is not None:
+                refresh()
 
-    def _remove_segment(self, profile, segment):
-        if segment in profile.segments:
-            profile.segments.remove(segment)
-            if profile.single_function == segment.title:
+    def _remove_segment(self, profile, segment, group=None, refresh=None):
+        siblings = group.items if group is not None else profile.segments
+        if segment in siblings:
+            siblings.remove(segment)
+            if group is None and profile.single_function == segment.title:
                 profile.single_function = None
             self._changed()
+            if refresh is not None:
+                refresh()
             self._toast(f"Removed “{segment.title}”")
 
     def _apply_pack(self, profile, pack):
@@ -1202,10 +1238,11 @@ class Application(Adw.Application):
     def _preview_segments(self, profile):
         if profile is None:
             return []
-        if profile.mode == "single":
+        if profile.mode == "single" and profile.single_segment() is not None:
             segment = profile.single_segment()
             return [segment] if segment else []
-        return profile.active_segments()
+        # As on the dial: a group without functions to open is left out.
+        return [segment for segment in profile.active_segments() if not segment.is_group or segment.active_items()]
 
     def _watch_system_style(self):
         self._color_scheme = ColorScheme()
@@ -1228,9 +1265,9 @@ class Application(Adw.Application):
             return None
         titles = [segment.title for segment in segments]
         colors = [segment_color(segment, index) for index, segment in enumerate(segments)]
-        icons = [segment.icon_url or "" for segment in segments]
+        icons = [segment_icon(segment) if segment.is_group else segment.icon_url or "" for segment in segments]
         accent = self.config.overlay.accent or DEFAULT_ACCENT
-        if profile.mode == "single" and segments:
+        if profile.mode == "single" and segments and not segments[0].is_group:
             segment = segments[0]
             return DialView(
                 self._skin(), titles, colors, accent, icons, title=segment.title, selected=True,
@@ -1268,10 +1305,56 @@ class Application(Adw.Application):
             self._dial_preview.queue_draw()
             self._show_function_editor(profile, segments[index])
 
+    def _draw_group_preview(self, profile, group, cr, width, height):
+        """The dial with the group's list open beside it, as on screen."""
+        segments = [
+            segment for segment in profile.active_segments()
+            if segment is group or not segment.is_group or segment.active_items()
+        ]
+        items = group.active_items()
+        submenu = {
+            "title": group.title,
+            "items": [item.title for item in items],
+            "icons": [segment_icon(item) for item in items],
+            "colors": [segment_color(item, index) for index, item in enumerate(items)],
+            "selected": 0,
+        } if items else None
+        view = DialView(
+            self._skin(),
+            [segment.title for segment in segments],
+            [segment_color(segment, index) for index, segment in enumerate(segments)],
+            self.config.overlay.accent or DEFAULT_ACCENT,
+            [segment_icon(segment) if segment.is_group else segment.icon_url or "" for segment in segments],
+            title=items[0].title if items else group.title,
+            submenu=submenu,
+        )
+        size = height
+        scale = size / PAINTED_D
+        opened = open_submenu(view)
+        if opened is None:
+            paint_dial(cr, view, (width - size) / 2, 0, size, draw_icon=draw_icon)
+            return
+        list_width, list_height = submenu_size(len(items))
+        # The list starts at the edge of the dial's box, as in dial.js.
+        reach = (DIAL_R - LIST_MARGIN + list_width) * scale
+        total = size / 2 + reach
+        left = (width - total) / 2
+        list_y = (height - list_height * scale) / 2
+        if opened.prefer_right:
+            paint_dial(cr, view, left, 0, size, draw_icon=draw_icon)
+            paint_submenu(cr, view, left + size / 2 + (DIAL_R - LIST_MARGIN) * scale, list_y, scale, "right",
+                          draw_icon=draw_icon)
+        else:
+            paint_submenu(cr, view, left, list_y, scale, "left", draw_icon=draw_icon)
+            paint_dial(cr, view, left + total - size, 0, size, draw_icon=draw_icon)
+
     # --- function library -------------------------------------------------------
 
-    def _show_function_library(self, profile):
-        dialog = Adw.Dialog(title="Add a function", content_width=560, content_height=680)
+    def _show_function_library(self, profile, group=None, on_added=None):
+        """Functions to add to the menu, or to group's list (one level: no
+        groups in a group)."""
+        title = "Add a function" if group is None else f"Add to “{group.title}”"
+        dialog = Adw.Dialog(title=title, content_width=560, content_height=680)
         view = Adw.ToolbarView()
         header = Adw.HeaderBar()
         view.add_top_bar(header)
@@ -1288,22 +1371,58 @@ class Application(Adw.Application):
         groups = []
 
         def add(segment):
-            segment.title = self._unique_title(profile, segment.title)
-            profile.segments.append(segment)
-            self._preview_title = segment.title
+            segment.title = self._unique_title(profile, segment.title, group=group)
+            if group is None:
+                profile.segments.append(segment)
+                self._preview_title = segment.title
+            else:
+                group.items.append(segment)
             dialog.close()
             self._changed()
+            if on_added is not None:
+                on_added()
             self._toast(f"Added “{segment.title}”")
+            if segment.is_group:
+                # A new group is empty: open it to add its functions.
+                GLib.idle_add(lambda: self._show_function_editor(profile, segment) and False)
+
+        def move_here(segment):
+            profile.segments.remove(segment)
+            if profile.single_function == segment.title:
+                profile.single_function = None
+            segment.title = self._unique_title(profile, segment.title, group=group)
+            group.items.append(segment)
+            dialog.close()
+            self._changed()
+            if on_added is not None:
+                on_added()
+            self._toast(f"Moved “{segment.title}” into “{group.title}”")
 
         def rebuild():
-            for group in groups:
-                page.remove(group)
+            for section in groups:
+                page.remove(section)
             groups.clear()
             query = search.get_text().strip().lower()
 
             pack = pack_for_app(profile.app_id)
-            if pack is not None and not query:
-                group = Adw.PreferencesGroup(title="Pre-programmed")
+            movable = [segment for segment in profile.segments if not segment.is_group] if group is not None else []
+            if movable and not query:
+                section = Adw.PreferencesGroup(
+                    title="From the dial",
+                    description="Moves a function of the radial menu into this group.",
+                )
+                for segment in movable:
+                    row = Adw.ActionRow(title=GLib.markup_escape_text(segment.title))
+                    row.add_prefix(_icon_image(segment_icon(segment)))
+                    row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+                    row.set_activatable(True)
+                    row.connect("activated", lambda _row, segment=segment: move_here(segment))
+                    section.add(row)
+                page.add(section)
+                groups.append(section)
+
+            if pack is not None and not query and group is None:
+                section = Adw.PreferencesGroup(title="Pre-programmed")
                 row = Adw.ActionRow(
                     title=f"All {pack.name} functions",
                     subtitle=", ".join(segment.title for segment in pack.factory()),
@@ -1311,9 +1430,9 @@ class Application(Adw.Application):
                 row.add_prefix(Gtk.Image.new_from_icon_name("starred-symbolic"))
                 row.set_activatable(True)
                 row.connect("activated", lambda _row: (dialog.close(), self._apply_pack(profile, pack)))
-                group.add(row)
-                page.add(group)
-                groups.append(group)
+                section.add(row)
+                page.add(section)
+                groups.append(section)
 
             extras = []
             if profile.app_id == DARKTABLE_APP_ID:
@@ -1321,6 +1440,8 @@ class Application(Adw.Application):
             entries = [
                 (preset.category, preset.title, preset.icon_name, preset.description, preset.factory)
                 for preset in FUNCTION_LIBRARY
+                # One level: no group inside a group.
+                if group is None or not preset.factory().is_group
             ] + extras
             categories = list(LIBRARY_CATEGORIES) + (["Darktable"] if extras else [])
             for category in categories:
@@ -1332,25 +1453,34 @@ class Application(Adw.Application):
                 ]
                 if not rows:
                     continue
-                group = Adw.PreferencesGroup(title=category)
+                section = Adw.PreferencesGroup(title=category)
                 for _category, title, icon_name, description, factory in rows:
                     row = Adw.ActionRow(title=title, subtitle=description)
                     row.add_prefix(Gtk.Image.new_from_icon_name(icon_name))
                     row.add_suffix(Gtk.Image.new_from_icon_name("list-add-symbolic"))
                     row.set_activatable(True)
                     row.connect("activated", lambda _row, factory=factory: add(factory()))
-                    group.add(row)
-                page.add(group)
-                groups.append(group)
+                    section.add(row)
+                page.add(section)
+                groups.append(section)
 
-            group = Adw.PreferencesGroup(title="Custom")
+            section = Adw.PreferencesGroup(title="Custom")
             row = Adw.ActionRow(title="Blank function", subtitle="Assign your own shortcuts, scroll or commands")
             row.add_prefix(Gtk.Image.new_from_icon_name("document-new-symbolic"))
             row.set_activatable(True)
             row.connect("activated", lambda _row: add(Segment(title="Custom")))
-            group.add(row)
-            page.add(group)
-            groups.append(group)
+            section.add(row)
+            if group is None:
+                row = Adw.ActionRow(
+                    title="Group",
+                    subtitle="A folder on the dial: choosing it opens a list of more functions beside the dial",
+                )
+                row.add_prefix(Gtk.Image.new_from_icon_name(GROUP_ICON))
+                row.set_activatable(True)
+                row.connect("activated", lambda _row: add(Segment(title="Group", items=[])))
+                section.add(row)
+            page.add(section)
+            groups.append(section)
 
         search.connect("search-changed", lambda _entry: rebuild())
         rebuild()
@@ -1358,21 +1488,26 @@ class Application(Adw.Application):
 
     # --- function editor ----------------------------------------------------------
 
-    def _show_function_editor(self, profile, segment):
+    def _show_function_editor(self, profile, segment, group=None, on_close=None):
+        """Edit a function, a group (its functions instead of actions) or,
+        with group, a function in that group's list."""
         dialog = Adw.Dialog(title=segment.title, content_width=600, content_height=720)
         view = Adw.ToolbarView()
         view.add_top_bar(Adw.HeaderBar())
         page = Adw.PreferencesPage()
         view.set_content(page)
         dialog.set_child(view)
-        state = {"groups": []}
+        state = {"groups": [], "item_rows": []}
+        siblings = group.items if group is not None else profile.segments
 
         def changed(rebuild_lists=False):
             self._schedule_save()
             if rebuild_lists:
                 build_triggers()
+            if segment.is_group:
+                group_preview.queue_draw()
 
-        general = Adw.PreferencesGroup(title="Function")
+        general = Adw.PreferencesGroup(title="Group" if segment.is_group else "Function")
         name = Adw.EntryRow(title="Name")
         name.set_text(segment.title)
 
@@ -1380,8 +1515,8 @@ class Application(Adw.Application):
             text = entry.get_text().strip()
             if not text or text == segment.title:
                 return
-            unique = self._unique_title(profile, text, ignore=segment)
-            if profile.single_function == segment.title:
+            unique = self._unique_title(profile, text, ignore=segment, group=group)
+            if group is None and profile.single_function == segment.title:
                 profile.single_function = unique
             segment.title = unique
             dialog.set_title(unique)
@@ -1395,7 +1530,7 @@ class Application(Adw.Application):
         colour_button = Gtk.ColorDialogButton.new(Gtk.ColorDialog(with_alpha=False))
         colour_button.set_valign(Gtk.Align.CENTER)
         rgba = Gdk.RGBA()
-        position = profile.segments.index(segment) if segment in profile.segments else 0
+        position = siblings.index(segment) if segment in siblings else 0
         rgba.parse(segment_color(segment, position))
         colour_button.set_rgba(rgba)
 
@@ -1420,9 +1555,10 @@ class Application(Adw.Application):
         def show_icon():
             icon = segment_icon(segment)
             _set_icon_image(icon_preview, icon)
+            automatic = "Automatic: a list" if segment.is_group else "Automatic: matches the function name"
             icon_row.set_subtitle(
                 GLib.markup_escape_text(Path(icon).name if icon.startswith("/") else "Your choice")
-                if segment.icon_url else "Automatic: matches the function name"
+                if segment.icon_url else automatic
             )
 
         def choose_icon(icon):
@@ -1471,14 +1607,15 @@ class Application(Adw.Application):
         show_icon()
         general.add(icon_row)
 
-        general.add(_spin_row(
-            "Rotation step",
-            f"Degrees per action; 0 uses the global default ({self.config.gesture.default_threshold}°)",
-            segment.treshold or 0, 0, 360, 5, 0,
-            lambda value: (setattr(segment, "treshold", int(value) or None), changed()),
-        ))
+        if not segment.is_group:
+            general.add(_spin_row(
+                "Rotation step",
+                f"Degrees per action; 0 uses the global default ({self.config.gesture.default_threshold}°)",
+                segment.treshold or 0, 0, 360, 5, 0,
+                lambda value: (setattr(segment, "treshold", int(value) or None), changed()),
+            ))
         general.add(_switch_row(
-            "Show on the dial", None, segment.enabled,
+            "Show on the dial" if group is None else "Show in the list", None, segment.enabled,
             lambda active: (setattr(segment, "enabled", active), changed()),
         ))
 
@@ -1489,11 +1626,65 @@ class Application(Adw.Application):
                 segment.overlay[key] = value
             changed()
 
+        def inherited(key):
+            value = profile.overlay.get(key, getattr(self.config.overlay, key))
+            return group.overlay.get(key, value) if group is not None else value
+
         general.add(self._dial_look_expander(
-            "Where and how the dial shows while this function is selected",
-            segment.overlay.get, set_look, "As profile",
-            lambda key: profile.overlay.get(key, getattr(self.config.overlay, key)),
+            "Where and how the dial shows while this group's list is open or one of its functions is selected"
+            if segment.is_group else "Where and how the dial shows while this function is selected",
+            segment.overlay.get, set_look, "As group" if group is not None else "As profile", inherited,
         ))
+
+        if segment.is_group:
+            # The dial as it shows with this group's list open.
+            group_preview = Gtk.DrawingArea(content_height=230)
+            group_preview.set_margin_bottom(6)
+            group_preview.set_draw_func(lambda _area, cr, width, height:
+                                        self._draw_group_preview(profile, segment, cr, width, height))
+            preview_group = Adw.PreferencesGroup()
+            preview_group.add(group_preview)
+            page.add(preview_group)
+
+            items = Adw.PreferencesGroup(
+                title="Functions in the group",
+                description="Choosing the group on the dial opens them as a list beside it: turn to move the "
+                "highlight, tap the centre to choose, hold it to go back.",
+            )
+            add = Gtk.Button()
+            add.add_css_class("suggested-action")
+            add.set_child(Adw.ButtonContent(icon_name="list-add-symbolic", label="Add function"))
+            add.set_valign(Gtk.Align.CENTER)
+            add.connect("clicked", lambda _button: self._show_function_library(profile, segment, build_items))
+            items.set_header_suffix(add)
+
+            def build_items():
+                for row in state["item_rows"]:
+                    items.remove(row)
+                rows = [
+                    self._function_row(profile, item, index, len(segment.items) - 1, segment, build_items)
+                    for index, item in enumerate(segment.items)
+                ]
+                if not rows:
+                    empty = Adw.ActionRow(
+                        title="No functions yet",
+                        subtitle="Add functions from the library or move them here from the dial.",
+                    )
+                    empty.add_prefix(Gtk.Image.new_from_icon_name("dialog-information-symbolic"))
+                    rows.append(empty)
+                for row in rows:
+                    items.add(row)
+                state["item_rows"] = rows
+                group_preview.queue_draw()
+
+            build_items()
+            # The functions first: they are what a group is for.
+            page.add(items)
+            page.add(general)
+            dialog.connect("closed", lambda _dialog: self._changed())
+            dialog.present(self._window)
+            return
+
         page.add(general)
 
         value_group = Adw.PreferencesGroup(
@@ -1547,7 +1738,13 @@ class Application(Adw.Application):
                 state["groups"].append(group)
 
         build_triggers()
-        dialog.connect("closed", lambda _dialog: self._changed())
+
+        def closed(_dialog):
+            self._changed()
+            if on_close is not None:
+                on_close()
+
+        dialog.connect("closed", closed)
         dialog.present(self._window)
 
     def _step_row(self, segment, field, index, step, changed):

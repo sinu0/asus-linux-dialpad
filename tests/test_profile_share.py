@@ -125,6 +125,43 @@ class ProfileShareTest(unittest.TestCase):
         self.assertEqual([segment.title for segment in profile.segments], ["Zoom", "zoom 2"])
         self.assertEqual(profile.single_function, "Zoom")
 
+    def test_reads_a_group(self):
+        text = json.dumps({"name": "Krita", "mode": "single", "segments": [
+            {"title": "Brush", "color": "#ffad66", "macro_cw": [{"type": "shell", "script": "dropped"}], "items": [
+                {"title": "Size", "treshold": 20,
+                 "macro_cw": [{"type": "keystroke", "keys": ["]"]}],
+                 "macro_ccw": [{"type": "keystroke", "keys": ["["]}]},
+                {"title": "size", "macro_center": [{"type": "shell", "script": "krita --reset"}]},
+            ]},
+            {"title": "Zoom"},
+        ]})
+        (profile,) = profiles_from_text(text)
+        brush = profile.segments[0]
+        self.assertTrue(brush.is_group)
+        # A group has no steps of its own; its functions keep theirs.
+        self.assertEqual(brush.macro_cw, [])
+        self.assertEqual([item.title for item in brush.items], ["Size", "size 2"])
+        self.assertEqual(brush.items[0].macro_cw[0].keys, ["KEY_RIGHTBRACE"])
+        # The dial is bound to a function, never to a group.
+        self.assertEqual(profile.single_function, "Zoom")
+        self.assertEqual(shell_commands([profile]), [("Krita", "Brush › size 2", "krita --reset")])
+        (copy,) = profiles_from_text(profile_json(profile))
+        self.assertEqual(_encoder(copy), _encoder(profile))
+
+    def test_groups_go_one_level_deep(self):
+        cases = {
+            '{"segments": [{"title": "G", "items": {"title": "A"}}]}': "must be a list",
+            '{"segments": [{"title": "G", "items": [{"title": "A", "items": []}]}]}': "one level deep",
+            '{"segments": [{"title": "G", "items": [{"macro_cw": []}]}]}': "has no \"title\"",
+            '{"segments": [{"title": "G", "items": [{"title": "A", "macro_cw": [{"type": "press"}]}]}]}':
+                "unknown step type",
+        }
+        for text, message in cases.items():
+            with self.subTest(text=text):
+                with self.assertRaises(ProfileTextError) as caught:
+                    profiles_from_text(text)
+                self.assertIn(message, str(caught.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,7 @@ What Turnpad adds to the original driver:
 
 - **Settings app** (GTK4/libadwaita): per-application profiles, a function library, pre-programmed packs (browsers, GIMP, Krita, Inkscape, Blender, Kdenlive, DaVinci Resolve, LibreOffice, code editors, Spotify, video players), function colours and order, import/export.
 - **ASUS Dial behaviour**: radial menu or single-function mode, per-app sensitivity and scroll speed, remembered last function, tap centre for the function's action, hold centre for the menu, horizontal scroll and Ctrl+wheel zoom.
+- **Groups**: a sector that opens a straight list of more functions beside the dial; turn to move along it, tap the centre to choose. More functions fit without smaller sectors.
 - **GNOME Shell overlay**: native radial dial with value gauge, rotation hints and finger position; size, position (anywhere on the screen) and visibility configurable: always visible, fading while you turn, or a small label instead of the dial — for all apps, per profile or per function.
 - **Guided calibration** that measures the dial on any DialPad touchpad — see [PORTING.md](PORTING.md).
 
@@ -95,6 +96,7 @@ Everything is set up in the **Turnpad** app (applications menu); changes apply i
 - Per-profile sensitivity, scroll speed and "remember last function"
 - Pre-programmed packs for browsers, GIMP, Krita, Inkscape, Blender, Kdenlive, DaVinci Resolve, LibreOffice, code editors, Spotify, video players and darktable; import/export of profiles
 - Launchers: a function with only a tap action runs as soon as it is chosen in the radial menu, like the radial menus of 3D mice. The library has Calculator, Terminal, Files, Screenshot, Lock screen and My script (any command or bash script); programs keep running without blocking the dial
+- Groups (folders): a sector of the menu that opens a straight list of more functions beside the dial, one level deep. The library's *Apps* group holds all the launchers; *Group* under Custom starts an empty one, and functions already on the dial can be moved into it
 
 **Functions**
 
@@ -107,6 +109,7 @@ Everything is set up in the **Turnpad** app (applications menu); changes apply i
 - Hold the illuminated corner icon to switch the DialPad on or off (optionally only together with a co-activator key)
 - In the menu, touch a sector and release to choose a function; a function that only has a tap action runs straight away
 - In a function, turn around the ring; tap the centre for the function's tap action (or to go back when it has none), hold the centre to return to the menu
+- Choosing a group opens its list beside the dial, on the side of its sector: turning moves the highlight one function per step (like an iPod wheel), a tap on the centre chooses (a launcher runs and the list stays), holding the centre goes one level back — from a function of the group to its list, from the list to the menu
 - Fast spins accelerate scrolling; the DialPad switches itself off after a period of inactivity
 
 **On-screen dial**
