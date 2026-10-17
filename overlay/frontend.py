@@ -160,6 +160,7 @@ class GroupList:
         self._translation = 0.0
         self._offset = 0
         self._moved_to = None
+        self._placed = None
         self._side = "right"
         self._slide = 0
         self._source = 0
@@ -168,6 +169,11 @@ class GroupList:
     def place(self, placed: dict, scale: float, width: int) -> None:
         """placed: look.submenu_placement() on the monitor; width: of the
         monitor, which the window does not pass."""
+        # Called for every driver signal: the window moves only on a change.
+        key = (placed["x"], placed["y"], placed["width"], placed["height"], placed["side"], scale, width)
+        if key == self._placed:
+            return
+        self._placed = key
         self._side = placed["side"]
         self._slide = look.js_round(look.LIST_SLIDE * scale)
         if placed["side"] == "right":
