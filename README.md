@@ -48,7 +48,7 @@ Configuration lives in `~/.config/asus-turnpad/config.json`; the original `dialp
 
 ### Supported desktops
 
-Turnpad currently supports **GNOME** (Shell 45–51). The driver itself also runs on other desktops, but without the native on-screen dial and skins. Support for another desktop (KDE Plasma, Hyprland, sway, COSMIC…) starts with an issue: [request your desktop](https://github.com/sinu0/asus-turnpad/issues/new?template=desktop-support.yml). [ARCHITECTURE.md](ARCHITECTURE.md#adding-a-desktop-environment) describes what a port involves.
+Turnpad currently supports **GNOME** (Shell 45–51). KDE Plasma 6, Hyprland, sway, niri and COSMIC get the same on-screen dial and skins too, drawn with gtk4-layer-shell (tested in CI on sway; see [INSTALL.md](INSTALL.md#the-on-screen-dial-on-your-desktop)). The driver itself also runs on other desktops; X11 sessions get the original PySide window. Support for another desktop starts with an issue: [request your desktop](https://github.com/sinu0/asus-turnpad/issues/new?template=desktop-support.yml). [ARCHITECTURE.md](ARCHITECTURE.md#adding-a-desktop-environment) describes what a port involves.
 
 ---
 
@@ -116,7 +116,8 @@ Everything is set up in the **Turnpad** app (applications menu); changes apply i
 - Visibility: *Always visible*; *Fade while turning* (full when the finger lands, after a second it fades to a chosen opacity, 0 % hides it) so the dial does not cover what you are changing; or *Small label instead of the dial* (only the function name and value)
 - Position and visibility are defaults on the Skins page; every profile and every function can override them (folded *On-screen dial* row), e.g. a small label for brush size in Krita but the full dial in the menu
 - Skins: Dark glass, Midnight (OLED black), Frost (light), ProArt bronze and Classic segments, optionally following the system light/dark style; the skin editor creates your own with a live preview, and its "Copy prompt for AI" / "Paste JSON" pair lets any AI assistant design one ([SKINS.md](SKINS.md))
-- Other desktops: the original PySide overlay (own `.svg` icons; double-click to unlock its position and move it)
+- KDE Plasma 6, Hyprland, sway, niri, COSMIC: the same dial on the compositor's overlay layer (gtk4-layer-shell), with the same skins and settings
+- X11 sessions: the original PySide overlay (own `.svg` icons; double-click to unlock its position and move it)
 
 **Base driver** (from the original project)
 

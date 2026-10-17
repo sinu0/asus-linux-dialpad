@@ -14,7 +14,7 @@ Turnpad is a set of separately running parts that talk over the session D-Bus an
           on-screen dial frontend (per desktop)
           · GNOME: gnome/extension/ (dial.js)
           · layer-shell compositors: overlay/layer_shell.py (painter.py)
-          · others: dialpad_ui.py (legacy window)
+          · X11: dialpad_ui.py (legacy window)
 ```
 
 | Part | Desktop-specific? | Where |
@@ -36,7 +36,7 @@ Turnpad is a set of separately running parts that talk over the session D-Bus an
 
 ## Adding a desktop environment
 
-Turnpad supports GNOME only for now. A new desktop starts with a [desktop support request](https://github.com/sinu0/asus-turnpad/issues/new?template=desktop-support.yml), ideally from someone who can test on it.
+Turnpad supports GNOME (Shell extension) and the Wayland compositors with layer-shell: KDE Plasma 6, Hyprland, sway, niri and COSMIC (`overlay/layer_shell.py`; sway is tested in CI, KWin by hand (it needs a GPU render node), the others are not). A new desktop starts with a [desktop support request](https://github.com/sinu0/asus-turnpad/issues/new?template=desktop-support.yml), ideally from someone who can test on it.
 
 Three integration points, all optional. The driver already works everywhere evdev and uinput do.
 
@@ -80,11 +80,21 @@ It reproduces the extension piece by piece, so both desktops show the same dial:
 | `paintBackground()`, `paintContent()`, `paintPointer()` and the icon actors | `paint_background()`, `paint_content()`, `paint_pointer()` in `overlay/painter.py` |
 | `layers.js` | `DialLayers` in `overlay/frontend.py`: each layer keeps its picture as a Cairo image until its key changes |
 
-`tests/test_overlay_look.py` runs the `dial.js` functions in gjs and compares them with `look.py`; `tests/test_live_painter.py` compares the painting with `dial.js` pixel by pixel. `tests/layer_shell_in_container.sh` runs the frontend on headless sway in a container with a fake driver on a private bus and compares screenshots with `dial.js` (also at output scale 2), clicks and types through the dial and checks hiding, the pill and the fade.
+`tests/test_overlay_look.py` runs the `dial.js` functions in gjs and compares them with `look.py`; `tests/test_live_painter.py` compares the painting with `dial.js` pixel by pixel. `tests/layer_shell_in_container.sh` runs the frontend on headless sway in a container with a fake driver on a private bus and compares screenshots with `dial.js` (also at output scale 2), clicks and types through the dial and checks hiding, the pill and the fade. `kwin` instead of `sway` runs it on headless KWin (`kwin_wayland --virtual`; screenshots through `org.kde.KWin.ScreenShot2`, clicks and keys through fake input, `tests/kwin_fake_input.py`); KWin 6.8 needs a DRM render node even headless, so it runs by hand with `podman run --device /dev/dri/renderD128`, not in CI.
 
 ### 3. Installer
 
 Add a case to `install_overlay.sh` that sources an `install_<desktop>_overlay.sh`, and the matching removal to `uninstall.sh`. Distribution packages (`packaging/`) install the frontend's files system-wide, and `packaging/asus-turnpad-setup` enables it per user.
+
+Today `install_overlay.sh` has three cases:
+
+| Session | Frontend | Installed by | Unit |
+|---|---|---|---|
+| GNOME | Shell extension | `install_gnome_extension.sh`; packages put it in `/usr/share/gnome-shell/extensions` | none (GNOME Shell loads it) |
+| Any other Wayland session (KDE Plasma 6, Hyprland, sway, niri, COSMIC) | `overlay/layer_shell.py` | `install_layer_shell_overlay.sh`: optional packages `layershell` from `install_packages.sh`, then the unit, only when `Gtk4LayerShell` imports | `asus-turnpad-overlay.service` (template in the repository root; `packaging/asus-turnpad-overlay.service` for the packages) |
+| X11 | `dialpad_ui.py` | `install_user_interface.sh` (PySide6) | `asus-turnpad-ui.service` from `asus-turnpad-ui.x11.service` |
+
+The layer-shell dial's unit belongs to `graphical-session.target` (the session must also hand `WAYLAND_DISPLAY` to the user's service manager) and is not restarted after exit status 3, so a unit enabled for a user who also logs in to GNOME or X11 stays quiet there. A compositor without layer-shell needs a frontend of its own; one with layer-shell should work with the existing one, and adding it to the CI job `layer-shell-dial` needs a class next to `Sway` in `tests/layer_shell_check.py` (start headless, screenshot, click, type) and a case in `tests/layer_shell_in_container.sh`.
 
 ## Keeping the two painters in sync
 

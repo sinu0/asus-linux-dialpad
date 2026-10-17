@@ -37,6 +37,11 @@ CONFIG_DIR_NAME = SLUG
 # Twins: uuid in gnome/extension/metadata.json, install_paths.sh.
 GNOME_EXTENSION_UUID = "asus-turnpad@sinu0.github.io"
 
+# User service of the on-screen dial on layer-shell compositors
+# (overlay/layer_shell.py). Twins: install_paths.sh,
+# packaging/asus-turnpad-setup, the unit files <OVERLAY_SERVICE>.
+OVERLAY_SERVICE = f"{SLUG}-overlay.service"
+
 # Twin: install_paths.sh.
 INSTALL_DIR = "/opt/asus-turnpad"
 

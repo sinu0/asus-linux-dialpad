@@ -19,7 +19,7 @@ echo
 LOGS_UNINSTALL_LOG_FILE_PATH="$LOGS_DIR_PATH/uninstall-$(date +"%d-%m-%Y-%H-%M-%S").log"
 
 {
-    for unit in "$UI_SERVICE" "$DRIVER_SERVICE"; do
+    for unit in "$OVERLAY_SERVICE" "$UI_SERVICE" "$DRIVER_SERVICE"; do
         if systemctl --user cat "$unit" >/dev/null 2>&1; then
             systemctl --user disable --now "$unit" && echo "Stopped and disabled $unit"
         fi

@@ -110,9 +110,11 @@ if ask "Do you want install systemctl service(s)?" y; then
     echo "$DRIVER_SERVICE placed"
     start_unit "$DRIVER_SERVICE"
 
-    if [ "$USER_INTERFACE" -eq 1 ]; then
+    # The legacy window is for X11; Wayland desktops get their dial from
+    # install_overlay.sh.
+    if [ "$USER_INTERFACE" -eq 1 ] && [ "$SESSION_KIND" == "x11" ]; then
         echo
-        install_unit "$SLUG-ui.$SESSION_KIND.service" "$UI_SERVICE" || { echo "Something went wrong when placing $UI_SERVICE"; exit 1; }
+        install_unit "$SLUG-ui.x11.service" "$UI_SERVICE" || { echo "Something went wrong when placing $UI_SERVICE"; exit 1; }
         echo "$UI_SERVICE placed"
         start_unit "$UI_SERVICE"
     fi

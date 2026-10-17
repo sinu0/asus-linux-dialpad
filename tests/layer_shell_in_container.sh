@@ -10,7 +10,11 @@
 # runs tests/layer_shell_check.py as an unprivileged user in a private D-Bus
 # session with a scratch HOME. Pictures and logs go to output-dir (default
 # /tmp/layer-shell-test); output-scale 2 tests HiDPI. Compositors: sway
-# (KWin is planned: it needs a screenshot path grim can use).
+# (CI) and kwin. KWin 6.8 renders with OpenGL only and needs a DRM render
+# node even headless, which CI runners do not have; locally:
+#
+#   podman run --rm --device /dev/dri/renderD128 -v "$PWD:/src:ro" archlinux:latest \
+#       bash /src/tests/layer_shell_in_container.sh /src kwin /tmp/out [1|2]
 #
 # TURNPAD_SKIP_PACKAGES=1 skips pacman for an image that has them already.
 
@@ -25,7 +29,9 @@ TESTER=tester
 case "$COMPOSITOR" in
     # grim screenshots, wtype and a virtual pointer (pywayland) type and click.
     sway) compositor_packages=(sway grim wtype python-pywayland wlr-protocols) ;;
-    *) echo "unknown compositor: $COMPOSITOR (supported: sway)"; exit 2 ;;
+    # Screenshots over D-Bus (ScreenShot2), clicks and keys with fake input.
+    kwin) compositor_packages=(kwin python-pywayland plasma-wayland-protocols) ;;
+    *) echo "unknown compositor: $COMPOSITOR (supported: sway, kwin)"; exit 2 ;;
 esac
 
 if [ -z "${TURNPAD_SKIP_PACKAGES:-}" ]; then

@@ -26,6 +26,26 @@ Use one of them, not both: `install.sh` refuses to run while a package is instal
 
 The CI tests run in containers without a DialPad, so they cover packages, the libraries the driver and the settings app import, files and the uninstaller, not the touchpad itself. The settings app needs Libadwaita 1.5 (GNOME 46, Ubuntu 24.04, Debian 13 or newer); the installer warns when it is older.
 
+### The on-screen dial on your desktop
+
+The driver works on every desktop. The dial on the screen comes from a different part per desktop; the installer and `asus-turnpad-setup` pick it from the session they run in (`XDG_CURRENT_DESKTOP`, `XDG_SESSION_TYPE`), so run them from a terminal of that desktop.
+
+| Desktop | On-screen dial | Packages | Tested |
+| --- | --- | --- | --- |
+| GNOME 45–51 | GNOME Shell extension | none extra | On a ProArt PX13 (GNOME 51) |
+| sway | Layer-shell dial, user service `asus-turnpad-overlay.service` | `gtk4-layer-shell` (Arch, Fedora), `gir1.2-gtk4layershell-1.0` (Debian 13, Ubuntu after 24.04), `typelib-1_0-Gtk4LayerShell-1_0` (openSUSE) | CI, every push: headless sway, screenshots compared with the GNOME dial, at 100 % and 200 % |
+| KDE Plasma 6 | Layer-shell dial, as for sway | as for sway | By hand: the same test on headless KWin 6.8 at 100 % and 200 % (KWin needs a GPU render node, which the CI machines do not have) |
+| Hyprland, niri, COSMIC | Layer-shell dial, as for sway | as for sway | Not tested |
+| X11 sessions | The legacy window (`dialpad_ui.py`, PySide6) | PySide6 | Not tested |
+
+Ubuntu 24.04 does not package gtk4-layer-shell: there the installer leaves the dial out on non-GNOME desktops and the driver works without it. The layer-shell dial starts with the graphical session (`graphical-session.target`), which Plasma, COSMIC, niri (`niri-session`) and Hyprland with uwsm start for you. When sway or Hyprland is started without such a session, start the dial from its config instead:
+
+```
+exec systemctl --user import-environment WAYLAND_DISPLAY && systemctl --user start asus-turnpad-overlay
+```
+
+Logs: `journalctl --user -u asus-turnpad-overlay`. It shows on the output that has focus; `/usr/bin/python3 /opt/asus-turnpad/overlay/layer_shell.py --output eDP-1` (or `/usr/share/asus-turnpad/...` for the packages) pins it to one.
+
 ## Arch package
 
 ```bash
@@ -37,7 +57,7 @@ asus-turnpad-setup             # once, as your user
 
 `build.sh` runs `makepkg -si` in `~/.cache/asus-turnpad/makepkg` rather than in the clone (makepkg writes the version into the PKGBUILD it builds from, which would get in the way of `git pull`); arguments are passed on to makepkg. Running `makepkg -si` in `packaging/arch` yourself works too.
 
-Log out and back in. `asus-turnpad-setup` adds you to the groups `input`, `i2c` and `uinput` (asks for sudo) and enables the driver's user service and the GNOME extension. It changes nothing for other users; each user who wants the dial runs it once.
+Log out and back in. `asus-turnpad-setup` adds you to the groups `input`, `i2c` and `uinput` (asks for sudo) and enables the driver's user service and the on-screen dial: the GNOME extension, or on other Wayland desktops the layer-shell dial's user service (install `gtk4-layer-shell` first, see [the dial on your desktop](#the-on-screen-dial-on-your-desktop)). It changes nothing for other users; each user who wants the dial runs it once.
 
 What the package installs:
 
@@ -46,6 +66,7 @@ What the package installs:
 | `/usr/share/asus-turnpad` | Driver and settings app |
 | `/usr/share/gnome-shell/extensions/asus-turnpad@sinu0.github.io` | The on-screen dial for GNOME |
 | `/usr/lib/systemd/user/asus-turnpad.service` | The driver as a user service (enabled per user by `asus-turnpad-setup`) |
+| `/usr/lib/systemd/user/asus-turnpad-overlay.service` | The on-screen dial on Wayland desktops other than GNOME (enabled per user by `asus-turnpad-setup`) |
 | `/usr/lib/udev/rules.d/70-asus-turnpad.rules` | Access to uinput, the I2C buses and the DialPad touchpad's hidraw node for the logged-in user |
 | `/usr/lib/modules-load.d/asus-turnpad.conf`, `/usr/lib/sysusers.d/asus-turnpad.conf` | Kernel modules `uinput` and `i2c-dev`; groups `i2c` and `uinput` |
 | `/usr/bin/asus-turnpad-setup` | The per-user setup above |
@@ -55,7 +76,7 @@ What the package installs:
 **Remove:**
 
 ```bash
-systemctl --user disable --now asus-turnpad
+systemctl --user disable --now asus-turnpad asus-turnpad-overlay
 sudo pacman -R asus-turnpad-git
 ```
 
@@ -91,7 +112,7 @@ The package installs the same files as the Arch package (one list for all three,
 **Remove:**
 
 ```bash
-systemctl --user disable --now asus-turnpad
+systemctl --user disable --now asus-turnpad asus-turnpad-overlay
 sudo apt remove asus-turnpad     # or: sudo dnf remove asus-turnpad
 ```
 
@@ -103,7 +124,7 @@ cd asus-turnpad
 bash install.sh
 ```
 
-The installer needs `sudo`. It installs the required system packages with your package manager (apt, dnf, pacman, zypper, xbps, emerge, eopkg, rpm-ostree), the Python libraries included (see [Python](#python)), copies the program to `/opt/asus-turnpad`, adds you to the groups `input`, `i2c` and `uinput`, picks the layout of your laptop, and sets up the user service and the GNOME extension. It asks no questions; `bash install.sh --interactive` lets you choose the layout, a co-activator key and the services yourself. Log out and back in afterwards.
+The installer needs `sudo`. It installs the required system packages with your package manager (apt, dnf, pacman, zypper, xbps, emerge, eopkg, rpm-ostree), the Python libraries included (see [Python](#python)), copies the program to `/opt/asus-turnpad`, adds you to the groups `input`, `i2c` and `uinput`, picks the layout of your laptop, and sets up the user service and the on-screen dial of your desktop (see [above](#the-on-screen-dial-on-your-desktop)). It asks no questions; `bash install.sh --interactive` lets you choose the layout, a co-activator key and the services yourself. Log out and back in afterwards.
 
 When your laptop is not in `laptop_touchpad_dialpad_layouts.csv`, the installer looks up the touchpad's vendor and product id on linux-hardware.org to find laptops with the same touchpad; if that also fails it uses `proartp16`, and you measure the dial with *Calibration → Guided calibration* in the app.
 
@@ -116,7 +137,7 @@ bash uninstall.sh                  # keeps your settings in ~/.config/asus-turnp
 bash uninstall.sh --interactive    # asks whether to remove them too
 ```
 
-It removes the services, the GNOME extension, `/opt/asus-turnpad`, the udev rules and module list, and anything left from a version before the rename. It uses the same paths as the installer (`install_paths.sh`), so pass the same environment variables if you changed them. Group memberships (`input`, `uinput`, `i2c`) stay.
+It removes the services (the dial's too), the GNOME extension, `/opt/asus-turnpad`, the udev rules and module list, and anything left from a version before the rename. It uses the same paths as the installer (`install_paths.sh`), so pass the same environment variables if you changed them. Group memberships (`input`, `uinput`, `i2c`) stay.
 
 ### Custom paths
 
@@ -199,4 +220,4 @@ Install with `bash install.sh --interactive` and answer no to the question about
 
 Turnpad runs with the distribution's Python, `/usr/bin/python3` (3.10 or newer), and the Python libraries from its packages; `install_packages.sh` lists them per package manager. Nothing is downloaded with pip and nothing is compiled. A Python from conda or pyenv in your `PATH` is not used. Installs from before kept a Python environment in `/opt/asus-turnpad/.env`; `install.sh` and `uninstall.sh` remove it.
 
-Some libraries are optional: when your release does not package one, the installer says so and the feature it serves stays off (for example `python3-pywayland` on Ubuntu 24.04; on Ubuntu 26.04 it is installed but does not load with Python 3.14; `python3-periphery` outside Debian and Ubuntu, and PySide6 for the legacy on-screen dial window).
+Some libraries are optional: when your release does not package one, the installer says so and the feature it serves stays off (for example `python3-pywayland` on Ubuntu 24.04; on Ubuntu 26.04 it is installed but does not load with Python 3.14; `python3-periphery` outside Debian and Ubuntu, PySide6 for the legacy on-screen dial window on X11, and gtk4-layer-shell for the dial on other Wayland desktops on Ubuntu 24.04).

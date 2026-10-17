@@ -1,0 +1,29 @@
+# The on-screen dial for Wayland desktops other than GNOME (KDE Plasma 6,
+# Hyprland, sway, niri, COSMIC), for distribution packages; install.sh
+# writes its own unit from asus-turnpad-overlay.service in the repository
+# root. asus-turnpad-setup enables it on those desktops. The session hands
+# WAYLAND_DISPLAY to the user's service manager.
+
+[Unit]
+Description=Turnpad on-screen dial (layer-shell)
+# Stop with the graphical session and start again with the next one.
+PartOf=graphical-session.target
+After=graphical-session.target plasma-workspace.target
+StartLimitBurst=20
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+# Commands of dial actions run as the user and can never gain privileges
+# (sudo, pkexec and other setuid helpers fail), even with passwordless sudo.
+NoNewPrivileges=yes
+ExecStart=/usr/bin/python3 /usr/share/asus-turnpad/overlay/layer_shell.py
+TimeoutSec=5
+Restart=on-failure
+RestartSec=1
+# Exit status 3: no layer-shell in this session (GNOME has the extension),
+# so starting again would not help.
+RestartPreventExitStatus=3
+
+[Install]
+WantedBy=graphical-session.target

@@ -4,7 +4,7 @@
 Run by tests/layer_shell_in_container.sh inside its own D-Bus session
 (dbus-run-session), with HOME and XDG_RUNTIME_DIR in a scratch directory:
 
-    python3 tests/layer_shell_check.py sway OUTPUT_DIR [OUTPUT_SCALE]
+    python3 tests/layer_shell_check.py sway|kwin OUTPUT_DIR [OUTPUT_SCALE]
 
 It starts the compositor without a screen, a window below the dial that
 records clicks, keys and focus, a fake driver on the session bus and the
@@ -195,7 +195,133 @@ class Sway:
         self.process.wait(10)
 
 
-COMPOSITORS = {"sway": Sway}
+class KWin:
+    """Headless KWin (kwin_wayland --virtual), the compositor of KDE Plasma.
+
+    KWin 6.8 renders with OpenGL only and needs a DRM render node even
+    without a screen (there is no QPainter fallback any more), so the
+    container must get one: podman run --device /dev/dri/renderD128.
+    Screenshots come from org.kde.KWin.ScreenShot2, clicks and keys from
+    the fake input protocol (tests/kwin_fake_input.py)."""
+
+    name = "kwin"
+    SOCKET = "turnpad-kwin"
+
+    def __init__(self, runtime: Path, output: Path):
+        if not glob.glob("/dev/dri/renderD*"):
+            raise SystemExit("KWin needs a DRM render node (/dev/dri/renderD*); "
+                             "run the container with --device /dev/dri/renderD128")
+        environment = {**os.environ, "KWIN_WAYLAND_NO_PERMISSION_CHECKS": "1",
+                       "KWIN_SCREENSHOT_NO_PERMISSION_CHECKS": "1", "QT_FORCE_STDERR_LOGGING": "1"}
+        environment.pop("WAYLAND_DISPLAY", None)
+        # Window animations would show in the screenshots.
+        config = Path(os.environ["XDG_CONFIG_HOME"])
+        config.mkdir(parents=True, exist_ok=True)
+        (config / "kwinrc").write_text("[Compositing]\nAnimationSpeed=0\n[Plugins]\n"
+                                       "blurEnabled=false\nslidingpopupsEnabled=false\n"
+                                       "fadingpopupsEnabled=false\nscaleEnabled=false\n"
+                                       "[Effect-overview]\nBorderActivate=9\n")
+        (config / "kdeglobals").write_text("[KDE]\nAnimationDurationFactor=0\n")
+        # --scale only multiplies the virtual output's pixels; the scale
+        # itself comes from the output configuration, which would say 1.
+        output_config = [
+            {"name": "outputs", "data": [{
+                "connectorName": "Virtual-0", "uuid": "6c2c9d7e-2f6a-4c5e-9a39-7d4c3f1b0a01",
+                "mode": {"basic": {"width": PIXELS[0], "height": PIXELS[1], "refreshRate": 60000}, "flags": 1},
+                "scale": SCALE, "transform": "Normal"}]},
+            {"name": "setups", "data": [{"lidClosed": False, "outputs": [{
+                "enabled": True, "outputIndex": 0, "position": {"x": 0, "y": 0}, "priority": 0,
+                "replicationSource": ""}]}]},
+        ]
+        (config / "kwinoutputconfig.json").write_text(json.dumps(output_config))
+        self.log = open(output / "kwin.log", "w")
+        # The cap_sys_nice file capability stops exec in containers, as for sway.
+        binary = runtime / "kwin_wayland"
+        shutil.copyfile(shutil.which("kwin_wayland"), binary)
+        binary.chmod(0o755)
+        self.process = subprocess.Popen(
+            [str(binary), "--virtual", "--no-lockscreen", "--no-global-shortcuts", "--no-kactivities",
+             # Logical size: KWin multiplies it by the scale.
+             "--socket", self.SOCKET, "--width", str(WIDTH), "--height", str(HEIGHT),
+             "--scale", str(SCALE)], env=environment, stdout=self.log, stderr=subprocess.STDOUT)
+        self.display = self.SOCKET
+        self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        if not wait_for(self.ready, 30, "KWin"):
+            raise SystemExit("KWin did not start, see kwin.log")
+
+    def ready(self) -> bool:
+        if self.process.poll() is not None:
+            raise SystemExit(f"KWin exited with status {self.process.returncode}, see kwin.log")
+        if not (Path(os.environ["XDG_RUNTIME_DIR"]) / self.SOCKET).exists():
+            return False
+        try:
+            self.capture()
+            return True
+        except GLib.Error:
+            return False
+
+    def _input(self, *args: str) -> None:
+        environment = {**os.environ, "WAYLAND_DISPLAY": self.display}
+        subprocess.run([sys.executable, str(ROOT / "tests" / "kwin_fake_input.py"), *args],
+                       env=environment, check=True, timeout=30)
+
+    def click(self, x: int, y: int) -> None:
+        self._input("click", str(x), str(y))
+
+    def type(self, text: str) -> None:
+        # Only the letters this test types: evdev codes of the US layout.
+        codes = {"q": 16}
+        for letter in text:
+            self._input("key", str(codes[letter]))
+
+    def has_window(self, title: str) -> bool:
+        # The target window is the only window and fills the screen.
+        image = self.capture()
+        return image.getpixel((image.width // 2, image.height // 2)) == BACKGROUND
+
+    def capture(self) -> Image.Image:
+        """The whole screen in device pixels, through a pipe."""
+        read_end, write_end = os.pipe()
+        fds = Gio.UnixFDList()
+        fds.append(write_end)
+        os.close(write_end)
+        options = {"native-resolution": GLib.Variant("b", True), "include-cursor": GLib.Variant("b", False),
+                   "include-decoration": GLib.Variant("b", False)}
+        try:
+            reply, _ = self.bus.call_with_unix_fd_list_sync(
+                "org.kde.KWin", "/org/kde/KWin/ScreenShot2", "org.kde.KWin.ScreenShot2", "CaptureWorkspace",
+                GLib.Variant("(a{sv}h)", (options, 0)), GLib.VariantType("(a{sv})"), Gio.DBusCallFlags.NONE,
+                10000, fds, None)
+            del fds  # closes our copy of the write end, so the pipe ends with KWin's
+            result = reply.unpack()[0]
+            size = result["stride"] * result["height"]
+            data = bytearray()
+            with os.fdopen(read_end, "rb", closefd=False) as pipe:
+                while len(data) < size:
+                    chunk = pipe.read(size - len(data))
+                    if not chunk:
+                        break
+                    data += chunk
+        finally:
+            os.close(read_end)
+        # QImage formats: 4-6 (A)RGB32, BGRA bytes in memory; 16-18 RGBA8888.
+        layouts = {4: "BGRA", 5: "BGRA", 6: "BGRA", 16: "RGBA", 17: "RGBA", 18: "RGBA"}
+        if result["format"] not in layouts:
+            raise SystemExit(f"unknown QImage format {result['format']} of a KWin screenshot")
+        return Image.frombuffer("RGBA", (result["width"], result["height"]), bytes(data), "raw",
+                                layouts[result["format"]], result["stride"], 1).convert("RGB")
+
+    def screenshot(self, path: Path) -> Image.Image:
+        image = self.capture()
+        image.save(path)
+        return image
+
+    def stop(self) -> None:
+        self.process.terminate()
+        self.process.wait(10)
+
+
+COMPOSITORS = {"sway": Sway, "kwin": KWin}
 
 
 def write_overlay(overlay: dict) -> None:
@@ -325,8 +451,11 @@ def main() -> int:
         pump(0.5)
         typed = target_log.read_text()[len(before):]
         check("key q" in typed, "keys typed while the dial shows reach the window below")
-        check("active True" in typed and "active False" not in typed.split("key q")[0],
-              "the window below keeps the keyboard focus while the dial shows")
+        # sway focuses the window when the virtual keyboard appears, KWin
+        # when the window opens: either way it is active when the key comes.
+        focus = [line for line in target_log.read_text().split("key q")[0].splitlines() if line.startswith("active")]
+        check(focus[-1:] == ["active True"] and "active False" not in typed.split("key q")[0],
+              f"the window below keeps the keyboard focus while the dial shows {focus}")
 
         print("== hiding after release", flush=True)
         released = list(menu["signal"])

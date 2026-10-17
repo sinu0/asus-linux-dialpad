@@ -2,11 +2,14 @@
 
 # One-time setup of Turnpad for the current user after installing a
 # distribution package: device groups, the driver's user service and the
-# GNOME extension. Safe to run again. install.sh does the same on its own.
+# on-screen dial (the GNOME extension, or the layer-shell dial's user service
+# on other Wayland desktops). Safe to run again. install.sh does the same on
+# its own.
 
 set -u
 
 SERVICE="asus-turnpad.service"
+OVERLAY_SERVICE="asus-turnpad-overlay.service"
 GNOME_EXTENSION_UUID="asus-turnpad@sinu0.github.io"
 
 if [[ $(id -u) == 0 ]]; then
@@ -48,8 +51,10 @@ if (( ! RELOGIN )); then
     systemctl --user restart "$SERVICE" && echo "Driver started."
 fi
 
-if [[ "${XDG_CURRENT_DESKTOP:-}" == *[Gg][Nn][Oo][Mm][Ee]* ]] && command -v gnome-extensions >/dev/null 2>&1; then
-    if gnome-extensions enable "$GNOME_EXTENSION_UUID" 2>/dev/null; then
+if [[ "${XDG_CURRENT_DESKTOP:-}" == *[Gg][Nn][Oo][Mm][Ee]* ]]; then
+    if ! command -v gnome-extensions >/dev/null 2>&1; then
+        echo "gnome-extensions is not available: enable \"Turnpad\" in the Extensions app to see the on-screen dial."
+    elif gnome-extensions enable "$GNOME_EXTENSION_UUID" 2>/dev/null; then
         echo "GNOME extension enabled."
     else
         # GNOME Shell knows a newly installed extension only after the next
@@ -64,8 +69,23 @@ print(items)' "$ENABLED" "$GNOME_EXTENSION_UUID")"
         echo "GNOME extension will be enabled at the next login."
         RELOGIN=1
     fi
+elif [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
+    # KDE Plasma 6, Hyprland, sway, niri, COSMIC: the dial on the overlay
+    # layer (overlay/layer_shell.py), with gtk4-layer-shell.
+    if ! python3 -c 'import gi; gi.require_version("Gtk4LayerShell", "1.0")' >/dev/null 2>&1; then
+        echo "The on-screen dial on ${XDG_CURRENT_DESKTOP:-this desktop} needs gtk4-layer-shell:"
+        echo "install gtk4-layer-shell (Arch, Fedora) or gir1.2-gtk4layershell-1.0 (Debian, Ubuntu; not in Ubuntu 24.04),"
+        echo "then run asus-turnpad-setup again. The driver works without it."
+    elif systemctl --user enable "$OVERLAY_SERVICE"; then
+        echo "On-screen dial enabled: it starts with every graphical login."
+        if (( ! RELOGIN )); then
+            systemctl --user restart "$OVERLAY_SERVICE" && echo "On-screen dial started."
+        fi
+    else
+        echo "WARNING: could not enable $OVERLAY_SERVICE"
+    fi
 else
-    echo "Not a GNOME session: the driver works, the on-screen dial needs GNOME Shell 45 or newer."
+    echo "Not a Wayland session: the driver works, the on-screen dial needs GNOME Shell 45 or newer or a Wayland desktop with layer-shell (KDE Plasma 6, Hyprland, sway, niri, COSMIC)."
 fi
 
 echo

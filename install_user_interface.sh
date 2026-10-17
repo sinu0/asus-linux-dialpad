@@ -23,7 +23,11 @@ if [[ "${XDG_CURRENT_DESKTOP,,}" == *gnome* ]]; then
     UI_DEFAULT=n
 fi
 
-if ask "Do you want to install the DialPad User Interface?" "$UI_DEFAULT"; then
+if [ "$XDG_SESSION_TYPE" == "wayland" ]; then
+    # Wayland desktops get the Shell extension (GNOME) or the layer-shell
+    # dial (install_overlay.sh); the legacy window is for X11.
+    echo "Not needed on Wayland: install_overlay.sh installs the on-screen dial of this desktop."
+elif ask "Do you want to install the DialPad User Interface?" "$UI_DEFAULT"; then
 
     # PySide6 from the distribution; not every release packages it
     # (Ubuntu 24.04 does not), and the window is then left out.
