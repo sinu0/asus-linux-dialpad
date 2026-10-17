@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import unittest
@@ -6,14 +7,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.legacy_adapter import shortcuts_from_config  # noqa: E402
 from config.schema import (  # noqa: E402
+    ConfigError,
     DialPadConfig,
     MacroStep,
+    ModifierActions,
     Profile,
     Segment,
     StepType,
     _decoder,
     _default_config,
     _encoder,
+    config_from_text,
+    shell_commands,
 )
 
 
@@ -181,6 +186,73 @@ class DialLookTest(unittest.TestCase):
         overlay = _decoder(data, DialPadConfig).overlay
         self.assertEqual((overlay.position, overlay.custom_x, overlay.visibility, overlay.fade_opacity),
                          ("custom", 0.0, "full", 100))
+
+
+class ModifierVariantTest(unittest.TestCase):
+    """Other actions of a function while Ctrl, Shift or Alt is held."""
+
+    def segment(self):
+        return Segment(
+            title="Volume",
+            macro_cw=[MacroStep(type=StepType.VOLUME, direction="up", value=1)],
+            macro_center=[MacroStep(type=StepType.MEDIA, keys=["KEY_MUTE"])],
+            with_modifier={
+                "Ctrl": ModifierActions(macro_center=[MacroStep(type=StepType.SHELL, script="pavucontrol")]),
+                "Alt": ModifierActions(),
+            },
+        )
+
+    def test_driver_gets_variants_after_the_plain_entries(self):
+        config = DialPadConfig(profiles=[Profile(name="Default", segments=[self.segment()])])
+        volume = shortcuts_from_config(config)["none"]["Volume"]
+        self.assertEqual([entry.get("modifier") for entry in volume["center"]],
+                         [None, ["KEY_LEFTCTRL", "KEY_RIGHTCTRL"]])
+        self.assertEqual(volume["center"][1]["macro"][0].script, "pavucontrol")
+        # Nothing with Ctrl for turning: the plain entry stays alone.
+        self.assertEqual(len(volume["clockwise"]), 1)
+
+    def test_saved_without_empty_variants_and_read_back(self):
+        data = _encoder(self.segment())
+        self.assertEqual(list(data["with_modifier"]), ["Ctrl"])
+        self.assertEqual(list(data["with_modifier"]["Ctrl"]), ["macro_center"])
+        data["with_modifier"]["Hyper"] = {"macro_cw": [{"type": "shell", "script": "x"}]}
+        loaded = _decoder(data, Segment)
+        self.assertEqual(list(loaded.with_modifier), ["Ctrl"])
+        self.assertEqual(loaded.with_modifier["Ctrl"].macro_center[0].script, "pavucontrol")
+        self.assertNotIn("with_modifier", _encoder(Segment(title="Plain")))
+
+    def test_imported_commands_include_variants(self):
+        commands = shell_commands([Profile(name="Default", segments=[self.segment()])])
+        self.assertIn(("Default", "Volume", "pavucontrol"), commands)
+
+    def test_a_function_turning_only_with_a_key_is_no_launcher(self):
+        segment = Segment(title="Brush", with_modifier={
+            "Shift": ModifierActions(macro_cw=[MacroStep(type=StepType.KEYSTROKE, keys=["KEY_RIGHTBRACE"])]),
+        })
+        self.assertTrue(segment.turns())
+        self.assertFalse(Segment(title="Launcher").turns())
+
+
+class ConfigTextTest(unittest.TestCase):
+    """config.json the driver cannot use is refused with a readable reason."""
+
+    def test_reads_a_saved_configuration(self):
+        text = json.dumps(_encoder(_default_config()))
+        self.assertEqual(config_from_text(text).profiles[0].name, "Default")
+
+    def test_explains_unusable_files(self):
+        valid = _encoder(_default_config())
+        del valid["geometry"]
+        cases = {
+            '{"version": 2,': "not valid JSON",
+            "[1, 2]": "no JSON object",
+            json.dumps(valid): "missing 'geometry'",
+        }
+        for text, message in cases.items():
+            with self.subTest(text=text[:30]):
+                with self.assertRaises(ConfigError) as caught:
+                    config_from_text(text)
+                self.assertIn(message, str(caught.exception))
 
 
 if __name__ == "__main__":

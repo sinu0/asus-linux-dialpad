@@ -45,9 +45,11 @@ from config.schema import (
     CONFIG_DIR,
     CONFIG_FILE,
     DARKTABLE_APP_ID,
+    MODIFIER_KEYS,
     OVERLAY_POSITIONS,
     DialPadConfig,
     MacroStep,
+    ModifierActions,
     Profile,
     Segment,
     StepType,
@@ -405,8 +407,35 @@ class Application(Adw.Application):
         self._save_source = 0
         if self.config is not None:
             save_config(self.config)
-            self._call_driver("ReloadConfig")
+            self._call_driver("ReloadConfig", callback=self._on_reload_reply)
         return GLib.SOURCE_REMOVE
+
+    def _on_reload_reply(self, connection, result, *_user_data, success=None, unreachable=None):
+        """Tell why when the driver refused the saved file (it keeps its settings)."""
+        try:
+            (accepted,) = connection.call_finish(result).unpack()
+        except (GLib.Error, AttributeError):
+            # No driver on the bus: it reads the file when it starts.
+            if unreachable:
+                self._toast(unreachable)
+            return
+        if accepted:
+            if success:
+                self._toast(success)
+            self._refresh_diagnostics()
+            return
+
+        def refused(status_connection, status_result, *_args):
+            try:
+                status = status_connection.call_finish(status_result).unpack()[0]
+                error = str(self._unpack_dbus_value(status.get("config_error")) or "")
+            except (GLib.Error, AttributeError, IndexError):
+                error = ""
+            self._toast(f"The driver kept its previous settings: {error}" if error
+                        else "The driver kept its previous settings")
+            self._refresh_diagnostics()
+
+        self._call_driver("GetStatus", "(a{sv})", refused)
 
     def _get_session_bus(self):
         if self._session_bus is not None:
@@ -1132,6 +1161,9 @@ class Application(Adw.Application):
             parts.append(f"Tap: {tap}")
         if segment.value_command:
             parts.append(f"shows value{(' in ' + segment.unit) if segment.unit else ''}")
+        held = [name for name, actions in segment.with_modifier.items() if not actions.is_empty()]
+        if held:
+            parts.append(f"more with {' / '.join(held)}")
         row.set_subtitle(GLib.markup_escape_text("  ·  ".join(parts) or "No actions yet"))
         row.add_prefix(_colour_swatch(segment_color(segment, index), 12))
         row.add_prefix(_icon_image(segment_icon(segment)))
@@ -1510,13 +1542,36 @@ class Application(Adw.Application):
         value_group.add(unit_row)
         page.add(value_group)
 
+        # The trigger groups below show the plain actions or those while a
+        # keyboard key is held (Segment.with_modifier).
+        held_keys = [None, *MODIFIER_KEYS]
+        held_group = Adw.PreferencesGroup(
+            title="Keyboard keys",
+            description="Holding Ctrl, Shift or Alt on the keyboard while turning or tapping can run other "
+            "actions. The key stays held, so the application sees it too.",
+        )
+        held_row = _combo_row(
+            "Actions for", None, ["No key held", *(f"{name} held" for name in MODIFIER_KEYS)], 0,
+            lambda index: (state.update(held=held_keys[index]), build_triggers()),
+        )
+        held_group.add(held_row)
+        page.add(held_group)
+
+        def held_summary():
+            names = [name for name, actions in segment.with_modifier.items() if not actions.is_empty()]
+            held_row.set_subtitle(f"Own actions with {' and '.join(names)}" if names else "Only actions without a key")
+
         def build_triggers():
             for group in state["groups"]:
                 page.remove(group)
             state["groups"] = []
+            held_summary()
+            held = state.get("held")
+            holder = segment if held is None else segment.with_modifier.setdefault(held, ModifierActions())
+            title = segment.title if held is None else f"{segment.title} with {held}"
             # The driver runs a function with nothing to turn as soon as it
             # is chosen in the menu (select_multifunction_segment).
-            if not segment.macro_cw and not segment.macro_ccw:
+            if held is None and not segment.turns():
                 kind = Adw.PreferencesGroup()
                 row = Adw.ActionRow(
                     title="Launcher",
@@ -1528,21 +1583,28 @@ class Application(Adw.Application):
                 page.add(kind)
                 state["groups"].append(kind)
             for field, label, icon_name, description in TRIGGERS:
+                if held is not None:
+                    label = f"{label} with {held}"
+                    description = f"Instead of the actions above while {held} is held"
                 group = Adw.PreferencesGroup(title=label, description=description)
                 add = _icon_button(
                     "list-add-symbolic", "Add action",
                     lambda field=field: self._show_step_dialog(
-                        segment, field, None, lambda: changed(True)
+                        holder, field, None, lambda: changed(True), title
                     ),
                 )
                 group.set_header_suffix(add)
-                steps = getattr(segment, field)
+                steps = getattr(holder, field)
                 if not steps:
-                    empty = Adw.ActionRow(title="No action", subtitle="Press + to add one")
+                    empty = Adw.ActionRow(
+                        title="No action",
+                        subtitle="Press + to add one" if held is None
+                        else "Press + to add one; without one the usual action runs",
+                    )
                     empty.add_css_class("dim-label")
                     group.add(empty)
                 for index, step in enumerate(steps):
-                    group.add(self._step_row(segment, field, index, step, lambda: changed(True)))
+                    group.add(self._step_row(holder, field, index, step, lambda: changed(True), title))
                 page.add(group)
                 state["groups"].append(group)
 
@@ -1550,14 +1612,14 @@ class Application(Adw.Application):
         dialog.connect("closed", lambda _dialog: self._changed())
         dialog.present(self._window)
 
-    def _step_row(self, segment, field, index, step, changed):
+    def _step_row(self, segment, field, index, step, changed, title=None):
         steps = getattr(segment, field)
         row = Adw.ActionRow(title=GLib.markup_escape_text(describe_step(step)))
         row.set_subtitle(GLib.markup_escape_text(self._step_hint(step)))
         row.add_prefix(Gtk.Image.new_from_icon_name(self._icon_for_step(step)))
         row.set_activatable(True)
         row.set_tooltip_text("Click to edit")
-        row.connect("activated", lambda _row: self._show_step_dialog(segment, field, index, changed))
+        row.connect("activated", lambda _row: self._show_step_dialog(segment, field, index, changed, title))
 
         def move(offset):
             target = index + offset
@@ -1736,7 +1798,8 @@ class Application(Adw.Application):
         button.add_css_class("flat")
         return button
 
-    def _show_step_dialog(self, segment, field, index, changed):
+    def _show_step_dialog(self, segment, field, index, changed, title=None):
+        """Edit a step of segment's field (or of a ModifierActions; title names it)."""
         steps = getattr(segment, field)
         original = steps[index] if index is not None and 0 <= index < len(steps) else None
         step = copy.deepcopy(original) if original else MacroStep(type=StepType.KEYSTROKE, keys=[])
@@ -1760,7 +1823,7 @@ class Application(Adw.Application):
         dialog.set_child(view)
 
         basics = Adw.PreferencesGroup(
-            title=f"{segment.title} — {trigger}",
+            title=f"{title or segment.title} — {trigger}",
             description="The label appears as a hint below the dial.",
         )
         shown_type = step.type
@@ -3329,6 +3392,7 @@ class Application(Adw.Application):
             ("profile", "Active profile"),
             ("function", "Selected function"),
             ("environment", "Environment"),
+            ("configuration", "Configuration"),
         ):
             row = Adw.ActionRow(title=title, subtitle="Unknown")
             status.add(row)
@@ -3365,13 +3429,26 @@ class Application(Adw.Application):
         save_config(self.config)
 
         def done(connection, result):
-            try:
-                connection.call_finish(result)
-                self._toast("Driver reloaded the configuration")
-            except (GLib.Error, AttributeError):
-                self._toast("Driver is not reachable over D-Bus")
+            self._on_reload_reply(
+                connection, result,
+                success="The driver takes the configuration with the next touch", unreachable="Driver is not reachable over D-Bus",
+            )
 
         self._call_driver("ReloadConfig", callback=done)
+
+    @staticmethod
+    def _configuration_state(status):
+        """What the driver runs from config.json (GetStatus), in words."""
+        if "config_revision" not in status:
+            return "Unknown (older driver)"
+        revision = str(status.get("config_revision") or "")
+        parts = [f"Applied ({revision})" if revision else "No config.json: the layout's shortcuts"]
+        if status.get("config_pending"):
+            # The driver applies it between gestures, on the next touchpad event.
+            parts.append("the newest settings apply with the next touch")
+        if status.get("config_error"):
+            parts.append(f"not applied: {status['config_error']}")
+        return " · ".join(parts)
 
     @staticmethod
     def _unpack_dbus_value(value):
@@ -3397,7 +3474,7 @@ class Application(Adw.Application):
             status = {key: self._unpack_dbus_value(value) for key, value in status.items()}
         except (GLib.Error, RuntimeError) as error:
             rows["service"].set_subtitle(f"Unavailable: {getattr(error, 'message', error)}")
-            for key in ("enabled", "application", "profile", "function", "environment"):
+            for key in ("enabled", "application", "profile", "function", "environment", "configuration"):
                 rows[key].set_subtitle("Unknown")
             return
 
@@ -3412,6 +3489,7 @@ class Application(Adw.Application):
         rows["environment"].set_subtitle(
             f"{status.get('session_type') or 'unknown session'} · {status.get('layout') or 'unknown layout'}"
         )
+        rows["configuration"].set_subtitle(self._configuration_state(status))
         max_x, max_y = int(status.get("touchpad_max_x") or 0), int(status.get("touchpad_max_y") or 0)
         if max_x > 0 and max_y > 0:
             self._touchpad_size = (max_x, max_y)

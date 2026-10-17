@@ -81,7 +81,9 @@
 | Signal | `OverlayState` – signature `bsasasidsbbb` (enabled, title, titles, icons, value, value_angle_start, unit, center_pressed, value_show_only_progress, touching) – keep it fixed for older extensions |
 | Signal | `OverlayDetails(s)` – JSON: profile, mode (`multi`/`single`), colors[] (menu order), color, hints {cw, ccw, center}, hold_returns, pointer (degrees, -1 = none), look (profile then function overrides of `config.schema.OVERLAY_RULE_KEYS`; `{}` = config defaults). Emitted before `OverlayState` in the same idle callback. Driver sends it via `send_to_socket({"details": {...}})`; details-only payloads emit no `OverlayState`. |
 | Signal | `CalibrationProgress(s)` – JSON from `CalibrationSession.state()` plus layout, touchpad_max_x/y and the latest `point` |
-| Methods | `SetActiveApplication(s)`, `GetStatus()`, `GetOverlayDetails() -> s`, `ReloadConfig()`, `StartCalibration() -> b`, `CancelCalibration() -> b` |
+| Methods | `SetActiveApplication(s)`, `GetStatus()`, `GetOverlayDetails() -> s`, `ReloadConfig() -> b`, `StartCalibration() -> b`, `CancelCalibration() -> b` |
+| `ReloadConfig` | Reads and converts `config.json` at once (`read_gui_config()`); `false` = unusable, the driver keeps what it runs. The touch loop applies it between gestures (`process_pending_driver_updates(gesture_idle)`), so only on the next touchpad event. |
+| `GetStatus` config keys | `config_revision` (first 12 hex of the applied file's SHA-256, `""` = layout shortcuts), `config_error` (why a newer file was not applied), `config_pending` (checked, waiting for the next touch); the app's Driver page shows them and the app toasts the error after a refused save |
 
 ## Config migration behavior
 
@@ -93,7 +95,7 @@
 ## Profiles and dial behaviour (ASUS Dial parity)
 
 - Profile fields: `mode` (`multi` radial menu / `single` bound function + `single_function`), `sensitivity` (divides rotation thresholds), `scroll_speed` (multiplies scroll units), `remember_last`.
-- Segment fields: `enabled`, `color`. MacroStep scroll fields: `axis` (`horizontal`), `modifiers` (keys held while scrolling, e.g. Ctrl = zoom). Never reuse a scroll step's legacy `keys` (old configs contain junk like `["8","11"]`).
+- Segment fields: `enabled`, `color`, `with_modifier` (`{"Ctrl"|"Shift"|"Alt": ModifierActions}`, own `macro_cw/ccw/center` while that key is held; `MODIFIER_KEYS` in `config/schema.py`). The adapter adds them as entries with `"modifier": [left, right key names]` after the plain entry; `shortcuts_for_modifiers()` in the driver runs the entries of a held key, otherwise the plain ones (a function without a variant keeps working while a key is held). The keyboard listener only follows keys in `modifiers`, which `enable_config_macro_capabilities()` fills from these entries. Use `Segment.macro_lists()` for anything that must see every step (`shell_commands()`, import checks). MacroStep scroll fields: `axis` (`horizontal`), `modifiers` (keys held while scrolling, e.g. Ctrl = zoom). Never reuse a scroll step's legacy `keys` (old configs contain junk like `["8","11"]`).
 - The legacy adapter puts profile settings under the reserved `_meta` key; `is_multifunction()` skips keys starting with `_`. Single mode uses the flat `clockwise/counterclockwise/center` layout with `_meta.single` holding title/treshold/value/unit/color/hints.
 - In a selected function: tap centre = the function's `macro_center` if any, otherwise back to menu; holding the centre for `gesture.center_hold_time` returns to the menu (fires while still touching).
 - Dial look per level: `overlay` defaults (`position` incl. `custom` + `custom_x`/`custom_y` = dial centre as screen fractions, `visibility` `full`/`fade`/`pill`, `fade_opacity` %) ← `Profile.overlay` ← `Segment.overlay` (dicts of overrides, validated by `overlay_rule()`). The driver merges profile + function (`overlay_look()`, also in single mode via `_meta.single.overlay`) into `details.look`; the menu uses the profile's. The extension resolves the rest with `effectiveLook()` in `dial.js`; `fade` = full on touch, fades after `FADE_AFTER_MS`; `pill` = a small St label (`pillContent()`/`pillPlacement()`) instead of the dial. Settings app: `_dial_look_rows()` (plain on the Skins page, folded "On-screen dial" row in profile and function editors, screen picker for custom).
@@ -119,6 +121,8 @@
 - `RotationTracker.reset()` must run on touch down, lift, centre and leaving the ring, or the next touch jumps.
 - `finger_down` follows the one finger the dial tracks (`dial_touch_id`, chosen by `dial_gesture.select_dial_touch`): the touch already followed, else the newest touch inside the ring or on the corner icon. Other fingers, a resting palm and touches reported as `MT_TOOL_PALM` are ignored, and lifting the tracked finger counts as release even while others stay down. Never clear `slots` on release; `update_touch_slots()` keeps them in sync (also from `d_t.sync()` after `SYN_DROPPED`).
 - Actions, shell macros and value queries run on the `dialpad-actions` worker thread via `enqueue_action()`; never call subprocesses from the touch loop.
+- Configuration reloads and application changes wait while the dial tracks a finger (applied at the end of the lift frame); calibration requests do not.
+- Every send to the virtual device holds `uinput_lock`; `reset_udev_device()` (on the action thread after a reload, on the keymap threads otherwise) swaps the device under it, releases held scroll modifiers on the old device and destroys it with `close_virtual_device()` (python-libevdev's reference cycles would keep it alive).
 - The GNOME overlay shows while `touching`, and fades out 1.5 s after release.
 
 ## Formatting

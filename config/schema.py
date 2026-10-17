@@ -19,6 +19,14 @@ OVERLAY_POSITIONS = ("center", "lower", "bottom", "top", "custom")
 # fade_opacity while turning; pill: a small label instead of the dial.
 OVERLAY_VISIBILITIES = ("full", "fade", "pill")
 SCROLL_AXES = ("vertical", "horizontal")
+# Keyboard modifiers that give a function other actions while held, with
+# the evdev keys of both sides of the keyboard.
+MODIFIER_KEYS = {
+    "Ctrl": ("KEY_LEFTCTRL", "KEY_RIGHTCTRL"),
+    "Shift": ("KEY_LEFTSHIFT", "KEY_RIGHTSHIFT"),
+    "Alt": ("KEY_LEFTALT", "KEY_RIGHTALT"),
+}
+MACRO_FIELDS = ("macro_cw", "macro_ccw", "macro_center")
 
 
 class StepType(str, Enum):
@@ -135,6 +143,18 @@ class MacroStep:
 
 
 @dataclass
+class ModifierActions:
+    """What a function does while a keyboard modifier (MODIFIER_KEYS) is held."""
+
+    macro_cw: list[MacroStep] = field(default_factory=list)
+    macro_ccw: list[MacroStep] = field(default_factory=list)
+    macro_center: list[MacroStep] = field(default_factory=list)
+
+    def is_empty(self) -> bool:
+        return not any(getattr(self, name) for name in MACRO_FIELDS)
+
+
+@dataclass
 class Segment:
     title: str
     icon_url: str | None = None
@@ -148,6 +168,18 @@ class Segment:
     color: str | None = None
     # Overrides of the on-screen dial while this function is selected.
     overlay: dict = field(default_factory=dict)
+    # Other actions while Ctrl, Shift or Alt is held, by MODIFIER_KEYS name.
+    with_modifier: dict[str, ModifierActions] = field(default_factory=dict)
+
+    def macro_lists(self) -> list[list[MacroStep]]:
+        """Every step list of the function, with the modifier variants."""
+        holders = [self, *self.with_modifier.values()]
+        return [getattr(holder, name) for holder in holders for name in MACRO_FIELDS]
+
+    def turns(self) -> bool:
+        """False for a launcher: nothing to turn, with or without a modifier."""
+        holders = [self, *self.with_modifier.values()]
+        return any(holder.macro_cw or holder.macro_ccw for holder in holders)
 
 
 @dataclass
@@ -201,7 +233,7 @@ def shell_commands(profiles: list[Profile]) -> list[tuple[str, str, str]]:
     found = []
     for profile in profiles:
         for segment in profile.segments:
-            for steps in (segment.macro_cw, segment.macro_ccw, segment.macro_center):
+            for steps in segment.macro_lists():
                 for step in steps:
                     if step.type is StepType.SHELL and step.script:
                         found.append((profile.name, segment.title, step.script))
@@ -315,6 +347,17 @@ def _encoder(obj):
             result["color"] = obj.color
         if obj.overlay:
             result["overlay"] = dict(obj.overlay)
+        variants = {
+            name: {
+                field_name: [_encoder(m) for m in getattr(actions, field_name)]
+                for field_name in MACRO_FIELDS
+                if getattr(actions, field_name)
+            }
+            for name, actions in obj.with_modifier.items()
+            if name in MODIFIER_KEYS and not actions.is_empty()
+        }
+        if variants:
+            result["with_modifier"] = {name: variants[name] for name in MODIFIER_KEYS if name in variants}
         return result
     if isinstance(obj, MacroStep):
         result: dict = {"type": obj.type.value}
@@ -399,12 +442,50 @@ def _decoder(d: dict, cls: type):
             enabled=bool(d.get("enabled", True)),
             color=d.get("color"),
             overlay=overlay_rule(d.get("overlay")),
+            with_modifier=_modifier_variants(d.get("with_modifier")),
         )
     if cls is MacroStep:
         values = _known(d, MacroStep)
         values["type"] = StepType(d["type"])
         return MacroStep(**values)
     raise TypeError(f"Unknown class: {cls}")
+
+
+def _modifier_variants(values) -> dict[str, ModifierActions]:
+    if not isinstance(values, dict):
+        return {}
+    variants = {}
+    for name in MODIFIER_KEYS:
+        actions = values.get(name)
+        if not isinstance(actions, dict):
+            continue
+        variant = ModifierActions(**{
+            field_name: [_decoder(m, MacroStep) for m in actions.get(field_name) or []]
+            for field_name in MACRO_FIELDS
+        })
+        if not variant.is_empty():
+            variants[name] = variant
+    return variants
+
+
+class ConfigError(ValueError):
+    """config.json cannot be used; the message says why."""
+
+
+def config_from_text(text: str) -> DialPadConfig:
+    """The configuration in a config.json document; raises ConfigError."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ConfigError(f"not valid JSON: {error.msg} at line {error.lineno}, column {error.colno}") from None
+    if not isinstance(data, dict):
+        raise ConfigError("the file holds no JSON object")
+    try:
+        return _decoder(data, DialPadConfig)
+    except KeyError as error:
+        raise ConfigError(f"missing {error.args[0]!r}") from None
+    except (TypeError, ValueError, AttributeError) as error:
+        raise ConfigError(f"unreadable value: {error}") from None
 
 
 def load_config() -> DialPadConfig:
@@ -415,10 +496,7 @@ def load_config() -> DialPadConfig:
         save_config(cfg)
         return cfg
 
-    with open(CONFIG_FILE) as f:
-        data = json.load(f)
-
-    return _decoder(data, DialPadConfig)
+    return config_from_text(CONFIG_FILE.read_text())
 
 
 def save_config(cfg: DialPadConfig) -> None:

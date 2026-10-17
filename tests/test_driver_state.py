@@ -35,6 +35,8 @@ STATE_FUNCTIONS = {
     "return_to_multifunction_menu",
     "select_multifunction_segment",
     "function_has_center_action",
+    "shortcuts_for_modifiers",
+    "modifier_names",
     "is_multifunction",
     "pad_to_minimum",
     "window_was_changed",

@@ -21,6 +21,8 @@
 - Arch package (`bash packaging/arch/build.sh` + `asus-turnpad-setup`): system Python libraries instead of a pip environment, layout picked when the driver starts (`auto`), tested in CI; `INSTALL.md` explains both ways to install
 - `install.sh` is tested on Fedora and Ubuntu in CI; it now installs the libraries the settings app and the pip builds need there, stops when pip fails instead of reporting success, and warns when Libadwaita is too old for the settings app
 - Guided calibration asks to keep or revert the measured geometry (it is live meanwhile, so the dial can be tried); the Calibration page can reset the geometry to the layout's values
+- Functions can do something else while Ctrl, Shift or Alt is held on the keyboard (turning and tapping, per function; "Actions for" in the function editor)
+- Saved settings reach the driver only between gestures; a `config.json` it cannot use is refused with the reason (Driver page, `GetStatus()`), and the running settings stay
 
 ### Removed
 
@@ -30,6 +32,9 @@
 
 ### Fixed
 
+- Saving settings while turning could leave Ctrl held (zoom scrolling) on a replaced virtual keyboard, the replaced DialPad keyboard stayed until Python's garbage collector removed it, and the dial stopped for half a second while the new one was created
+- A broken `config.json` made the driver fall back to the layout's shortcuts on the next reload
+- Holding a tracked keyboard key (Ctrl, Shift, Alt) blocked every action without one
 - Commands and shell scripts of dial actions blocked every further dial action until they ended (a calculator until it was closed), and programs started from the dial were killed with the driver service
 - Centre actions of rotating functions were unreachable in the radial menu
 - Switching application kept the previous application's selected function

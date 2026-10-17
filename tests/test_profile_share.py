@@ -111,6 +111,9 @@ class ProfileShareTest(unittest.TestCase):
             '{"segments": [{"title": "T", "macro_cw": [{"type": "keystroke", "keys": ["Hyper", "Q"]}]}]}':
                 "unknown key Hyper",
             '{"segments": [{"title": "T", "macro_cw": [{"type": "shell"}]}]}': "needs a \"script\"",
+            '{"segments": [{"title": "T", "with_modifier": {"Meta": {}}}]}': "\"with_modifier\" takes",
+            '{"segments": [{"title": "T", "with_modifier": {"Ctrl": {"macro_cw": [{"type": "shell"}]}}}]}':
+                "needs a \"script\"",
         }
         for text, message in cases.items():
             with self.subTest(text=text):
@@ -124,6 +127,19 @@ class ProfileShareTest(unittest.TestCase):
         (profile,) = profiles_from_text(text)
         self.assertEqual([segment.title for segment in profile.segments], ["Zoom", "zoom 2"])
         self.assertEqual(profile.single_function, "Zoom")
+
+    def test_reads_actions_with_a_held_key(self):
+        text = json.dumps({"name": "P", "segments": [{
+            "title": "Brush",
+            "macro_cw": [{"type": "keystroke", "keys": ["KEY_RIGHTBRACE"]}],
+            "with_modifier": {"Shift": {"macro_cw": [{"type": "keystroke", "keys": ["Ctrl", "]"]}]}},
+        }]})
+        (profile,) = profiles_from_text(text)
+        variant = profile.segments[0].with_modifier["Shift"]
+        self.assertEqual(variant.macro_cw[0].keys, ["KEY_LEFTCTRL", "KEY_RIGHTBRACE"])
+
+    def test_format_describes_held_keys(self):
+        self.assertIn('"with_modifier"', ai_prompt(Profile(name="P")))
 
 
 if __name__ == "__main__":

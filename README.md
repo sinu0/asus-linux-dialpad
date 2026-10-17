@@ -101,6 +101,7 @@ Everything is set up in the **Turnpad** app (applications menu); changes apply i
 - Library of ready functions: volume, brightness, keyboard light, mute, workspaces, vertical/horizontal scroll, zoom, tabs, back/forward, arrow keys, media tracks, seek, undo/redo, font size, brush size, frame stepping, timeline zoom
 - Own colour, order on the dial, show/hide, rotation step and an optional live value (e.g. volume in % with a level gauge)
 - Separate actions for turning clockwise, counter-clockwise and tapping; each action can be a keyboard shortcut (recorded from the keyboard, clicked together from key buttons or typed as `Ctrl+F12`; the ⓘ button in the action editor explains it), media key, volume, brightness, vertical or horizontal scroll (optionally with Ctrl/Shift/Alt held, e.g. Ctrl + wheel zoom), a shell command or a wait — several steps run in order
+- Other actions while Ctrl, Shift or Alt is held on the keyboard, e.g. Volume: tap mutes, Ctrl + tap opens the mixer; Brush size: Shift + turn changes the hardness. Without its own action for a held key a function does what it always does
 
 **Using the dial**
 
@@ -157,12 +158,12 @@ Use the **Turnpad** app for every setting:
 
 | App page | What it configures |
 | --- | --- |
-| **Dial Controls** | Functions of the selected profile (add from the library, order, colour, icon, show/hide, actions for turning and tapping, live value, on-screen dial position and visibility), dial mode, sensitivity, scroll speed, remembering the last function, building a profile with an AI assistant |
+| **Dial Controls** | Functions of the selected profile (add from the library, order, colour, icon, show/hide, actions for turning and tapping, other actions with Ctrl/Shift/Alt held, live value, on-screen dial position and visibility), dial mode, sensitivity, scroll speed, remembering the last function, building a profile with an AI assistant |
 | **Apps & Profiles** | Default and application profiles, pre-programmed packs, duplicate/rename/remove, import and export, on-screen dial position and visibility per profile |
 | **Skins** | Skin gallery and editor, separate skins for light and dark style, on-screen dial size, position (also a custom place), visibility (always, fade while turning to a chosen opacity, small label), visibility time, hints, finger position, progress arc and accent colour |
 | **Behaviour** | Corner icon hold time, co-activator keys, switching off after inactivity, DialPad light (follows the keyboard backlight including off, or a fixed level 0–8 where 0 keeps it off), default rotation step, jitter filter, centre hold time, minimum menu sectors |
 | **Calibration** | Guided calibration (trace the ring and the centre button, then keep or revert the result), manual dial geometry and corner icon area, reset to the layout's geometry |
-| **Driver** | Driver status, active profile and function, reload, configuration folder |
+| **Driver** | Driver status, active profile and function, the configuration the driver runs (and why it refused a newer one), reload, configuration folder |
 
 **Building a profile with an AI assistant.** At the bottom of Dial Controls, *Copy prompt for AI* copies a description of the profile format together with the current profile. Paste it into ChatGPT, Claude or any other assistant, add what you want (“Inkscape: zoom, rotate canvas, layers, undo”), copy the whole answer and choose *Paste from AI*. The app reads the JSON out of the answer, accepts short key names such as `Ctrl`, explains what is wrong if something is not usable, lists every shell command before you accept, and then replaces the profile or adds it as a new one.
 
@@ -174,7 +175,7 @@ You do not need to edit these files; they are described for backups and troubles
 
 | File | Content |
 | --- | --- |
-| `~/.config/asus-turnpad/config.json` | Everything set in the app: profiles, functions, behaviour, on-screen dial and dial geometry. Written atomically; the driver and the GNOME extension reload it after every change. Use *Import/Export* to move profiles between computers. |
+| `~/.config/asus-turnpad/config.json` | Everything set in the app: profiles, functions, behaviour, on-screen dial and dial geometry. Written atomically; the driver and the GNOME extension reload it after every change. The driver checks the file first and keeps its running settings when it cannot use it (the **Driver** page says why), and applies a change only between two touches of the dial. Use *Import/Export* to move profiles between computers. |
 | `~/.config/asus-turnpad/dialpad_dev` | Runtime state of the driver: `enabled` (DialPad on/off) and `socket_enabled` (messages for the PySide overlay on other desktops; the GNOME overlay does not need it). Its other keys come from the original driver and are ignored while `config.json` exists. |
 | `/opt/asus-turnpad/layouts/*.py` | Default geometry of each touchpad family and the original Python format of shortcuts. Used only until `config.json` exists — the first start of the app converts them. |
 
