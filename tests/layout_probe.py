@@ -124,7 +124,7 @@ def steps(app, result, size_names):
         app._apply_calibration(CALIBRATION_RESULT, "proartp16")
         yield
         result.extend(f"{size_name}, calibration review: {fault}" for fault in overflowing(window))
-        app._finish_calibration_review(keep=False)
+        app._finish_calibration_review(keep=False, quiet=True)
         app._view_stack.set_visible_child_name("actions")
         for dialog_name in dialogs(app, profile):
             unfold(window)
