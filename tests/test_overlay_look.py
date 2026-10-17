@@ -69,6 +69,26 @@ def state(title, titles, **extra):
     }
 
 
+# Groups whose list is open (details.submenu as the driver sends it) and
+# broken payloads that must not open one.
+SUBMENUS = [
+    {"title": "Brightness", "index": 1, "items": ["Size", "Opacity", "Flow"], "icons": ["", "my-flow", ""],
+     "colors": ["#6cb6ff", "#f4c95d", "bad"], "selected": 1},
+    {"title": "Undo / Redo", "items": [f"Item {n}" for n in range(12)], "icons": ["a", None, 7],
+     "colors": COLORS, "selected": 9},
+    {"title": "Undo / Redo", "items": [f"Item {n}" for n in range(12)], "selected": 99},
+    {"title": "Zoom", "items": ["One", None, 3, 2.5, True], "selected": "2"},
+    {"title": "Not in the menu", "items": ["A", "B"], "selected": -4},
+    {"title": "Volume", "items": ["A", "B"], "selected": 0.5},
+    {"title": "Volume", "items": ["A", "B"], "selected": "nope"},
+    {"title": "Volume", "items": []},
+    {"title": "Volume", "items": "AB"},
+    {"title": "Volume"},
+    None,
+    "Volume",
+]
+
+
 def views():
     skin = resolve_skin(builtin_skins(), "glass")
     states = [
@@ -88,9 +108,24 @@ def views():
         {"colors": COLORS, "pointer": 0},
         {"profile": "darktable", "colors": COLORS, "color": "nope", "pointer": 359.5},
     ]
+    groups = [
+        {"profile": "Krita", "colors": COLORS, "pointer": 40, "submenu": submenu} for submenu in SUBMENUS
+    ] + [
+        # A function chosen from a group: its icon comes from the driver.
+        {"profile": "Krita", "colors": COLORS, "color": "#ff0000", "parent": "Brightness", "icon": "my-size"},
+        {"profile": "Krita", "colors": COLORS, "parent": "Brightness", "icon": None},
+    ]
+    group_states = [
+        state("Opacity", MENU),
+        state("Item 9", ["A", "B", "C", "D", "E", "F", "G", "H", "Undo / Redo"]),
+        state("Size", [], unit=""),
+        state("Opacity", MENU, enabled=False),
+    ]
     result = []
-    for index, (st, de) in enumerate(itertools.product(states, details)):
-        appearance = {"scale": SCALES[index % len(SCALES)], "show_pointer": index % 3 != 0}
+    pairs = list(itertools.product(states, details)) + list(itertools.product(group_states, groups))
+    for index, (st, de) in enumerate(pairs):
+        appearance = {"scale": SCALES[index % len(SCALES)], "show_pointer": index % 3 != 0,
+                      "show_hints": index % 4 != 1}
         result.append({"state": st, "details": de, "appearance": appearance,
                        "accent": [0.9, 0.7, 0.5, 1], "skin": skin})
     return result
@@ -99,7 +134,8 @@ def views():
 SCRIPT = """
 import GLib from 'gi://GLib';
 import { effectiveLook, iconLayout, overlayPlacement, parseColor, pillContent, pillPlacement,
-         pointerPlacement, isSelectedMode, segmentState, iconNameFor } from '%s';
+         pointerPlacement, isSelectedMode, segmentState, iconNameFor, openSubmenu, submenuLayout,
+         submenuPlacement, submenuSize } from '%s';
 const input = JSON.parse(new TextDecoder().decode(GLib.file_get_contents(ARGV[0])[1]));
 const out = {};
 out.placements = input.placements.map(([w, h, scale, position, custom, ...near]) =>
@@ -113,7 +149,16 @@ out.views = input.views.map(view => ({
     pointer: pointerPlacement(view),
     selected: isSelectedMode(view.state),
     segments: segmentState(view.state),
+    submenu: openSubmenu(view),
+    listIcons: submenuLayout(view),
+    listIconsSmall: submenuLayout(view, 0.6123),
 }));
+out.lists = input.lists.map(([w, h, scale, position, custom, pointer, side, gap, count, hints, preferRight]) => {
+    const monitor = { width: w, height: h };
+    const dial = overlayPlacement(monitor, scale, position, custom, pointer, side, gap);
+    const size = submenuSize(count, hints);
+    return { size, placed: submenuPlacement(monitor, dial, scale, size, preferRight) };
+});
 out.colors = input.colors.map(text => parseColor(text, [9, 9, 9, 9]));
 out.iconNames = input.titles.map(iconNameFor);
 print(JSON.stringify(out));
@@ -156,6 +201,17 @@ class LookTwinsTest(unittest.TestCase):
                     [None, (0, 0), (0.5, 0.5), (1, 1), (0.31, 0.77)])
             ],
             "views": views(),
+            "lists": [
+                [w, h, scale, position, custom, spot(w, h, *at) if at else None, side, 24, count, hints, right]
+                for (w, h), scale, (position, custom, at, side), count, hints, right in itertools.product(
+                    MONITORS, SCALES,
+                    [("lower", None, None, None), ("top", None, None, None), ("custom", [0, 0.5], None, None),
+                     ("custom", [1, 1], None, None), ("custom", [0.123, 0.987], None, None),
+                     ("pointer", None, (0.5, 0.5), "below-right"), ("pointer", None, (1, 1), "left"),
+                     ("pointer", None, (0, 0.5), "right"), ("pointer", None, (0.31, 0.77), "above"),
+                     ("pointer", None, (0.123, 0.456), "below-left")],
+                    [1, 3, 7, 12], [True, False], [True, False])
+            ],
             "colors": ["#e7b98d", "E7B98D", " #102030 ", "#12345", "#1234567", None, 7, "#gggggg"],
             "titles": ["Volume", "Brush size", "Lock screen", "Terminal", "", "Something else"],
         }
@@ -195,6 +251,25 @@ class LookTwinsTest(unittest.TestCase):
                 self.assertEqual(normal(look.pointer_placement(view)), normal(expected["pointer"]))
                 self.assertEqual(look.is_selected_mode(view["state"]), expected["selected"])
                 self.assertEqual(normal(look.segment_state(view["state"])), normal(expected["segments"]))
+                self.assertEqual(normal(look.open_submenu(view)), normal(expected["submenu"]))
+                self.assertEqual(normal(look.submenu_layout(view)), normal(expected["listIcons"]))
+                self.assertEqual(normal(look.submenu_layout(view, 0.6123)), normal(expected["listIconsSmall"]))
+
+    def test_group_lists_were_compared(self):
+        opened = [expected["submenu"] for expected in self.js["views"] if expected["submenu"]]
+        self.assertGreaterEqual(len(opened), 12)
+        self.assertEqual({submenu["preferRight"] for submenu in opened}, {True, False})
+
+    def test_submenu_placement(self):
+        for args, expected in zip(self.input["lists"], self.js["lists"]):
+            w, h, scale, position, custom, pointer, side, gap, count, hints, right = args
+            with self.subTest(args=args):
+                monitor = {"width": w, "height": h}
+                dial = look.overlay_placement(monitor, scale, position, custom, pointer, side, gap)
+                size = look.submenu_size(count, hints)
+                self.assertEqual(size, expected["size"])
+                self.assertEqual(normal(look.submenu_placement(monitor, dial, scale, size, right)),
+                                 normal(expected["placed"]))
 
     def test_parse_color(self):
         for text, expected in zip(self.input["colors"], self.js["colors"]):
@@ -216,19 +291,25 @@ class ConstantsTest(unittest.TestCase):
     def test_dial_geometry(self):
         constants = js_constants(DIAL_JS)
         for name in ("DIAL_D", "HINT_H", "ICON_R", "HIGHLIGHT_R", "GAUGE_R", "POINTER_GLOW_R", "ICON_SIZE",
-                     "CENTER_ICON_SIZE"):
+                     "CENTER_ICON_SIZE", "LIST_W", "LIST_ROW_H", "LIST_HEADER_H", "LIST_FOOTER_H", "LIST_PAD",
+                     "LIST_MARGIN", "LIST_ICON_SIZE", "LIST_ROWS_MAX", "LIST_SCALE_MIN"):
             self.assertEqual(getattr(look, name), constants[name], name)
 
     def test_painter_geometry(self):
         from overlay import painter
 
         constants = js_constants(DIAL_JS)
-        for name in ("DIAL_D", "OUTER_R", "ICON_R", "BUBBLE_R", "HIGHLIGHT_R", "GAUGE_R", "GAUGE_W", "CENTER_R"):
+        for name in ("DIAL_D", "OUTER_R", "ICON_R", "BUBBLE_R", "HIGHLIGHT_R", "GAUGE_R", "GAUGE_W", "CENTER_R",
+                     "LIST_W", "LIST_ROW_H", "LIST_HEADER_H", "LIST_FOOTER_H", "LIST_PAD", "LIST_MARGIN",
+                     "LIST_RADIUS", "LIST_ICON_SIZE", "LIST_ROWS_MAX"):
             self.assertEqual(getattr(painter, name), constants[name], name)
+        footer = re.search(r"^const LIST_FOOTER = '(.*)';", DIAL_JS.read_text(), re.M).group(1)
+        self.assertEqual(painter.LIST_FOOTER, footer)
 
     def test_extension_timing(self):
         constants = js_constants(EXTENSION_JS)
-        for name in ("FADE_IN_MS", "FADE_OUT_MS", "FADE_AFTER_MS", "FADE_SLOW_MS", "PILL_ICON_SIZE"):
+        for name in ("FADE_IN_MS", "FADE_OUT_MS", "FADE_AFTER_MS", "FADE_SLOW_MS", "PILL_ICON_SIZE",
+                     "LIST_OPEN_MS", "LIST_CLOSE_MS", "LIST_SLIDE"):
             self.assertEqual(getattr(look, name), constants[name], name)
 
     def test_positions_and_pointer_sides(self):
@@ -297,6 +378,11 @@ class DriverStateTest(unittest.TestCase):
         current = look.new_state()
         look.apply_overlay_state(current, (True, "", [], [], 0, 0.0, "", False, False))
         self.assertTrue(current["touching"])
+
+    def test_details_match_the_extension(self):
+        text = EXTENSION_JS.read_text()
+        block = re.search(r"this\._details = \{(.*?)\n        \};", text, re.S).group(1)
+        self.assertEqual(re.findall(r"^\s*(\w+):", block, re.M), list(look.new_details()))
 
     def test_details_merge_and_ignore_garbage(self):
         details = look.new_details()

@@ -19,6 +19,8 @@ MIN_PIXELS = 25
 MENU = ["Volume", "Brightness", "Scroll", "Zoom", "Undo / Redo", "Media"]
 COLORS = ["#6cb6ff", "#f4c95d", "#9ad17b", "#e7b98d", "#c99bff", "#ff8f8f"]
 NO_TITLES = [""] * len(MENU)
+# The monitor the reference pictures place the dial and a group's list on.
+MONITOR = {"width": 1920, "height": 1080}
 
 
 def signal(title="", titles=None, value=0, angle=0.0, unit="", pressed=False, progress=False, touching=True,
@@ -69,6 +71,32 @@ CASES = [
         "details": {"profile": "Default", "colors": COLORS, "color": "#f4c95d", "pointer": 200,
                     "hints": {"ccw": "Darker", "cw": "Brighter"}},
     },
+    # Groups: "Brightness" (sector 1, right half) and "Undo / Redo" (sector
+    # 4, left half) stand for groups whose list is open beside the dial.
+    {
+        "name": "group-list",
+        "overlay": {"skin": "glass"},
+        "signal": signal("Opacity"),
+        "details": {"profile": "Krita", "colors": COLORS, "pointer": 64,
+                    "submenu": {"title": "Brightness", "index": 1, "items": ["Size", "Opacity", "Flow"],
+                                "icons": ["", "", ""], "colors": ["#6cb6ff", "#f4c95d", "#9ad17b"],
+                                "selected": 1}},
+    },
+    {
+        "name": "group-list-long",
+        "overlay": {"skin": "classic", "scale": 1.3, "show_hints": False},
+        "signal": signal("Item 9"),
+        "details": {"profile": "Inkscape", "colors": COLORS, "pointer": 250,
+                    "submenu": {"title": "Undo / Redo", "index": 4, "items": [f"Item {n}" for n in range(12)],
+                                "icons": ["", "", "edit-copy-symbolic"], "colors": COLORS, "selected": 9}},
+    },
+    {
+        "name": "group-function",
+        "overlay": {"skin": "midnight"},
+        "signal": signal("Opacity", NO_TITLES, value=40, unit="%"),
+        "details": {"profile": "Krita", "colors": COLORS, "color": "#f4c95d", "pointer": 150, "parent": "Brightness",
+                    "icon": "", "hints": {"ccw": "Less", "cw": "More", "center": "Reset"}},
+    },
 ]
 
 
@@ -82,17 +110,36 @@ def case_view(case):
     return look.make_view(state, details, appearance, skin)
 
 
-def reference_cases(cases=None):
-    """Cases as tests/render_dial_reference.js reads them."""
+def reference_cases(cases=None, monitor=None):
+    """Cases as tests/render_dial_reference.js reads them; monitor: logical
+    {"width", "height"} that places a group's list (default MONITOR)."""
     entries = []
     for case in CASES if cases is None else cases:
         view = case_view(case)
         entries.append({
             "name": case["name"], "skin": look.skin_id(view["appearance"], True),
             "accent": view["appearance"]["accent"], "appearance": view["appearance"],
-            "state": view["state"], "details": view["details"],
+            "state": view["state"], "details": view["details"], "monitor": monitor or MONITOR,
         })
     return entries
+
+
+def dial_placement(view, monitor=None):
+    """Where the dial of a case goes on a monitor (logical pixels)."""
+    rule = look.effective_look(view["appearance"], view["details"].get("look"))
+    return look.overlay_placement(monitor or MONITOR, view["appearance"]["scale"], rule["position"], rule["custom"])
+
+
+def list_placement(view, monitor=None):
+    """Where a case's group list goes beside its dial, or None
+    (_updateSubmenu() in extension.js)."""
+    submenu = look.open_submenu(view)
+    if not submenu:
+        return None
+    appearance = view["appearance"]
+    size = look.submenu_size(len(submenu["items"]), appearance["show_hints"])
+    return look.submenu_placement(monitor or MONITOR, dial_placement(view, monitor), appearance["scale"], size,
+                                  submenu["preferRight"])
 
 
 def changed_pixels(first, second):

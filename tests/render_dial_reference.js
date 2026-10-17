@@ -5,9 +5,11 @@
 //
 //   gjs -m tests/render_dial_reference.js cases.json output-directory
 //
-// cases.json: [{name, skin, accent, appearance, state, details, scale?}],
-// state and details as in extension.js. Writes <name>.png, transparent
-// around the dial, overlayPlacement() size at the given pixel scale.
+// cases.json: [{name, skin, accent, appearance, state, details,
+// pixelScale?, monitor?}], state and details as in extension.js. Writes
+// <name>.png, transparent around the dial, overlayPlacement() size at the
+// given pixel scale, and with a group's list open <name>-list.png, its
+// submenuPlacement() beside the dial on monitor ({width, height}, logical).
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Rsvg from 'gi://Rsvg?version=2.0';
@@ -17,11 +19,18 @@ import System from 'system';
 import {
     DIAL_D,
     HINT_H,
+    effectiveLook,
     iconLayout,
     iconNameFor,
+    openSubmenu,
+    overlayPlacement,
     paintDial,
+    paintSubmenu,
     parseColor,
     resolveSkin,
+    submenuLayout,
+    submenuPlacement,
+    submenuSize,
 } from '../gnome/extension/dial.js';
 
 const ROOT = GLib.path_get_dirname(GLib.path_get_dirname(System.programPath));
@@ -110,5 +119,30 @@ for (const entry of readJson(casesPath)) {
             drawIcon(cr, center.title, center.configured, center.x, center.y, center.size, center.color);
     }
     surface.writeToPNG(GLib.build_filenamev([output, `${entry.name}.png`]));
+    cr.$dispose();
+    if (view.state.enabled)
+        paintList(view, entry, pixels);
+}
+
+// An open group's list as _updateSubmenu() in extension.js places and
+// paints it beside the dial on entry.monitor: <name>-list.png.
+function paintList(view, entry, pixels) {
+    const submenu = openSubmenu(view);
+    if (!submenu)
+        return;
+    const monitor = entry.monitor ?? { width: 1920, height: 1080 };
+    const look = effectiveLook(view.appearance, view.details.look);
+    const scale = view.appearance.scale;
+    const dial = overlayPlacement(monitor, scale, look.position, look.custom);
+    const size = submenuSize(submenu.items.length, view.appearance.show_hints);
+    const placed = submenuPlacement(monitor, dial, scale, size, submenu.preferRight);
+    const surface = new Cairo.ImageSurface(Cairo.Format.ARGB32,
+        Math.ceil(placed.width * pixels), Math.ceil(placed.height * pixels));
+    const cr = new Cairo.Context(surface);
+    cr.scale(pixels, pixels);
+    paintSubmenu(cr, view, placed.side, placed.scale);
+    for (const row of submenuLayout(view, placed.scale).rows)
+        drawIcon(cr, row.title, row.configured, row.x, row.y, row.size, row.color);
+    surface.writeToPNG(GLib.build_filenamev([output, `${entry.name}-list.png`]));
     cr.$dispose();
 }

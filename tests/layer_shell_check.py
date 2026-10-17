@@ -11,8 +11,8 @@ records clicks, keys and focus, a fake driver on the session bus and the
 dial (overlay/layer_shell.py). For every case of tests/dial_cases.py it
 writes the overlay section of config.json (the dial reloads it), sends the
 driver's OverlayDetails and OverlayState signals, takes a screenshot and
-compares the dial with dial.js's picture of the same state
-(tests/render_dial_reference.js) over the window's colour. Then the pill,
+compares the dial (and a group's list beside it) with dial.js's picture of
+the same state (tests/render_dial_reference.js) over the window's colour. Then the pill,
 clicks and keys through the dial, focus, hiding after release and the
 fade. Screenshots and differences stay in OUTPUT_DIR.
 """
@@ -39,7 +39,7 @@ from gi.repository import Gio, GLib  # noqa: E402
 from PIL import Image, ImageChops  # noqa: E402
 
 from config import identity  # noqa: E402
-from dial_cases import CASES, MIN_PIXELS, case_view, changed_pixels, reference_cases  # noqa: E402
+from dial_cases import CASES, MIN_PIXELS, case_view, changed_pixels, list_placement, reference_cases  # noqa: E402
 from overlay import look  # noqa: E402
 
 # Screen pixels; WIDTH and HEIGHT are logical, set from the output scale.
@@ -131,7 +131,9 @@ class FakeDriver:
             invocation.return_value(GLib.Variant("(s)", (json.dumps(self.details),)))
 
     def send(self, details, state):
-        """Details first, then the state, in one go like the driver."""
+        """Details first, then the state, in one go like the driver, which
+        sends every key (submenu None while no list is open)."""
+        details = {**look.new_details(), **details}
         self.details = details
         self.bus.emit_signal(None, identity.DBUS_PATH, identity.DBUS_INTERFACE, "OverlayDetails",
                              GLib.Variant("(s)", (json.dumps(details),)))
@@ -403,7 +405,8 @@ def main() -> int:
     runtime = Path(os.environ["XDG_RUNTIME_DIR"])
     print(f"== {compositor_name} at scale {SCALE}: reference pictures from dial.js", flush=True)
     cases_file = output / "cases.json"
-    cases_file.write_text(json.dumps([{**entry, "pixelScale": SCALE} for entry in reference_cases()]))
+    monitor = {"width": WIDTH, "height": HEIGHT}
+    cases_file.write_text(json.dumps([{**entry, "pixelScale": SCALE} for entry in reference_cases(monitor=monitor)]))
     subprocess.run(["gjs", "-m", str(ROOT / "tests" / "render_dial_reference.js"), str(cases_file),
                     str(output / "reference")], check=True)
 
@@ -446,9 +449,21 @@ def main() -> int:
             pump(0.6)
             shot = compositor.screenshot(output / f"screen-{name}.png")
             box = dial_box(case_view(case))
-            reference = Image.open(output / "reference" / f"{name}.png").convert("RGBA")
-            expected = Image.new("RGBA", reference.size, BACKGROUND + (255,))
-            expected.alpha_composite(reference)
+            # The screen as the Shell would show it: the dial, a group's list
+            # on top of it (its shadow margin may overlap the dial's box).
+            screen = Image.new("RGBA", shot.size, BACKGROUND + (255,))
+            screen.alpha_composite(Image.open(output / "reference" / f"{name}.png").convert("RGBA"), box[:2])
+            listed = list_placement(case_view(case), monitor)
+            list_box = None
+            if listed:
+                list_box = tuple(round(value * SCALE) for value in (
+                    listed["x"], listed["y"], listed["x"] + listed["width"], listed["y"] + listed["height"]))
+                screen.alpha_composite(Image.open(output / "reference" / f"{name}-list.png").convert("RGBA"),
+                                       list_box[:2])
+                differ = changed_pixels(shot.crop(list_box).convert("RGBA"), screen.crop(list_box))
+                check(differ is not None and differ < MIN_PIXELS,
+                      f"{name}: the group's list beside the dial matches dial.js ({differ} pixels differ)")
+            expected = screen.crop(box)
             actual = shot.crop(box).convert("RGBA")
             actual.save(output / f"dial-{name}.png")
             # The finger dot is a layer of its own at a fractional position,
@@ -466,7 +481,8 @@ def main() -> int:
             check(pixels is not None and pixels < MIN_PIXELS,
                   f"{name}: the dial on screen matches dial.js ({pixels} pixels differ)")
             outside = shot.copy()
-            outside.paste(Image.new("RGB", (box[2] - box[0], box[3] - box[1]), BACKGROUND), box[:2])
+            for shown in (box, list_box) if list_box else (box,):
+                outside.paste(Image.new("RGB", (shown[2] - shown[0], shown[3] - shown[1]), BACKGROUND), shown[:2])
             check(background_pixels(outside) == 0, f"{name}: nothing else on screen")
 
         print("== click-through, keys and focus", flush=True)
@@ -504,6 +520,25 @@ def main() -> int:
         pump(look.DEFAULT_APPEARANCE["hide_delay_ms"] / 1000 + look.FADE_OUT_MS / 1000 + 0.5)
         shot = compositor.screenshot(output / "screen-hidden.png")
         check(background_pixels(shot) == 0, "the dial is gone hide_delay_ms after release")
+
+        # A group's list is part of the dial: it lingers and hides with it.
+        group = next(case for case in CASES if case["name"] == "group-list")
+        driver.send(group["details"], group["signal"])
+        pump(0.6)
+        listed = list_placement(case_view(group), monitor)
+        list_box = tuple(round(value * SCALE) for value in (
+            listed["x"], listed["y"], listed["x"] + listed["width"], listed["y"] + listed["height"]))
+        check(background_pixels(compositor.screenshot(output / "screen-group.png"), list_box) > 1000,
+              "a group's list shows beside the dial")
+        released_group = list(group["signal"])
+        released_group[-1] = False
+        driver.send(group["details"], released_group)
+        pump(0.5)
+        check(background_pixels(compositor.screenshot(output / "screen-group-released.png"), list_box) > 1000,
+              "the list lingers with the dial after release")
+        pump(look.DEFAULT_APPEARANCE["hide_delay_ms"] / 1000 + look.FADE_OUT_MS / 1000 + 0.5)
+        check(background_pixels(compositor.screenshot(output / "screen-group-hidden.png")) == 0,
+              "the list is gone with the dial")
 
         print("== pill", flush=True)
         details = {**menu["details"], "look": {"visibility": "pill"}}

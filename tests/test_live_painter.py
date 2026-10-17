@@ -29,7 +29,7 @@ try:
 except (ImportError, ValueError):
     cairo = None
 
-from dial_cases import CASES, MIN_PIXELS, case_view, changed_pixels, reference_cases  # noqa: E402
+from dial_cases import CASES, MIN_PIXELS, case_view, changed_pixels, list_placement, reference_cases  # noqa: E402
 from overlay import look  # noqa: E402
 
 ICON_THEMES = ["/usr/share/icons/Adwaita", "/usr/share/icons/AdwaitaLegacy", "/usr/share/icons/hicolor"]
@@ -108,6 +108,26 @@ class LivePainterTest(unittest.TestCase):
                 pixels = changed_pixels(self.output / "reference" / f"{case['name']}.png", python)
                 self.assertIsNotNone(pixels, "sizes differ")
                 self.assertLess(pixels, MIN_PIXELS)
+
+    def test_group_lists_match_dial_js(self):
+        from overlay.painter import paint_live_submenu
+
+        lists = 0
+        for case in CASES:
+            view = case_view(case)
+            placed = list_placement(view)
+            reference = self.output / "reference" / f"{case['name']}-list.png"
+            with self.subTest(case=case["name"]):
+                self.assertEqual(reference.exists(), placed is not None)
+                if placed is None:
+                    continue
+                lists += 1
+                surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, placed["width"], placed["height"])
+                paint_live_submenu(cairo.Context(surface), view, placed["side"], placed["scale"], draw_icon)
+                python = self.output / f"{case['name']}-list.png"
+                surface.write_to_png(str(python))
+                self.assertEqual(changed_pixels(reference, python), 0)
+        self.assertEqual(lists, 2)
 
     def test_layers_paint_like_the_whole_dial(self):
         # The layer-shell dial paints three layers; together they are the dial.

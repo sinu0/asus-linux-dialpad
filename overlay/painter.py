@@ -500,13 +500,28 @@ def paint_submenu(cr, view, x, y, scale, side="right", draw_icon=None, hints=Tru
     if submenu is None:
         return
     draw_icon = draw_icon or _no_icon
-    palette = view.palette
+    group_color = view.colors[submenu.index] if 0 <= submenu.index < len(view.colors) else view.accent
+
+    def row_icon(cr, position, icon_x, middle, selected):
+        icon = submenu.icons[position] or icon_for_title(submenu.items[position])
+        draw_icon(cr, icon, icon_x - LIST_ICON_SIZE / 2, middle - LIST_ICON_SIZE / 2, LIST_ICON_SIZE,
+                  view.palette["iconOnColor" if selected else "icon"])
+
+    cr.save()
+    cr.translate(x, y)
+    cr.scale(scale, scale)
+    _draw_list(cr, view.palette, submenu, group_color, side, hints, row_icon)
+    cr.restore()
+
+
+def _draw_list(cr, palette, submenu, group_color, side, hints, row_icon=None):
+    """drawSubmenu() in dial.js, unscaled; submenu as OpenSubmenu has it.
+    row_icon(cr, position, x, y, selected) paints a row's icon inside the
+    row, so it fades with it (the previews); the Shell's icons are actors."""
     width, height = submenu_size(len(submenu.items), hints)
     left = top = LIST_MARGIN
     panel_w, panel_h = width - 2 * LIST_MARGIN, height - 2 * LIST_MARGIN
     cr.save()
-    cr.translate(x, y)
-    cr.scale(scale, scale)
     for step in range(5, -1, -1):
         grow = step * 1.8 - 3
         cr.new_path()
@@ -525,7 +540,6 @@ def paint_submenu(cr, view, x, y, scale, side="right", draw_icon=None, hints=Tru
     cr.set_source_rgba(*palette["rim"])
     cr.stroke()
 
-    group_color = view.colors[submenu.index] if 0 <= submenu.index < len(view.colors) else view.accent
     edge = left + panel_w - 2.5 if side == "left" else left + 2.5
     cr.new_path()
     cr.set_line_cap(1)  # round
@@ -566,9 +580,8 @@ def paint_submenu(cr, view, x, y, scale, side="right", draw_icon=None, hints=Tru
             cr.stroke()
         _aligned_text(cr, _truncate(submenu.items[position], 20), box_x + 44, middle, 13,
                       palette["iconOnColor" if selected else "text"], "left", selected)
-        icon = submenu.icons[position] or icon_for_title(submenu.items[position])
-        draw_icon(cr, icon, icon_x - LIST_ICON_SIZE / 2, middle - LIST_ICON_SIZE / 2, LIST_ICON_SIZE,
-                  palette["iconOnColor" if selected else "icon"])
+        if row_icon is not None:
+            row_icon(cr, position, icon_x, middle, selected)
         cr.pop_group_to_source()
         cr.paint_with_alpha(alpha)
 
@@ -629,7 +642,8 @@ class _LiveMenu:
         self.palette = self.skin["palette"]
         self.titles = segments["titles"]
         self.count = segments["count"]
-        self.title = "" if state["title"] == "Menu" else state["title"]
+        # The sector to highlight: an open list's group, else the title.
+        self.title = look.active_title(view)
         self.pointer = None
         self.selected = False
         self.submenu = None
@@ -701,6 +715,39 @@ def paint_live_dial(cr, view, draw_icon=None):
         cr.scale(scale, scale)
         _draw_pointer(cr, view["skin"]["palette"], pointer["x"], pointer["y"], pointer["color"])
         cr.restore()
+
+
+class _LiveSubmenu:
+    """openSubmenu() of overlay/look.py in the shape _draw_list() reads."""
+
+    def __init__(self, submenu):
+        for key in ("title", "items", "colors", "selected", "first", "rows"):
+            setattr(self, key, submenu[key])
+        self._submenu = submenu
+
+    def faded(self, row):
+        return look.list_row_faded(self._submenu, row)
+
+
+def paint_live_submenu(cr, view, side="right", scale=None, draw_icon=None):
+    """paintSubmenu() in dial.js and the list's icon actors
+    (submenuLayout()): the open group's list in a submenu_size() box at the
+    top left corner; side and scale come from look.submenu_placement()."""
+    submenu = look.open_submenu(view)
+    if not submenu:
+        return
+    scale = view["appearance"]["scale"] if scale is None else scale
+    group_color = look.segment_color(view, submenu["index"]) if submenu["index"] >= 0 else view["accent"]
+    cr.save()
+    cr.scale(scale, scale)
+    _draw_list(cr, view["skin"]["palette"], _LiveSubmenu(submenu), group_color, side,
+               view["appearance"].get("show_hints") is not False)
+    cr.restore()
+    cr.new_path()
+    if draw_icon is not None:
+        for row in look.submenu_layout(view, scale)["rows"]:
+            draw_icon(cr, look.icon_source(row["title"], row["configured"]), row["x"], row["y"], row["size"],
+                      row["color"])
 
 
 def _draw_pointer(cr, palette, x, y, color):
@@ -824,7 +871,8 @@ def _live_center(cr, view, cache):
             _text(cr, _truncate(profile, 16), DIAL_R + 26, 8.5, palette["muted"], False)
     elif title and title != "Menu":
         _text(cr, _truncate(title, 14), DIAL_R + 10, 13 if len(title) > 10 else 16, palette["text"], True)
-        _text(cr, "Release to select", DIAL_R + 32, 8.5, palette["muted"], False)
+        action = "Tap to choose" if look.open_submenu(view) else "Release to select"
+        _text(cr, action, DIAL_R + 32, 8.5, palette["muted"], False)
     else:
         _text(cr, _truncate(profile or "DIAL", 14), DIAL_R - 8, 11 if len(profile) > 10 else 13, palette["text"], True)
         _text(cr, "Choose a function", DIAL_R + 14, 9, palette["muted"], False)
@@ -841,12 +889,14 @@ def _hints(cr, view):
     multi = view["details"].get("mode") != "single"
     ccw = _truncate(hints.get("ccw"), 20)
     cw = _truncate(hints.get("cw"), 20)
+    # A function of a group goes back to the group's list.
+    back = "back" if view["details"].get("parent") else "menu"
     center = ""
     if hints.get("center"):
         action = _truncate(hints["center"], 26)
-        center = f"Tap: {action}  ·  Hold: menu" if multi else f"Tap: {action}"
+        center = f"Tap: {action}  ·  Hold: {back}" if multi else f"Tap: {action}"
     elif multi:
-        center = "Tap centre: menu"
+        center = f"Tap centre: {back}"
     if not ccw and not cw and not center:
         return
     height = 40 if center else 24

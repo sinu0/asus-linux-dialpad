@@ -2,7 +2,7 @@
 
 Python twins of the logic in gnome/extension/dial.js (overlayPlacement,
 besidePointer, effectiveLook, pillContent, pillPlacement, iconLayout,
-pointerPlacement…) and of the state handling in gnome/extension/extension.js
+pointerPlacement, openSubmenu, submenuPlacement, submenuLayout…) and of the state handling in gnome/extension/extension.js
 (appearance from config.json, OverlayState and OverlayDetails). The dials outside GNOME Shell
 (overlay/layer_shell.py) use them, so every desktop places and fades the
 dial alike. tests/test_overlay_look.py runs the JavaScript originals in gjs
@@ -32,6 +32,16 @@ POINTER_GLOW_R = 15
 POINTER_SIZE = 2 * POINTER_GLOW_R
 ICON_SIZE = 20
 CENTER_ICON_SIZE = 26
+# A group's list beside the dial (the LIST_* constants of dial.js).
+LIST_W = 232
+LIST_ROW_H = 40
+LIST_HEADER_H = 34
+LIST_FOOTER_H = 22
+LIST_PAD = 8
+LIST_MARGIN = 12
+LIST_ICON_SIZE = 18
+LIST_ROWS_MAX = 7
+LIST_SCALE_MIN = 0.6
 
 # Timing and sizes from extension.js.
 FADE_IN_MS = 120
@@ -40,6 +50,10 @@ FADE_OUT_MS = 260
 FADE_AFTER_MS = 1000
 FADE_SLOW_MS = 600
 PILL_ICON_SIZE = 18
+# A group's list slides out from the dial.
+LIST_OPEN_MS = 180
+LIST_CLOSE_MS = 120
+LIST_SLIDE = 24
 
 DEFAULT_SKIN = "glass"
 DEFAULT_ACCENT = (0.906, 0.725, 0.553, 1)
@@ -217,6 +231,50 @@ def overlay_placement(monitor, scale, position, custom=None, pointer=None,
     }
 
 
+def submenu_size(count, hints=True) -> dict:
+    """submenuSize(): a group's list with count functions, shadow margin
+    included (unscaled)."""
+    rows = max(1, min(LIST_ROWS_MAX, count))
+    return {
+        "width": LIST_W + 2 * LIST_MARGIN,
+        "height": LIST_HEADER_H + rows * LIST_ROW_H + 2 * LIST_PAD + (LIST_FOOTER_H if hints else 0)
+        + 2 * LIST_MARGIN,
+    }
+
+
+def submenu_placement(monitor, dial, scale, size, prefer_right=True) -> dict:
+    """submenuPlacement(): the list beside the dial (an overlay_placement()),
+    on the preferred side when it has room, smaller rather than over the
+    dial, never past an edge."""
+    # The shadow margin may overlap the dial's own empty margin.
+    reach = size["width"] - LIST_MARGIN
+    room = {
+        "right": (monitor["width"] - dial["x"] - dial["width"]) / reach,
+        "left": dial["x"] / reach,
+    }
+    preferred, other = ("right", "left") if prefer_right else ("left", "right")
+    side = preferred
+    if room[preferred] < scale:
+        side = other if room[other] >= scale or room[other] > room[preferred] else preferred
+    fitted = max(LIST_SCALE_MIN, min(scale, room[side], monitor["height"] / size["height"]))
+    width = js_round(size["width"] * fitted)
+    height = js_round(size["height"] * fitted)
+    inset = js_round(LIST_MARGIN * fitted)
+
+    def clamp(value, maximum):
+        return max(0, min(maximum, js_round(value)))
+
+    x = dial["x"] + dial["width"] - inset if side == "right" else dial["x"] - width + inset
+    return {
+        "x": clamp(x, monitor["width"] - width),
+        "y": clamp(dial["y"] + dial["width"] / 2 - height / 2, monitor["height"] - height),
+        "width": width,
+        "height": height,
+        "side": side,
+        "scale": fitted,
+    }
+
+
 def effective_look(appearance, look) -> dict:
     """effectiveLook(): config.json defaults with the profile's and
     function's overrides from the driver on top; invalid values fall back."""
@@ -290,6 +348,9 @@ def new_details() -> dict:
         "hold_returns": True,
         "pointer": -1,
         "look": {},
+        "icon": "",
+        "parent": "",
+        "submenu": None,
     }
 
 
@@ -354,11 +415,70 @@ def segment_color(view, index):
     return parse_color(colors[index] if 0 <= index < len(colors) else None, view["accent"])
 
 
+def js_string(value) -> str:
+    """String(value ?? '') for the JSON values the driver sends."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return format_value(value)
+    return str(value)
+
+
+def open_submenu(view):
+    """openSubmenu(): the group whose list is open beside the menu, or None:
+    {title, index (its sector), items, icons, colors (parsed), selected,
+    first (top visible row), rows (visible), preferRight}."""
+    state, details = view["state"], view["details"]
+    submenu = details.get("submenu")
+    if not isinstance(submenu, dict) or not isinstance(submenu.get("items"), list) or not submenu["items"]:
+        return None
+    if not state["enabled"] or is_selected_mode(state) or not any(state["titles"]):
+        return None
+    items = [js_string(item) for item in submenu["items"]]
+    count = len(items)
+    icons = submenu.get("icons") if isinstance(submenu.get("icons"), list) else []
+    colors = submenu.get("colors") if isinstance(submenu.get("colors"), list) else []
+    number = js_number(submenu.get("selected"))
+    selected = max(0, min(count - 1, js_round(_or(number, 0))))
+    rows = min(LIST_ROWS_MAX, count)
+    first = max(0, min(count - rows, selected - rows // 2))
+    titles = segment_state(state)["titles"]
+    title = js_string(submenu.get("title"))
+    index = titles.index(title) if title in titles else -1
+    sectors = max(len(titles), 4)
+    return {
+        "title": title,
+        "index": index,
+        "items": items,
+        "icons": [js_string(icons[position] if position < len(icons) else None) for position in range(count)],
+        "colors": [parse_color(colors[position] if position < len(colors) else None, view["accent"])
+                   for position in range(count)],
+        "selected": selected,
+        "first": first,
+        "rows": rows,
+        # A sector on the right half of the dial opens its list to the right.
+        "preferRight": index < 0 or (index + 0.5) / sectors <= 0.5,
+    }
+
+
+def active_title(view) -> str:
+    """activeTitle(): the group of an open list, else the title."""
+    submenu = open_submenu(view)
+    if submenu:
+        return submenu["title"]
+    return "" if view["state"]["title"] == "Menu" else view["state"]["title"]
+
+
 def function_color(view):
     return parse_color(view["details"].get("color"), view["accent"])
 
 
 def active_color(view):
+    submenu = open_submenu(view)
+    if submenu:
+        return submenu["colors"][submenu["selected"]]
     titles = segment_state(view["state"])["titles"]
     title = view["state"]["title"]
     return segment_color(view, titles.index(title)) if title in titles else view["accent"]
@@ -378,10 +498,14 @@ def pill_content(view) -> dict:
         titles = segments["titles"]
         return _configured_icon(segments["icons"], titles.index(title) if title in titles else -1)
 
+    submenu = open_submenu(view)
+    if submenu:
+        return {"title": state["title"], "value": f"{submenu['selected'] + 1}/{len(submenu['items'])}",
+                "configured": submenu["icons"][submenu["selected"]], "color": submenu["colors"][submenu["selected"]]}
     if is_selected_mode(state):
         value = f"{format_value(state['value'])}{state['unit']}" if not state["valueShowOnlyProgress"] and state["unit"] else ""
-        return {"title": state["title"], "value": value, "configured": configured(state["title"]),
-                "color": function_color(view)}
+        icon = details["icon"] if isinstance(details.get("icon"), str) else configured(state["title"])
+        return {"title": state["title"], "value": value, "configured": icon, "color": function_color(view)}
     if state["title"] and state["title"] != "Menu":
         return {"title": state["title"], "value": "", "configured": configured(state["title"]),
                 "color": active_color(view)}
@@ -414,7 +538,8 @@ def icon_layout(view) -> dict:
     state, skin = view["state"], view["skin"]
     segments = segment_state(state)
     titles, icons, count = segments["titles"], segments["icons"], segments["count"]
-    active_title = "" if state["title"] == "Menu" else state["title"]
+    active = active_title(view)
+    submenu = open_submenu(view)
     scale = view["appearance"]["scale"]
     selected = is_selected_mode(state)
     slice_angle = 2 * math.pi / count
@@ -431,7 +556,7 @@ def icon_layout(view) -> dict:
             "x": js_round((DIAL_R + math.cos(angle) * ICON_R) * scale - size / 2),
             "y": js_round((DIAL_R + math.sin(angle) * ICON_R) * scale - size / 2),
             "size": size,
-            "color": skin["palette"]["iconOnColor"] if title == active_title else skin["palette"]["icon"],
+            "color": skin["palette"]["iconOnColor"] if title == active else skin["palette"]["icon"],
         })
 
     center = None
@@ -440,9 +565,15 @@ def icon_layout(view) -> dict:
         index = titles.index(state["title"]) if state["title"] in titles else -1
         center_size = js_round(CENTER_ICON_SIZE * scale)
         offset = 34 if selected else 26
+        configured = _configured_icon(icons, index)
+        if submenu:
+            configured = submenu["icons"][submenu["selected"]]
+        # A function of a group is not in the menu; the driver sends its icon.
+        elif selected and isinstance(view["details"].get("icon"), str):
+            configured = view["details"]["icon"]
         center = {
             "title": state["title"],
-            "configured": _configured_icon(icons, index),
+            "configured": configured,
             "x": js_round(DIAL_R * scale - center_size / 2),
             "y": js_round((DIAL_R - offset) * scale - center_size / 2),
             "size": center_size,
@@ -454,7 +585,8 @@ def icon_layout(view) -> dict:
 def pointer_placement(view):
     """pointerPlacement(): centre of the finger dot in unscaled dial units
     and its colour, or None when no dot is shown."""
-    pointer = js_number(view["details"].get("pointer"))
+    # A missing value is undefined in JavaScript: NaN, unlike null (0).
+    pointer = js_number(view["details"].get("pointer", math.nan))
     if not view["appearance"].get("show_pointer") or not view["state"]["touching"] or not pointer >= 0:
         return None
     selected = is_selected_mode(view["state"])
@@ -475,8 +607,57 @@ def content_key(view) -> str:
         state["enabled"], state["title"], state["titles"], state["menuTitles"], state["value"],
         state["valueAngleStart"], state["unit"], state["centerPressed"], state["valueShowOnlyProgress"],
         details.get("profile"), details.get("mode"), details.get("colors"), details.get("color"),
-        details.get("hints"),
+        details.get("hints"), details.get("parent"), details.get("submenu"),
     ], default=str)
+
+
+def _list_row(row) -> dict:
+    """listRow(): top left corner of a row of the list and its size, unscaled."""
+    return {
+        "x": LIST_MARGIN + LIST_PAD,
+        "y": LIST_MARGIN + LIST_HEADER_H + row * LIST_ROW_H,
+        "width": LIST_W - 2 * LIST_PAD,
+        "height": LIST_ROW_H - 4,
+    }
+
+
+def list_row_faded(submenu, row) -> bool:
+    """listRowFaded(): rows hidden above or below fade the row at that edge."""
+    return ((row == 0 and submenu["first"] > 0)
+            or (row == submenu["rows"] - 1 and submenu["first"] + submenu["rows"] < len(submenu["items"])))
+
+
+def submenu_layout(view, scale=None):
+    """submenuLayout(): the list's icons relative to its top left corner,
+    scaled (scale from submenu_placement()); None without an open list."""
+    submenu = open_submenu(view)
+    if not submenu:
+        return None
+    scale = view["appearance"]["scale"] if scale is None else scale
+    palette = view["skin"]["palette"]
+    size = js_round(LIST_ICON_SIZE * scale)
+    rows = []
+    for row in range(submenu["rows"]):
+        position = submenu["first"] + row
+        box = _list_row(row)
+        r, g, b, a = palette["iconOnColor"] if position == submenu["selected"] else palette["icon"]
+        rows.append({
+            "title": submenu["items"][position],
+            "configured": submenu["icons"][position],
+            "x": js_round((box["x"] + 22) * scale - size / 2),
+            "y": js_round((box["y"] + box["height"] / 2) * scale - size / 2),
+            "size": size,
+            "color": [r, g, b, a * (0.4 if list_row_faded(submenu, row) else 1)],
+        })
+    return {"rows": rows}
+
+
+def submenu_key(view, side) -> str:
+    """submenuKey(): everything the list's picture depends on besides the
+    skin and the scale."""
+    submenu = open_submenu(view)
+    return json.dumps([submenu, side, view["appearance"].get("show_hints"), view["details"].get("colors")]
+                      if submenu else None, default=str)
 
 
 # --- easing (Clutter.AnimationMode) ------------------------------------------
@@ -491,3 +672,7 @@ def ease_in_quad(t: float) -> float:
 
 def ease_in_out_quad(t: float) -> float:
     return 2 * t * t if t < 0.5 else -1 + (4 - 2 * t) * t
+
+
+def ease_out_cubic(t: float) -> float:
+    return (t - 1) ** 3 + 1

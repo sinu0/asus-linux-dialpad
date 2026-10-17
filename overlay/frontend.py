@@ -2,8 +2,9 @@
 
 The structure follows gnome/extension/extension.js: appearance from
 config.json (reloaded when it or a skin changes), the driver's signals on
-the session bus, the dial in three layers (layers.js) and the pill in its
-place with visibility "pill". Decisions come from overlay/look.py and
+the session bus, the dial in three layers (layers.js), a group's list
+beside it (a window that fades with the dial) and the pill in its place
+with visibility "pill". Decisions come from overlay/look.py and
 overlay/visibility.py, painting from overlay/painter.py.
 """
 
@@ -36,7 +37,7 @@ CONFIG_RELOAD_MS = 200
 FADE_STEP_MS = 16
 
 CSS = """
-window.turnpad-dial, window.turnpad-pill { background: none; box-shadow: none; }
+window.turnpad-dial, window.turnpad-pill, window.turnpad-list { background: none; box-shadow: none; }
 """
 
 
@@ -90,6 +91,9 @@ class FadingWindow:
         self.window = window
         self._opacity = 0.0
         self._source = 0
+        # Windows that show and fade with this one, like child actors
+        # (GroupList): told after every change.
+        self.followers = []
         window.set_opacity(0)
 
     @property
@@ -101,6 +105,8 @@ class FadingWindow:
         # Hidden windows are unmapped: they cost the compositor nothing and
         # the next show lets it choose the output again.
         self.window.set_visible(value)
+        for follower in self.followers:
+            follower.parent_changed()
 
     @property
     def opacity(self) -> float:
@@ -110,6 +116,8 @@ class FadingWindow:
     def opacity(self, value: float) -> None:
         self._opacity = value
         self.window.set_opacity(max(0.0, min(1.0, value / 255)))
+        for follower in self.followers:
+            follower.parent_changed()
 
     def ease(self, opacity, duration, easing, on_complete=None) -> None:
         self.remove_all_transitions()
@@ -131,6 +139,108 @@ class FadingWindow:
         if self._source:
             GLib.source_remove(self._source)
             self._source = 0
+
+
+class GroupList:
+    """A group's list beside the dial: the list actor of extension.js, a
+    child of the dial there, so it shows, fades and hides with it. Here it
+    is a window of its own whose opacity is the dial's times its own; it
+    slides out from the dial, so the window reaches LIST_SLIDE further
+    towards the dial and the picture moves inside it."""
+
+    def __init__(self, window: Gtk.Window, fixed: Gtk.Fixed, area: Gtk.Widget, dial: FadingWindow):
+        self.window = window
+        self._fixed = fixed
+        self._area = area
+        self._dial = dial
+        dial.followers.append(self)
+        self.open = False
+        self._shown = False
+        self._opacity = 0.0
+        self._translation = 0.0
+        self._offset = 0
+        self._moved_to = None
+        self._side = "right"
+        self._slide = 0
+        self._source = 0
+        window.set_opacity(0)
+
+    def place(self, placed: dict, scale: float, width: int) -> None:
+        """placed: look.submenu_placement() on the monitor; width: of the
+        monitor, which the window does not pass."""
+        self._side = placed["side"]
+        self._slide = look.js_round(look.LIST_SLIDE * scale)
+        if placed["side"] == "right":
+            left = max(0, placed["x"] - self._slide)
+            right = placed["x"] + placed["width"]
+        else:
+            left = placed["x"]
+            right = min(width, placed["x"] + placed["width"] + self._slide)
+        self._offset = placed["x"] - left
+        self.window.get_child().set_size_request(right - left, placed["height"])
+        self.window.set_default_size(right - left, placed["height"])
+        Gtk4LayerShell.set_margin(self.window, Gtk4LayerShell.Edge.LEFT, left)
+        Gtk4LayerShell.set_margin(self.window, Gtk4LayerShell.Edge.TOP, placed["y"])
+        self._apply()
+
+    def show_list(self) -> None:
+        """Slide in, unless it is open already (_updateSubmenu())."""
+        if self.open:
+            return
+        self.open = True
+        self._shown = True
+        self._opacity = 0.0
+        self._translation = (-1 if self._side == "right" else 1) * self._slide
+        self._ease(255, 0, look.LIST_OPEN_MS, look.ease_out_cubic)
+
+    def hide_list(self) -> None:
+        """Fade out towards the dial (_closeSubmenu())."""
+        if not self.open:
+            return
+        self.open = False
+
+        def done():
+            if not self.open:
+                self._shown = False
+                self._apply()
+
+        towards = (-1 if self._side == "right" else 1) * look.js_round(self._slide / 2)
+        self._ease(0, towards, look.LIST_CLOSE_MS, look.ease_in_quad, done)
+
+    def parent_changed(self) -> None:
+        self._apply()
+
+    def _apply(self) -> None:
+        visible = self._shown and self._dial.visible
+        if self.window.get_visible() != visible:
+            self.window.set_visible(visible)
+        self.window.set_opacity(max(0.0, min(1.0, self._dial.opacity / 255 * self._opacity / 255)))
+        position = self._offset + round(self._translation)
+        if position != self._moved_to:
+            self._moved_to = position
+            self._fixed.move(self._area, position, 0)
+
+    def _ease(self, opacity, translation, duration, easing, on_complete=None) -> None:
+        if self._source:
+            GLib.source_remove(self._source)
+        start = (self._opacity, self._translation)
+        begin = GLib.get_monotonic_time()
+
+        def step():
+            progress = min(1.0, (GLib.get_monotonic_time() - begin) / (duration * 1000))
+            eased = easing(progress)
+            self._opacity = start[0] + (opacity - start[0]) * eased
+            self._translation = start[1] + (translation - start[1]) * eased
+            self._apply()
+            if progress < 1:
+                return GLib.SOURCE_CONTINUE
+            self._source = 0
+            if on_complete:
+                on_complete()
+            return GLib.SOURCE_REMOVE
+
+        self._apply()
+        self._source = GLib.timeout_add(FADE_STEP_MS, step)
 
 
 class GLibTimers:
@@ -276,6 +386,12 @@ class DialFrontend:
         self._look_key = ""
         self._pill_key = ""
         self._skin_id = ""
+        # Where the dial is on self._placed_on, and the group list beside it.
+        self._dial_placement = None
+        self._list_key = ""
+        self._list_side = "right"
+        self._list_scale = 1.0
+        self._list_monitor = None
         self.state = look.new_state()
         self.details = look.new_details()
         self.appearance = dict(look.DEFAULT_APPEARANCE)
@@ -352,6 +468,8 @@ class DialFrontend:
         self._pill_key = ""
         self.layers.invalidate()
         self._update_pill()
+        self._list_key = ""
+        self._update_submenu()
 
     def _watch_config(self) -> None:
         # config.json and the skins directory; a skins directory created
@@ -416,6 +534,17 @@ class DialFrontend:
 
         self.dial_actor = FadingWindow(self._dial)
         self.pill_actor = FadingWindow(self._pill)
+
+        # A group's list beside the dial, on the dial's output.
+        self._list = _layer_window("turnpad-list")
+        list_fixed = Gtk.Fixed()
+        list_fixed.set_can_target(False)
+        self._list.set_child(list_fixed)
+        self._list_layer = _Layer(self._paint_list)
+        list_fixed.put(self._list_layer.area, 0, 0)
+        if self._output:
+            Gtk4LayerShell.set_monitor(self._list, self._monitor_by_connector(self._output))
+        self.list_actor = GroupList(self._list, list_fixed, self._list_layer.area, self.dial_actor)
         self.visibility = Visibility(self.dial_actor, self.pill_actor, GLibTimers(), self._look, lambda: self.state,
                                      lambda: self.appearance["hide_delay_ms"], self._follow_pointer)
 
@@ -518,8 +647,46 @@ class DialFrontend:
         Gtk4LayerShell.set_margin(self._dial, Gtk4LayerShell.Edge.LEFT, placed["x"])
         Gtk4LayerShell.set_margin(self._dial, Gtk4LayerShell.Edge.TOP, placed["y"])
         self.layers.set_size(placed["width"], placed["height"], scale)
+        self._dial_placement = placed
         self._pill_key = ""
         self._update_pill()
+        self._list_key = ""
+        self._update_submenu()
+
+    # --- group list
+
+    def _paint_list(self, cr) -> None:
+        painter.paint_live_submenu(cr, self.view(), self._list_side, self._list_scale, gtk_icons.draw_icon)
+
+    def _update_submenu(self) -> None:
+        """Opens, moves, repaints or closes the list of the open group
+        (_updateSubmenu() in extension.js)."""
+        monitor = self._placed_on
+        if monitor is None or self._dial_placement is None:
+            return
+        view = self.view()
+        submenu = look.open_submenu(view)
+        if not submenu:
+            self.list_actor.hide_list()
+            self._list_key = ""
+            return
+        scale = self.appearance["scale"]
+        geometry = self._logical(monitor)
+        size = look.submenu_size(len(submenu["items"]), self.appearance["show_hints"])
+        placed = look.submenu_placement(geometry, self._dial_placement, scale, size, submenu["preferRight"])
+        self._list_side, self._list_scale = placed["side"], placed["scale"]
+        if not self._output and monitor is not self._list_monitor:
+            # The compositor would choose the list's output on its own.
+            Gtk4LayerShell.set_monitor(self._list, monitor)
+            self._list_monitor = monitor
+        self.list_actor.place(placed, scale, geometry["width"])
+        key = json.dumps([look.submenu_key(view, placed["side"]), placed["scale"], placed["width"],
+                          placed["height"]])
+        if key != self._list_key:
+            self._list_key = key
+            self._list_layer.set_size(placed["width"], placed["height"])
+            self._list_layer.invalidate()
+        self.list_actor.show_list()
 
     # --- pill
 
@@ -611,6 +778,7 @@ class DialFrontend:
             self.visibility.look_changed()
         self.layers.update()
         self._update_pill()
+        self._update_submenu()
 
     def _on_overlay_details(self, _bus, _sender, _path, _interface, _signal, parameters) -> None:
         self._merge_details(parameters.unpack()[0])
@@ -621,3 +789,4 @@ class DialFrontend:
         self.visibility.update(was_enabled, was_touching)
         self.layers.update()
         self._update_pill()
+        self._update_submenu()
