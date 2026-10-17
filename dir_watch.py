@@ -16,7 +16,9 @@ import gi
 gi.require_version("Gio", "2.0")
 from gi.repository import Gio, GLib
 
-log = logging.getLogger(__name__)
+from config.identity import SLUG
+
+log = logging.getLogger(SLUG)
 
 # Gio event → the inotify event it stands for.
 _FINISHED_WRITE = Gio.FileMonitorEvent.CHANGES_DONE_HINT  # IN_CLOSE_WRITE
