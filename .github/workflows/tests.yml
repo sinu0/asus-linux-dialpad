@@ -70,7 +70,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: ["fedora:latest", "ubuntu:latest"]
+        image: ["fedora:latest", "ubuntu:latest", "ubuntu:24.04"]
     name: install.sh on ${{ matrix.image }}
     runs-on: ubuntu-latest
     timeout-minutes: 20

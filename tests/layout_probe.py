@@ -102,9 +102,32 @@ def dialogs(app, profile):
     demo.close_dialogs(app)
 
 
+def sidebar_faults(app):
+    """The list that stands in for Adw.ViewSwitcherSidebar before Libadwaita 1.9
+    must follow the pages both ways."""
+    sidebar = next((box for box in demo._descendants(app._window, Gtk.ListBox)
+                    if box.has_css_class("navigation-sidebar")), None)
+    if hasattr(Adw, "ViewSwitcherSidebar"):
+        return []
+    if sidebar is None:
+        return ["no page sidebar"]
+    faults = []
+    for index, page in enumerate(PAGES):
+        app._view_stack.set_visible_child_name(page)
+        selected = sidebar.get_selected_row()
+        if selected is None or selected.get_index() != index:
+            faults.append(f"sidebar does not follow the {page} page")
+    for index, page in reversed(list(enumerate(PAGES))):
+        sidebar.select_row(sidebar.get_row_at_index(index))
+        if app._view_stack.get_visible_child_name() != page:
+            faults.append(f"sidebar row {index} does not show the {page} page")
+    return faults
+
+
 def steps(app, result, size_names):
     window = app._window
     profile = app.config.profiles[0]
+    result.extend(sidebar_faults(app))
     app._select_profile(profile)
     for size_name in size_names:
         width, height = SIZES[size_name]
