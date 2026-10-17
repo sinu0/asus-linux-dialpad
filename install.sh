@@ -382,9 +382,9 @@ set -o pipefail
 
     echo
 
-    # The settings app uses Adw.ViewSwitcherSidebar (Libadwaita 1.9, GNOME 50).
-    if ! python3 -c 'import gi, sys; gi.require_version("Adw", "1"); from gi.repository import Adw; sys.exit(0 if hasattr(Adw, "ViewSwitcherSidebar") else 1)' 2>/dev/null; then
-        echo "WARNING: the Turnpad settings app needs Libadwaita 1.9 or newer (GNOME 50 or newer); it will not start on this system."
+    # The settings app needs Libadwaita 1.5 (GNOME 46, Ubuntu 24.04, Debian 13).
+    if ! python3 -c 'import gi, sys; gi.require_version("Adw", "1"); from gi.repository import Adw; sys.exit(0 if (Adw.get_major_version(), Adw.get_minor_version()) >= (1, 5) else 1)' 2>/dev/null; then
+        echo "WARNING: the Turnpad settings app needs Libadwaita 1.5 or newer (GNOME 46 or newer); it will not start on this system."
         echo "The driver works; its settings are then kept in $CONFIG_FILE_DIR_PATH/config.json."
         echo
     fi

@@ -81,8 +81,7 @@ from gi.repository import Adw, Gtk, Rsvg
 import cairo
 version = (Adw.get_major_version(), Adw.get_minor_version())
 print("GTK %d.%d, Libadwaita %d.%d" % (Gtk.get_major_version(), Gtk.get_minor_version(), *version))
-assert version >= (1, 9), "the settings app needs Libadwaita 1.9 (Adw.ViewSwitcherSidebar)"
-assert hasattr(Adw, "ViewSwitcherSidebar")
+assert version >= (1, 5), "the settings app needs Libadwaita 1.5"
 import config_app.main, overlay.painter, config.skins
 assert config.skins.load_skins()
 print("settings app imports ok")

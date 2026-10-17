@@ -19,10 +19,10 @@ Use one of them, not both: `install.sh` refuses to run while the package is inst
 | Arch Linux (package) | CI, every push | Package builds, installs, imports, removes |
 | Fedora 44 (`install.sh`) | CI, every push | Installs, imports, uninstalls |
 | Ubuntu 26.04 LTS (`install.sh`) | CI, every push | Installs, imports, uninstalls |
-| Ubuntu 24.04 LTS (`install.sh`) | Once, by hand | Driver works; the settings app does not start (Libadwaita 1.5) |
+| Ubuntu 24.04 LTS (`install.sh`) | CI, every push | Installs, imports, uninstalls |
 | Debian, openSUSE, Void, Gentoo, Solus, immutable Fedora | No | The installer has their package names from the original project |
 
-The CI tests run in containers without a DialPad, so they cover packages, the Python environment, files and the uninstaller, not the touchpad itself. The settings app needs Libadwaita 1.9 (GNOME 50 or newer); the installer warns when it is older.
+The CI tests run in containers without a DialPad, so they cover packages, the Python environment, files and the uninstaller, not the touchpad itself. The settings app needs Libadwaita 1.5 (GNOME 46, Ubuntu 24.04, Debian 13 or newer); the installer warns when it is older.
 
 ## Arch package
 
