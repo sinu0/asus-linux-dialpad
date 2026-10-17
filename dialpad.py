@@ -7,7 +7,7 @@ import sys
 import threading
 from time import sleep, time
 
-# X11 libraries are only needed in X11 sessions (requirements.x11.txt).
+# X11 libraries are only needed in X11 sessions (python-xlib, xcffib from the distribution).
 X11_LIBS_AVAILABLE = False
 try:
     import Xlib.display
