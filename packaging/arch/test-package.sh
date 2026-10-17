@@ -57,24 +57,7 @@ if find "$APP" -newer "$PACKAGE" -name '*.pyc' | grep -q .; then
 fi
 
 echo "== the libraries the driver and the settings app import"
-cd /tmp
-python3 - <<'EOF'
-import sys
-sys.path.insert(0, "/usr/share/asus-turnpad")
-import libevdev, pyinotify, xkbcommon.xkb, pywayland.client, dbus, systemd.journal  # driver
-from pyinotify import ThreadedNotifier
-import gi
-gi.require_version("Gtk", "4.0")
-gi.require_version("Adw", "1")
-gi.require_version("Rsvg", "2.0")
-from gi.repository import Adw, Gtk, Rsvg  # settings app
-import cairo
-import backlight, dial_gesture, dialpad_dbus, launch, layout_detect
-import config.schema, config.migrate, config.skins, overlay.painter, desktop.active_window
-assert config.skins.load_skins(), "built-in skins not found next to the settings app"
-assert layout_detect.detect_layout("/usr/share/asus-turnpad/layouts") in {"proartp16", "asusvivobook16x", "zenbookpro14"}
-print("imports ok")
-EOF
+(cd /tmp && python3 -I "$SRC/packaging/check-imports.py" "$APP")
 python3 -m py_compile "$APP/config_app/main.py"
 bash -n /usr/bin/asus-turnpad-setup
 # The setup helper refuses root.
