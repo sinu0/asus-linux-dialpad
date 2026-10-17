@@ -106,10 +106,10 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         log("gtk4-layer-shell is not installed (package gtk4-layer-shell or libgtk4-layer-shell0)")
         return EXIT_UNSUPPORTED
-    from gi.repository import GLib, Gtk, Gtk4LayerShell
+    from gi.repository import Gdk, GLib, Gtk, Gtk4LayerShell
 
-    if not Gtk.init_check():
-        log("cannot open the display")
+    if not Gtk.init_check() or Gdk.Display.get_default() is None:
+        log(f"cannot open the Wayland display {os.environ.get('WAYLAND_DISPLAY')}")
         return 1
     if not Gtk4LayerShell.is_supported():
         log("this compositor has no layer-shell; on GNOME the Turnpad Shell extension shows the dial")
@@ -119,8 +119,15 @@ def main(argv: list[str] | None = None) -> int:
 
     loop = GLib.MainLoop()
     frontend = DialFrontend(output=args.output)
+    try:
+        gi.require_version("GLibUnix", "2.0")
+        from gi.repository import GLibUnix
+
+        signal_add = GLibUnix.signal_add
+    except (ImportError, ValueError):
+        signal_add = GLib.unix_signal_add  # GLib before 2.80
     for number in (signal.SIGINT, signal.SIGTERM):
-        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, number, lambda: (loop.quit(), GLib.SOURCE_REMOVE)[1])
+        signal_add(GLib.PRIORITY_DEFAULT, number, lambda: (loop.quit(), GLib.SOURCE_REMOVE)[1])
     frontend.start()
     log(f"running on {os.environ.get('WAYLAND_DISPLAY')}")
     try:
