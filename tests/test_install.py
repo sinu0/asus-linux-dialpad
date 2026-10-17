@@ -33,7 +33,7 @@ class InstallTest(unittest.TestCase):
                     self.assertIn(f"{name}/*.py", text)
 
     def test_package_copies_what_the_installer_copies(self):
-        pkgbuild = (ROOT / "packaging" / "arch" / "PKGBUILD").read_text()
+        packaged = (ROOT / "packaging" / "install-files.sh").read_text()  # shared by all packages
         installer = (ROOT / "install.sh").read_text()
         for path in sorted(ROOT.glob("*.py")):
             if path.name == "dialpad_ui.py":
@@ -41,19 +41,50 @@ class InstallTest(unittest.TestCase):
                 continue
             with self.subTest(module=path.name):
                 self.assertIn(path.name, installer)
-                self.assertIn(path.name, pkgbuild)
+        # The packages take every module next to the driver but that one.
+        self.assertIn("for module in *.py; do", packaged)
+        self.assertIn("$module == dialpad_ui.py ]] || MODULES+=", packaged)
         for package in ("config", "config_app", "desktop", "layouts", "overlay"):
             with self.subTest(package=package):
                 if package != "config_app":  # listed one by one, see below
                     self.assertIn(f"{package}/*.py", installer)
-                self.assertRegex(pkgbuild, rf"for dir in [^;]*\b{package}\b")
+                self.assertRegex(packaged, rf"for dir in [^;]*\b{package}\b")
         for name in sorted(path.name for path in EXTENSION.iterdir() if path.suffix in {".js", ".json", ".css"}):
             with self.subTest(file=name):
-                self.assertRegex(pkgbuild, rf"gnome/extension/\{{[^}}]*\b{re.escape(name)}\b")
+                self.assertRegex(packaged, rf"gnome/extension/\{{[^}}]*\b{re.escape(name)}\b")
         for name in ("laptop_touchpad_dialpad_layouts.csv", "config_app/icon.svg", "config_app/style.css"):
             with self.subTest(file=name):
                 self.assertIn(name, installer)
-                self.assertIn(name, pkgbuild)
+                self.assertIn(name, packaged)
+
+    def test_every_package_installs_the_shared_file_list(self):
+        # One list for the Arch, Debian and RPM packages, so a new file
+        # cannot be missing from one of them.
+        for recipe in ("arch/PKGBUILD", "deb/debian/rules", "rpm/asus-turnpad.spec"):
+            text = (ROOT / "packaging" / recipe).read_text()
+            with self.subTest(recipe=recipe):
+                self.assertRegex(text, r"(?m)^\s*bash packaging/install-files\.sh ")
+                self.assertNotRegex(text, r"(?m)^\s*install -")
+
+    def test_rpm_lists_what_install_files_installs(self):
+        # rpmbuild fails on installed but unlisted files only in a Fedora
+        # container; every directory install-files.sh writes needs a line.
+        spec = (ROOT / "packaging" / "rpm" / "asus-turnpad.spec").read_text()
+        files = spec.split("\n%files\n", 1)[1]
+        for path in ("%{_datadir}/%{name}\n", "%{_datadir}/gnome-shell/extensions/%{extension_uuid}\n",
+                     "%{_datadir}/applications/", "%{_datadir}/icons/", "%{_userunitdir}/", "%{_udevrulesdir}/",
+                     "%{_modulesloaddir}/", "%{_sysusersdir}/", "%{_bindir}/", "%{_docdir}/%{name}\n"):
+            with self.subTest(path=path):
+                self.assertIn(path, files)
+
+    def test_debian_scripts_keep_the_debhelper_snippets(self):
+        # dh_python3 adds py3compile/py3clean there; without them the
+        # package has no bytecode.
+        for script in ("postinst", "prerm", "postrm"):
+            path = ROOT / "packaging" / "deb" / "debian" / script
+            with self.subTest(script=script):
+                self.assertIn("\n#DEBHELPER#\n", path.read_text())
+                self.assertTrue(path.stat().st_mode & 0o111, "not executable")
 
     def test_installer_copies_every_settings_app_module(self):
         text = (ROOT / "install.sh").read_text()

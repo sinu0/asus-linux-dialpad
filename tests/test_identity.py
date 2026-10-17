@@ -61,10 +61,13 @@ class IdentityTest(unittest.TestCase):
         pkgbuild = read("packaging/arch/PKGBUILD")
         self.assertIn(f"_pkgname={identity.SLUG}\n", pkgbuild)
         self.assertIn(f'url="{identity.REPOSITORY_URL}"', pkgbuild)
-        self.assertIn(f"/usr/share/gnome-shell/extensions/{identity.GNOME_EXTENSION_UUID}", pkgbuild)
-        self.assertIn(f"{identity.APP_ID}.desktop", pkgbuild)
-        self.assertIn(f"{identity.APP_ID}.svg", pkgbuild)
-        self.assertIn(f"/usr/share/$_pkgname", pkgbuild)
+        # The file list of every package; its names come from install_paths.sh (test_install_paths).
+        files = read("packaging/install-files.sh")
+        self.assertIn("source ./install_paths.sh\n", files)
+        self.assertIn('PACKAGE_DIR="/usr/share/$SLUG"\n', files)
+        self.assertIn('/usr/share/gnome-shell/extensions/$GNOME_EXTENSION_UUID"', files)
+        self.assertIn('"config_app/$APP_ID.desktop"', files)
+        self.assertIn('/apps/$APP_ID.svg"', files)
         self.assertEqual(identity.PACKAGE_DIR, f"/usr/share/{identity.SLUG}")
         service = read(f"packaging/{identity.SLUG}.service")
         self.assertIn(f"{identity.PACKAGE_DIR}/dialpad.py auto %E/{identity.CONFIG_DIR_NAME}/", service)
@@ -73,6 +76,27 @@ class IdentityTest(unittest.TestCase):
         self.assertIn(f'SERVICE="{identity.SLUG}.service"', setup)
         self.assertIn(identity.INSTALL_DIR, setup)
         self.assertIn(f"[ -d {identity.PACKAGE_DIR} ]", read("install.sh"))
+
+    def test_deb_and_rpm_packages(self):
+        control = read("packaging/deb/debian/control")
+        self.assertIn(f"Source: {identity.SLUG}\n", control)
+        self.assertIn(f"Package: {identity.SLUG}\n", control)
+        self.assertIn(f"Homepage: {identity.REPOSITORY_URL}\n", control)
+        self.assertIn(f"$(CURDIR)/debian/{identity.SLUG} ", read("packaging/deb/debian/rules"))
+        self.assertIn(f"systemd-sysusers {identity.SLUG}.conf", read("packaging/deb/debian/postinst"))
+        spec = read(f"packaging/rpm/{identity.SLUG}.spec")
+        self.assertRegex(spec, rf"(?m)^Name: +{re.escape(identity.SLUG)}$")
+        self.assertRegex(spec, rf"(?m)^URL: +{re.escape(identity.REPOSITORY_URL)}$")
+        self.assertIn(f"%global extension_uuid {identity.GNOME_EXTENSION_UUID}\n", spec)
+        self.assertIn(f"%global app_id {identity.APP_ID}\n", spec)
+        for path in ("packaging/deb/build.sh", "packaging/rpm/build.sh"):
+            with self.subTest(path=path):
+                self.assertIn(f"/{identity.SLUG}/", read(path))
+        # How to remove each package, where install.sh refuses to run beside it.
+        installer = read("install.sh")
+        for command in ("pacman -R asus-turnpad-git", f"apt remove {identity.SLUG}", f"dnf remove {identity.SLUG}"):
+            with self.subTest(command=command):
+                self.assertIn(command, installer)
 
     def test_repository_links(self):
         # The repository was renamed; GitHub redirects, but links should not rely on it.

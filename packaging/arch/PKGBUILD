@@ -47,38 +47,6 @@ pkgver() {
 
 package() {
     cd "$_pkgname"
-    local app="$pkgdir/usr/share/$_pkgname"
-    local extension_files=(gnome/extension/{extension.js,dial.js,layers.js,skins.json,metadata.json,stylesheet.css})
-
-    # Driver and settings app (the same files install.sh puts in /opt/asus-turnpad).
-    install -Dm755 dialpad.py "$app/dialpad.py"
-    install -Dm644 -t "$app" dialpad_dbus.py dial_gesture.py backlight.py launch.py layout_detect.py \
-        laptop_touchpad_dialpad_layouts.csv
-    local dir
-    for dir in config config_app desktop layouts overlay; do
-        install -Dm644 -t "$app/$dir" "$dir"/*.py
-    done
-    chmod 755 "$app/config_app/main.py"
-    install -Dm644 -t "$app/config_app" config_app/icon.svg config_app/style.css
-    # The settings app reads the built-in skins next to itself.
-    install -Dm644 -t "$app/gnome/extension" "${extension_files[@]}"
-    python -m compileall -q -d "/usr/share/$_pkgname" "$app"
-
-    # On-screen dial for GNOME Shell.
-    install -Dm644 -t "$pkgdir/usr/share/gnome-shell/extensions/asus-turnpad@sinu0.github.io" "${extension_files[@]}"
-
-    # Launcher and icon of the settings app.
-    install -dm755 "$pkgdir/usr/share/applications"
-    sed "s|@INSTALL_DIR@|/usr/share/$_pkgname|g" config_app/io.github.sinu0.AsusTurnpad.desktop \
-        > "$pkgdir/usr/share/applications/io.github.sinu0.AsusTurnpad.desktop"
-    install -Dm644 config_app/icon.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.sinu0.AsusTurnpad.svg"
-
-    # System integration: user service, device access, kernel modules, groups.
-    install -Dm644 packaging/asus-turnpad.service "$pkgdir/usr/lib/systemd/user/asus-turnpad.service"
-    install -Dm644 packaging/70-asus-turnpad.rules "$pkgdir/usr/lib/udev/rules.d/70-asus-turnpad.rules"
-    install -Dm644 packaging/asus-turnpad.modules-load "$pkgdir/usr/lib/modules-load.d/asus-turnpad.conf"
-    install -Dm644 packaging/asus-turnpad.sysusers "$pkgdir/usr/lib/sysusers.d/asus-turnpad.conf"
-    install -Dm755 packaging/asus-turnpad-setup "$pkgdir/usr/bin/asus-turnpad-setup"
-
-    install -Dm644 -t "$pkgdir/usr/share/doc/$_pkgname" README.md CHANGELOG.md PORTING.md SKINS.md
+    # The file list is shared with the .deb and .rpm packages.
+    bash packaging/install-files.sh "$pkgdir"
 }
