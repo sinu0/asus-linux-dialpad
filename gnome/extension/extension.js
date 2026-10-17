@@ -56,6 +56,8 @@ export default class DialPadExtension extends Extension {
         this._detailsSignalId = 0;
         this._focusHandlerId = 0;
         this._monitorsId = 0;
+        // The monitor the dial is on; kept until it is fully hidden.
+        this._monitor = null;
         this._configMonitors = [];
         this._configReloadId = 0;
         this._interfaceSettings = null;
@@ -304,7 +306,10 @@ export default class DialPadExtension extends Extension {
         for (const child of [this._pillIcon, this._pillTitle, this._pillValue])
             this._pill.add_child(child);
         Main.layoutManager.uiGroup.add_child(this._pill);
-        this._monitorsId = Main.layoutManager.connect('monitors-changed', () => this._applyGeometry());
+        this._monitorsId = Main.layoutManager.connect('monitors-changed', () => {
+            this._monitor = null;
+            this._applyGeometry();
+        });
         GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
             this._applyGeometry();
             return GLib.SOURCE_REMOVE;
@@ -327,6 +332,7 @@ export default class DialPadExtension extends Extension {
         this._pill = null;
         this._pillKey = '';
         this._shownActor = null;
+        this._monitor = null;
         this._layers?.destroy();
         this._layers = null;
         this._iconLayer = null;
@@ -335,10 +341,28 @@ export default class DialPadExtension extends Extension {
         this._shown = false;
     }
 
+    // The monitor the dial shows on: the one it was shown on while it is on
+    // screen, else the primary one until it is shown.
+    _dialMonitor() {
+        const monitors = Main.layoutManager.monitors;
+        return monitors.includes(this._monitor) ? this._monitor : Main.layoutManager.primaryMonitor;
+    }
+
+    // A dial that is fully hidden comes back on the monitor with the pointer.
+    _followPointer() {
+        if (this._overlay?.visible || this._pill?.visible)
+            return;
+        const monitor = Main.layoutManager.currentMonitor ?? Main.layoutManager.primaryMonitor;
+        const moved = monitor !== this._dialMonitor();
+        this._monitor = monitor;
+        if (moved)
+            this._applyGeometry();
+    }
+
     _applyGeometry() {
         if (!this._overlay || !this._layers)
             return;
-        const monitor = Main.layoutManager.primaryMonitor;
+        const monitor = this._dialMonitor();
         if (!monitor)
             return;
         const scale = this._appearance.scale;
@@ -364,7 +388,7 @@ export default class DialPadExtension extends Extension {
 
     _updatePill() {
         const pill = this._pill;
-        const monitor = Main.layoutManager.primaryMonitor;
+        const monitor = this._dialMonitor();
         if (!pill || !monitor || this._look().visibility !== 'pill')
             return;
         const scale = this._appearance.scale;
@@ -533,6 +557,7 @@ export default class DialPadExtension extends Extension {
 
     // touchStarted: a new touch brings a faded dial back to full.
     _show(touchStarted) {
+        this._followPointer();
         const actor = this._activeActor();
         if (this._shownActor && this._shownActor !== actor) {
             this._shownActor.remove_all_transitions();

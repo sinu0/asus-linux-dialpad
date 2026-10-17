@@ -120,7 +120,7 @@
 - `RotationTracker.reset()` must run on touch down, lift, centre and leaving the ring, or the next touch jumps.
 - `finger_down` follows the one finger the dial tracks (`dial_touch_id`, chosen by `dial_gesture.select_dial_touch`): the touch already followed, else the newest touch inside the ring or on the corner icon. Other fingers, a resting palm and touches reported as `MT_TOOL_PALM` are ignored, and lifting the tracked finger counts as release even while others stay down. Never clear `slots` on release; `update_touch_slots()` keeps them in sync (also from `d_t.sync()` after `SYN_DROPPED`).
 - Actions, shell macros and value queries run on the `dialpad-actions` worker thread via `enqueue_action()`; never call subprocesses from the touch loop.
-- The GNOME overlay shows while `touching`, and fades out 1.5 s after release.
+- The GNOME overlay shows while `touching`, and fades out 1.5 s after release. It appears on the monitor with the pointer (`_followPointer()` in `extension.js`) and stays there while visible, even if the pointer moves to another monitor; only a fully hidden dial follows the pointer again. The layer-shell dial gets the same effect from the compositor: its window is unmapped only when fully hidden, so the compositor picks the output again on the next show.
 
 ## Formatting
 
