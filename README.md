@@ -22,8 +22,8 @@ What Turnpad adds to the original driver:
 
 ```bash
 git clone https://github.com/sinu0/asus-turnpad.git
-cd asus-turnpad/packaging/arch
-makepkg -si
+cd asus-turnpad
+bash packaging/arch/build.sh
 asus-turnpad-setup
 ```
 
@@ -39,7 +39,7 @@ Then log out and back in, hold the illuminated corner of the touchpad to switch 
 
 | | Arch package | `install.sh` |
 | --- | --- | --- |
-| Update | `git pull`, then `makepkg -si` in `packaging/arch` | `git pull`, then `bash install.sh` |
+| Update | `git pull`, then `bash packaging/arch/build.sh` | `git pull`, then `bash install.sh` |
 | Remove | `systemctl --user disable --now asus-turnpad`, then `sudo pacman -R asus-turnpad-git` | `bash uninstall.sh` |
 
 Use one of the two, not both; to switch from `install.sh` to the package, run `bash uninstall.sh` first. Your settings in `~/.config/asus-turnpad` stay either way. Details, custom paths and immutable systems: [INSTALL.md](INSTALL.md). The original project's anonymous installation reports are removed; only for a laptop missing from the layout table does `install.sh` look up its touchpad id on linux-hardware.org.

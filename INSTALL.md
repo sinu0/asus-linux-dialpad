@@ -8,7 +8,7 @@ The short version is in the [README](README.md#install). This page has the detai
 | Program | `/usr/share/asus-turnpad`, managed by pacman | `/opt/asus-turnpad` with its own Python environment |
 | Python libraries | Distribution packages | Downloaded by pip into `/opt/asus-turnpad/.env` |
 | Layout of your laptop | Picked when the driver starts (`auto`) | Picked during installation |
-| Update | `git pull`, then `makepkg -si` again | `git pull`, then `bash install.sh` again |
+| Update | `git pull`, then `bash packaging/arch/build.sh` | `git pull`, then `bash install.sh` again |
 | Remove | `sudo pacman -R asus-turnpad-git` | `bash uninstall.sh` |
 
 Use one of them, not both: `install.sh` refuses to run while the package is installed, and `asus-turnpad-setup` refuses while an `install.sh` install is present. Your settings in `~/.config/asus-turnpad` are kept by both and work with both.
@@ -19,10 +19,12 @@ Only tested on CachyOS (Arch) with GNOME 51. The settings app needs a current GT
 
 ```bash
 git clone https://github.com/sinu0/asus-turnpad.git
-cd asus-turnpad/packaging/arch
-makepkg -si              # builds the latest commit on GitHub and installs it with pacman
-asus-turnpad-setup       # once, as your user
+cd asus-turnpad
+bash packaging/arch/build.sh   # builds the latest commit on GitHub and installs it with pacman
+asus-turnpad-setup             # once, as your user
 ```
+
+`build.sh` runs `makepkg -si` in `~/.cache/asus-turnpad/makepkg` rather than in the clone (makepkg writes the version into the PKGBUILD it builds from, which would get in the way of `git pull`); arguments are passed on to makepkg. Running `makepkg -si` in `packaging/arch` yourself works too.
 
 Log out and back in. `asus-turnpad-setup` adds you to the groups `input`, `i2c` and `uinput` (asks for sudo) and enables the driver's user service and the GNOME extension. It changes nothing for other users; each user who wants the dial runs it once.
 
@@ -37,7 +39,7 @@ What the package installs:
 | `/usr/lib/modules-load.d/asus-turnpad.conf`, `/usr/lib/sysusers.d/asus-turnpad.conf` | Kernel modules `uinput` and `i2c-dev`; groups `i2c` and `uinput` |
 | `/usr/bin/asus-turnpad-setup` | The per-user setup above |
 
-**Update:** `git pull` in the clone, then `makepkg -si` in `packaging/arch` (it always builds the latest commit on GitHub) and `systemctl --user restart asus-turnpad`. A changed GNOME extension loads at the next login.
+**Update:** `git pull`, then `bash packaging/arch/build.sh` (it always builds the latest commit on GitHub and restarts the driver). A changed GNOME extension loads at the next login.
 
 **Remove:**
 

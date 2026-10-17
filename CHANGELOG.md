@@ -18,7 +18,7 @@
 - Brightness of the DialPad light: follows the keyboard backlight (its brightness key dims or switches off the DialPad light too) or a fixed level 0–8, where 0 keeps the light off
 - Unattended installer (`bash install.sh`; `--interactive` for the original questions)
 - On-screen dial position and visibility for all apps, per profile and per function: a custom place on the screen, fading while turning (to a chosen opacity) or a small label instead of the dial
-- Arch package (`packaging/arch`, `makepkg -si` + `asus-turnpad-setup`): system Python libraries instead of a pip environment, layout picked when the driver starts (`auto`), tested in CI; `INSTALL.md` explains both ways to install
+- Arch package (`bash packaging/arch/build.sh` + `asus-turnpad-setup`): system Python libraries instead of a pip environment, layout picked when the driver starts (`auto`), tested in CI; `INSTALL.md` explains both ways to install
 - Guided calibration asks to keep or revert the measured geometry (it is live meanwhile, so the dial can be tried); the Calibration page can reset the geometry to the layout's values
 
 ### Removed

@@ -1,7 +1,7 @@
 # Maintainer: Mariusz Pacek (sinu0) <https://github.com/sinu0>
 #
 # Builds Turnpad from the latest commit on GitHub:
-#   cd packaging/arch && makepkg -si
+#   bash packaging/arch/build.sh    (makepkg -si outside the clone)
 # then, as your user: asus-turnpad-setup
 
 pkgname=asus-turnpad-git
