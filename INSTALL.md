@@ -5,8 +5,8 @@ The short version is in the [README](README.md#install). This page has the detai
 | | Arch package | `install.sh` |
 | --- | --- | --- |
 | Distributions | Arch Linux and derivatives (CachyOS, EndeavourOS, Manjaro) | Any distribution with systemd: Fedora, Ubuntu, Debian, openSUSE, Void, Gentoo, Solus, immutable Fedora |
-| Program | `/usr/share/asus-turnpad`, managed by pacman | `/opt/asus-turnpad` with its own Python environment |
-| Python libraries | Distribution packages | Downloaded by pip into `/opt/asus-turnpad/.env` |
+| Program | `/usr/share/asus-turnpad`, managed by pacman | `/opt/asus-turnpad` |
+| Python libraries | Distribution packages | Distribution packages, installed by `install.sh` (no pip) |
 | Layout of your laptop | Picked when the driver starts (`auto`) | Picked during installation |
 | Update | `git pull`, then `bash packaging/arch/build.sh` | `git pull`, then `bash install.sh` again |
 | Remove | `sudo pacman -R asus-turnpad-git` | `bash uninstall.sh` |
@@ -22,7 +22,7 @@ Use one of them, not both: `install.sh` refuses to run while the package is inst
 | Ubuntu 24.04 LTS (`install.sh`) | Once, by hand | Driver works; the settings app does not start (Libadwaita 1.5) |
 | Debian, openSUSE, Void, Gentoo, Solus, immutable Fedora | No | The installer has their package names from the original project |
 
-The CI tests run in containers without a DialPad, so they cover packages, the Python environment, files and the uninstaller, not the touchpad itself. The settings app needs Libadwaita 1.9 (GNOME 50 or newer); the installer warns when it is older.
+The CI tests run in containers without a DialPad, so they cover packages, the libraries the driver and the settings app import, files and the uninstaller, not the touchpad itself. The settings app needs Libadwaita 1.9 (GNOME 50 or newer); the installer warns when it is older.
 
 ## Arch package
 
@@ -67,7 +67,7 @@ cd asus-turnpad
 bash install.sh
 ```
 
-The installer needs `sudo`. It installs the required system packages with your package manager (apt, dnf, pacman, zypper, xbps, emerge, eopkg, rpm-ostree), creates a Python environment in `/opt/asus-turnpad`, adds you to the groups `input`, `i2c` and `uinput`, picks the layout of your laptop, and sets up the user service and the GNOME extension. It asks no questions; `bash install.sh --interactive` lets you choose the layout, a co-activator key and the services yourself. Log out and back in afterwards.
+The installer needs `sudo`. It installs the required system packages with your package manager (apt, dnf, pacman, zypper, xbps, emerge, eopkg, rpm-ostree), the Python libraries included (see [Python](#python)), copies the program to `/opt/asus-turnpad`, adds you to the groups `input`, `i2c` and `uinput`, picks the layout of your laptop, and sets up the user service and the GNOME extension. It asks no questions; `bash install.sh --interactive` lets you choose the layout, a co-activator key and the services yourself. Log out and back in afterwards.
 
 When your laptop is not in `laptop_touchpad_dialpad_layouts.csv`, the installer looks up the touchpad's vendor and product id on linux-hardware.org to find laptops with the same touchpad; if that also fails it uses `proartp16`, and you measure the dial with *Calibration → Guided calibration* in the app.
 
@@ -88,7 +88,7 @@ The installer and the uninstaller read these environment variables (defaults in 
 
 ```
 # ENV VARS (with the defaults, see install_paths.sh)
-INSTALL_DIR_PATH="/opt/asus-turnpad"                 # program and its Python environment, owned by root
+INSTALL_DIR_PATH="/opt/asus-turnpad"                 # program, owned by root
 CONFIG_FILE_DIR_PATH="$HOME/.config/asus-turnpad"    # settings, skins and driver state
 LOGS_DIR_PATH="/var/log/asus-turnpad"                # only for install and uninstall logs
 INSTALL_UDEV_DIR_PATH="/etc/udev"
@@ -98,7 +98,7 @@ Where things go follows the Filesystem Hierarchy Standard for software installed
 
 | Path | Content |
 | --- | --- |
-| `/opt/asus-turnpad` | Driver, settings app, GNOME extension source and the Python environment (read-only for users) |
+| `/opt/asus-turnpad` | Driver, settings app, GNOME extension source (read-only for users) |
 | `~/.config/asus-turnpad` | `config.json`, `skins/`, driver state `dialpad_dev` |
 | `~/.config/systemd/user/asus-turnpad.service` | The driver as a user service, started with the graphical session |
 | `~/.local/share/gnome-shell/extensions/asus-turnpad@sinu0.github.io` | The on-screen dial for GNOME |
@@ -156,47 +156,11 @@ $ systemctl reboot
 Install with `bash install.sh --interactive` and answer no to the question about `systemd`, then start the driver yourself. The first argument is the layout (`auto` picks the one of this laptop), the second the directory for the driver state `dialpad_dev`:
 
 ```
-/opt/asus-turnpad/.env/bin/python3 /opt/asus-turnpad/dialpad.py <auto|asusvivobook16x|proartp16|..> ~/.config/asus-turnpad/
+/usr/bin/python3 /opt/asus-turnpad/dialpad.py <auto|asusvivobook16x|proartp16|..> ~/.config/asus-turnpad/
 ```
 
-### Python version managers
+### Python
 
-**conda**
+Turnpad runs with the distribution's Python, `/usr/bin/python3` (3.10 or newer), and the Python libraries from its packages; `install_packages.sh` lists them per package manager. Nothing is downloaded with pip and nothing is compiled. A Python from conda or pyenv in your `PATH` is not used. Installs from before kept a Python environment in `/opt/asus-turnpad/.env`; `install.sh` and `uninstall.sh` remove it.
 
-```
-$ # install conda and then
-$ conda create -n conda_env -c conda-forge python=3.11
-$ conda activate conda_env
-(conda_env) $ which python3
-/home/ldrahnik/miniconda3/envs/conda_env/bin/python3
-(conda_env) $ python3 --version
-Python 3.11.13
-(conda_env) $ bash install.sh
-...
-$ (conda_env) $ /opt/asus-turnpad/.env/bin/python3 --version
-Python 3.11.13
-(conda_env) $ conda deactivate
-$
-```
-
-**pyenv** (Python 3.10 or newer)
-
-```
-$ git clone https://github.com/sinu0/asus-turnpad.git
-$ cd asus-turnpad
-
-$ # pyenv install Ubuntu 22.04
-$ apt install -y make build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev wget curl llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev libffi-dev liblzma-dev python3-openssl git
-$ curl https://pyenv.run | bash
-
-# install & change to the Python version for which one do you want to install the driver
-$ CC=clang pyenv install 3.12
-$ pyenv global 3.12 # change as global
-$ # pyenv local 3.12 # will create file .python-version inside source dir so next (re)install will be used automatically saved Python version in this file
-
-# install the driver
-$ bash install.sh
-
-# change to the standardly (previously) used Python version
-$ pyenv global system
-```
+Some libraries are optional: when your release does not package one, the installer says so and the feature it serves stays off (for example `python3-pywayland` on Ubuntu 24.04; on Ubuntu 26.04 it is installed but does not load with Python 3.14; `python3-periphery` outside Debian and Ubuntu, and PySide6 for the legacy on-screen dial window).

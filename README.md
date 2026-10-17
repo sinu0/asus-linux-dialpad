@@ -250,8 +250,8 @@ $ socat - UNIX-RECV:$XDG_RUNTIME_DIR/asus-turnpad.sock
 or use log level `DEBUG`:
 
 ```
-$ cd /opt/asus-turnpad && source .env/bin/activate
-(.env) $ LOG=DEBUG python3 dialpad_ui.py
+$ cd /opt/asus-turnpad
+$ LOG=DEBUG /usr/bin/python3 dialpad_ui.py
 Listening on /run/user/1000/asus-turnpad.sock
 2026-01-15 12:34:23,980 DEBUG {'ts': 1768476870.9540725, 'enabled': True}
 2026-01-15 12:34:26,281 DEBUG {'ts': 1768476866.2752297, 'titles': ['Volume', 'Scroll', 'Brightness'], 'icons': ['/usr/share/icons/elementary/status/symbolic/audio-volume-medium-symbolic.svg', '/usr/share/icons/elementary/status/symbolic/rotation-allowed-symbolic.svg', '/usr/share/icons/elementary/status/symbolic/display-brightness-symbolic.svg'], 'title': None}

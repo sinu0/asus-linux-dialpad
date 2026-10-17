@@ -8,11 +8,11 @@
 - **Root:** Single-repo, single-app. No monorepo, no build steps; unit tests in `tests/`.
 - **CI:** `.github/workflows/tests.yml` on GitHub Actions (every push and pull request) runs in an `archlinux:latest` container (Ubuntu's GTK/Libadwaita are too old): unit tests including the headless-mutter layout test, syntax checks, and `update_previews.py --check --only overlay`; job `arch-package` runs `packaging/arch/test-package.sh` (builds the Arch package from the commit, installs, checks files and imports, removes). Settings pictures are only rendered and attached to the run (artifact `rendered-pictures`): they show the apps installed on the desktop that renders them (Krita, Firefox, darktable icons), so they are updated locally.
 - **Entrypoints:**
-  - `dialpad.py` – main driver daemon, ~3000 lines, monolithic. Runs as the user service `asus-turnpad.service` via a Python venv at `/opt/asus-turnpad/.env`.
+  - `dialpad.py` – main driver daemon, ~3000 lines, monolithic. Runs as the user service `asus-turnpad.service` with the system `/usr/bin/python3`.
   - `dialpad_ui.py` – legacy PySide6 overlay, separate `asus-turnpad-ui.service`. On GNOME replaced by `gnome/extension/`.
-  - `install.sh` – bash installer for every distribution (unattended; `--interactive` asks), sources sub-scripts from repo root. Refuses to run while the Arch package is installed.
+  - `install.sh` – bash installer for every distribution (unattended; `--interactive` asks), sources sub-scripts from repo root. Refuses to run while the Arch package is installed. Installs distribution packages only (`install_packages.sh`: groups per package manager, optional ones one by one); no venv, no pip, no compiler or `-dev` headers (`tests/test_install.py` maps every imported library and GI namespace to its package).
   - `packaging/` – distribution packages: `arch/PKGBUILD` (`asus-turnpad-git`, builds the latest GitHub commit; deps from the Arch repos, no venv), static user unit `asus-turnpad.service` (layout `auto`), udev rules (uaccess + groups), modules-load, sysusers, and `asus-turnpad-setup` (per-user: groups, enable service and extension; refuses while an `install.sh` install exists). `arch/build.sh` runs `makepkg -si` in `~/.cache/asus-turnpad/makepkg` (makepkg rewrites `pkgver` in the PKGBUILD it uses, which would dirty the clone); `arch/test-package.sh` tests it in a clean container. `tests/install_in_container.sh` runs `install.sh` + `uninstall.sh` in Fedora/Ubuntu containers (CI job `install`); `INSTALL_IN_CONTAINER=1` (install_common.sh) skips the touchpad check, modprobe and starting services. The settings app needs Libadwaita 1.9 (`Adw.ViewSwitcherSidebar`); `install.sh` warns below that. Users read `INSTALL.md`.
-- **Install target:** `install.sh` → `/opt/asus-turnpad/` with a venv, owned by root (FHS layout in `install_paths.sh`); Arch package → `/usr/share/asus-turnpad` (`identity.PACKAGE_DIR`), system Python. Code must not assume either path (it finds files next to itself). User data: `~/.config/asus-turnpad/` (`config.json`, `skins/`, driver state `dialpad_dev`). Source and installed versions can diverge; diff before debugging.
+- **Install target:** `install.sh` → `/opt/asus-turnpad/`, owned by root, system Python (`PYTHON` in `install_paths.sh`) (FHS layout in `install_paths.sh`); Arch package → `/usr/share/asus-turnpad` (`identity.PACKAGE_DIR`), system Python. Code must not assume either path (it finds files next to itself). User data: `~/.config/asus-turnpad/` (`config.json`, `skins/`, driver state `dialpad_dev`). Source and installed versions can diverge; diff before debugging.
 - **Fork additions:**
   - `layout_detect.py` – layout for this laptop from `laptop_touchpad_dialpad_layouts.csv` (product name, then touchpad vendor/product id; fallback `proartp16`). `dialpad.py auto` uses it; `install_layout_auto_suggestion.sh` runs it as a script. Nix packaging was removed (stale, old names).
   - `dialpad_dbus.py` – session D-Bus service (`io.github.sinu0.AsusTurnpad.Driver`), signal `OverlayState(bsasasidsbbb)`.
@@ -34,7 +34,8 @@
   - `desktop/` – everything that differs per desktop on the Python side: `active_window.py` (focused-window backends registered with `@backend`, tried in order) and `color_scheme.py` (light/dark via the XDG portal, gsettings fallback).
   - `config/identity.py` – display name (`Turnpad`) and all technical identifiers; `tests/test_identity.py` checks their twins in JS, JSON, `.desktop` and shell files.
   - `install_overlay.sh` – picks the on-screen dial frontend per desktop (GNOME → `install_gnome_extension.sh`).
-  - `install_paths.sh` – every installed path and name for the shell scripts (FHS: `/opt`, `~/.config`, `/etc/udev/rules.d`, `/etc/modules-load.d`, `/var/log`); scripts source it and never set their own defaults (`tests/test_identity.py`). The program directory is root-owned: install Python packages with `venv_pip`, never write to it at runtime.
+  - `install_paths.sh` – every installed path and name for the shell scripts (FHS: `/opt`, `~/.config`, `/etc/udev/rules.d`, `/etc/modules-load.d`, `/var/log`); scripts source it and never set their own defaults (`tests/test_identity.py`). The program directory is root-owned, never write to it at runtime. Python libraries come from distribution packages only (`install_packages.sh`); there are no `requirements*.txt`.
+  - `install_packages.sh` – package names per package manager and group (`PACKAGES_<manager>_<group>`: required, x11, plasma, optional, wayland, x11libs, systemd, ui), `install_packages` / `install_optional`; rpm-ostree collects everything into one layer.
   - `install_migrate.sh` – moves installs from before the rename (see Name above).
   - `uninstall.sh` – removes everything installed plus pre-rename leftovers; keeps `~/.config/asus-turnpad` unless confirmed with `--interactive`.
   - `ARCHITECTURE.md` – component map and how to add a desktop environment.
@@ -62,7 +63,7 @@
 - **System:** CachyOS (Arch-based), GNOME Shell 51 (extension metadata lists 50 and 51), Wayland, Python 3.14, GTK 4.22, Libadwaita 1.9.
 - **Laptop:** ASUS ProArt PX13 HN7306WV. Touchpad `ASCF1A00:00 2808:0220` (min-max x 0-4010, y 0-2443).
 - **Layout:** `proartp16` used as fallback. Geometry in legacy layout may not match PX13 — needs calibration.
-- **Venv packages:** `dbus-python` must be in the driver venv for D-Bus to work. It is declared in `requirements.txt`; the current installed venv has version 1.4.0.
+- **Python libraries:** distribution packages for the system Python (Arch package: PKGBUILD depends; `install.sh`: `install_packages.sh`). No venv; `install_migrate.sh` removes an old `/opt/asus-turnpad/.env` and services that ran it.
 
 ## GNOME Shell extension lifecycle
 
