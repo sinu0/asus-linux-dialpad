@@ -1,2 +1,0 @@
-xcffib
-python-xlib

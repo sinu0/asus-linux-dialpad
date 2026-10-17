@@ -2,7 +2,11 @@
 
 source non_sudo_check.sh
 
+source install_common.sh "$@"
+
 source install_paths.sh
+
+source install_packages.sh
 
 echo
 echo "DialPad User Interface Installation"
@@ -21,25 +25,36 @@ fi
 
 if ask "Do you want to install the DialPad User Interface?" "$UI_DEFAULT"; then
 
-    venv_pip install -r requirements.ui.txt
+    # PySide6 from the distribution; not every release packages it
+    # (Ubuntu 24.04 does not), and the window is then left out.
+    detect_package_manager
+    install_optional $(packages ui)
 
-    USER_INTERFACE=1
-
-    sudo install dialpad_ui.py "$INSTALL_DIR_PATH"
-
-    echo
-
-    echo "Enabling DialPad User Interface in configuration..."
-
-    if [ ! -f "$CONFIG_FILE_PATH" ]; then
-        echo "[main]" | tee "$CONFIG_FILE_PATH" > /dev/null
-    fi
-
-    # check if the setting already exists
-    if grep -q "socket_enabled" "$CONFIG_FILE_PATH"; then
-        sed -i "s/socket_enabled.*/socket_enabled = 1/" "$CONFIG_FILE_PATH"
+    if ! "$PYTHON" -c "import PySide6.QtWidgets, PySide6.QtSvg" >/dev/null 2>&1; then
+        echo
+        echo "PySide6 is not available from the packages of this distribution; the DialPad User Interface is not installed."
+        if [ "$PACKAGE_MANAGER" == "rpm-ostree" ]; then
+            echo "Layer it with: sudo rpm-ostree install $(packages ui), reboot and run install.sh again."
+        fi
     else
-        # add new setting under [main] section
-        sed -i "/\[main\]/a socket_enabled = 1" "$CONFIG_FILE_PATH"
+        USER_INTERFACE=1
+
+        sudo install dialpad_ui.py "$INSTALL_DIR_PATH"
+
+        echo
+
+        echo "Enabling DialPad User Interface in configuration..."
+
+        if [ ! -f "$CONFIG_FILE_PATH" ]; then
+            echo "[main]" | tee "$CONFIG_FILE_PATH" > /dev/null
+        fi
+
+        # check if the setting already exists
+        if grep -q "socket_enabled" "$CONFIG_FILE_PATH"; then
+            sed -i "s/socket_enabled.*/socket_enabled = 1/" "$CONFIG_FILE_PATH"
+        else
+            # add new setting under [main] section
+            sed -i "/\[main\]/a socket_enabled = 1" "$CONFIG_FILE_PATH"
+        fi
     fi
 fi
